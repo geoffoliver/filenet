@@ -14,6 +14,7 @@ import {
   removeStaleEntries,
   scanAndIndex,
   scanDirectory,
+  startPeriodicRescan,
 } from '../indexer';
 import { createPrismaClient } from '../db';
 
@@ -284,5 +285,48 @@ describe('scanAndIndex', () => {
     await scanAndIndex(prisma, [dir]);
     await scanAndIndex(prisma, [dir]);
     expect(await prisma.sharedFile.count()).toBe(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// startPeriodicRescan
+// ---------------------------------------------------------------------------
+
+describe('startPeriodicRescan', () => {
+  it('returns a no-op stop function when intervalMinutes is 0', () => {
+    const stop = startPeriodicRescan(prisma, async () => [], 0);
+    expect(typeof stop).toBe('function');
+    stop();
+  });
+
+  it('returns a stop function when interval is positive', () => {
+    const stop = startPeriodicRescan(prisma, async () => [], 60);
+    expect(typeof stop).toBe('function');
+    stop();
+  });
+
+  it('calls getFolders after the interval fires', async () => {
+    let calls = 0;
+    const getFolders = async () => {
+      calls++;
+      return [];
+    };
+    const intervalMs = 40;
+    const stop = startPeriodicRescan(prisma, getFolders, intervalMs / 60_000);
+    await Bun.sleep(70);
+    stop();
+    expect(calls).toBeGreaterThanOrEqual(1);
+  });
+
+  it('stop function prevents further calls', async () => {
+    let calls = 0;
+    const getFolders = async () => {
+      calls++;
+      return [];
+    };
+    const stop = startPeriodicRescan(prisma, getFolders, 30 / 60_000);
+    stop();
+    await Bun.sleep(60);
+    expect(calls).toBe(0);
   });
 });

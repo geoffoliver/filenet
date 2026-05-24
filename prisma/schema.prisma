@@ -44,6 +44,7 @@ model Settings {
   autoAcceptFromFriendsOfFriends Boolean @default(false)
   sharedFolders                  String  @default("[]")
   downloadFolder                 String?
+  rescanIntervalMinutes          Int     @default(0)
 }
 
 model SharedFile {

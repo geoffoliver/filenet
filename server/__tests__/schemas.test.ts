@@ -185,6 +185,26 @@ describe('PatchSettingsBodySchema', () => {
   it('rejects empty string downloadFolder', () => {
     expect(PatchSettingsBodySchema.safeParse({ downloadFolder: '   ' }).success).toBe(false);
   });
+
+  it('accepts rescanIntervalMinutes of 0 (disabled)', () => {
+    const r = PatchSettingsBodySchema.safeParse({ rescanIntervalMinutes: 0 });
+    expect(r.success).toBe(true);
+  });
+
+  it('accepts a positive rescanIntervalMinutes', () => {
+    const r = PatchSettingsBodySchema.safeParse({ rescanIntervalMinutes: 60 });
+    expect(r.success).toBe(true);
+    if (!r.success) return;
+    expect(r.data.rescanIntervalMinutes).toBe(60);
+  });
+
+  it('rejects negative rescanIntervalMinutes', () => {
+    expect(PatchSettingsBodySchema.safeParse({ rescanIntervalMinutes: -1 }).success).toBe(false);
+  });
+
+  it('rejects non-integer rescanIntervalMinutes', () => {
+    expect(PatchSettingsBodySchema.safeParse({ rescanIntervalMinutes: 1.5 }).success).toBe(false);
+  });
 });
 
 describe('FriendRequestMessageSchema', () => {

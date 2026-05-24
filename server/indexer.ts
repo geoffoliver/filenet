@@ -142,3 +142,17 @@ export async function scanAndIndex(
   const removed = await removeStaleEntries(prisma, new Set(allPaths));
   return { indexed: allPaths.length, removed };
 }
+
+export function startPeriodicRescan(
+  prisma: PrismaClient,
+  getFolders: () => Promise<string[]>,
+  intervalMinutes: number,
+): () => void {
+  if (intervalMinutes <= 0) return () => {};
+  const id = setInterval(() => {
+    getFolders()
+      .then((folders) => scanAndIndex(prisma, folders))
+      .catch((err) => console.error('Periodic rescan failed:', err));
+  }, intervalMinutes * 60_000);
+  return () => clearInterval(id);
+}

@@ -136,6 +136,24 @@ describe('updateSettings — sharedFolders and downloadFolder', () => {
   });
 });
 
+describe('updateSettings — rescanIntervalMinutes', () => {
+  it('defaults to 0', async () => {
+    const settings = await getOrCreateSettings(prisma);
+    expect(settings.rescanIntervalMinutes).toBe(0);
+  });
+
+  it('stores and retrieves a positive interval', async () => {
+    const updated = await updateSettings(prisma, { rescanIntervalMinutes: 60 });
+    expect(updated.rescanIntervalMinutes).toBe(60);
+  });
+
+  it('resets to 0 to disable periodic rescan', async () => {
+    await updateSettings(prisma, { rescanIntervalMinutes: 30 });
+    const cleared = await updateSettings(prisma, { rescanIntervalMinutes: 0 });
+    expect(cleared.rescanIntervalMinutes).toBe(0);
+  });
+});
+
 describe('parseSharedFolders', () => {
   it('parses a valid JSON array of strings', () => {
     expect(parseSharedFolders('["a","b"]')).toEqual(['a', 'b']);

@@ -9,6 +9,7 @@ export type SettingsPatch = {
   autoAcceptFromFriendsOfFriends?: boolean;
   sharedFolders?: string[];
   downloadFolder?: string | null;
+  rescanIntervalMinutes?: number;
 };
 
 export type SafeSettings = Omit<Settings, 'invitePassword' | 'sharedFolders'> & {
