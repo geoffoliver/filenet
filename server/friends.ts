@@ -60,6 +60,7 @@ export async function handleIncomingFriendRequest(
         nodeId: params.nodeId,
         publicKey: params.publicKey,
         status: 'INCOMING_PENDING',
+        acceptedAt: null,
       },
     });
   }
@@ -79,6 +80,8 @@ export async function handleIncomingFriendRequest(
 export async function acceptFriendRequest(prisma: PrismaClient, friendId: string): Promise<Friend> {
   const friend = await prisma.friend.findUnique({ where: { id: friendId } });
   if (!friend) throw new Error(`Friend ${friendId} not found`);
+  if (friend.status === 'ACCEPTED') return friend;
+  if (friend.status === 'BLOCKED') throw new Error(`Cannot accept a BLOCKED friend`);
   return prisma.friend.update({
     where: { id: friendId },
     data: {

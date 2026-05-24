@@ -121,6 +121,26 @@ describe('handleIncomingFriendRequest', () => {
     expect(second.id).toBe(all[0].id);
   });
 
+  it('clears acceptedAt when an already-accepted record is re-upgraded to INCOMING_PENDING', async () => {
+    const peerIdentity = generateIdentity();
+    const outgoing = await addOutgoingFriend(prisma, {
+      name: 'Re-requester',
+      address: '10.0.0.200',
+      port: 7734,
+    });
+    await acceptFriendRequest(prisma, outgoing.id);
+    const incoming = await handleIncomingFriendRequest(prisma, {
+      nodeId: peerIdentity.nodeId,
+      publicKey: peerIdentity.publicKey.toString('base64'),
+      name: 'Re-requester',
+      address: '10.0.0.200',
+      port: 7734,
+    });
+    expect(incoming.id).toBe(outgoing.id);
+    expect(incoming.status).toBe('INCOMING_PENDING');
+    expect(incoming.acceptedAt).toBeNull();
+  });
+
   it('upgrades an OUTGOING_PENDING record when the peer sends back a request', async () => {
     const peerIdentity = generateIdentity();
     const outgoing = await addOutgoingFriend(prisma, {
@@ -185,6 +205,35 @@ describe('acceptFriendRequest', () => {
 
   it('throws if friend does not exist', async () => {
     await expect(acceptFriendRequest(prisma, 'nonexistent-id')).rejects.toThrow();
+  });
+
+  it('throws when trying to accept a BLOCKED friend', async () => {
+    const peerIdentity = generateIdentity();
+    const friend = await handleIncomingFriendRequest(prisma, {
+      nodeId: peerIdentity.nodeId,
+      publicKey: peerIdentity.publicKey.toString('base64'),
+      name: 'Blocked',
+      address: '10.0.0.100',
+      port: 7734,
+    });
+    await prisma.friend.update({ where: { id: friend.id }, data: { status: 'BLOCKED' } });
+    await expect(acceptFriendRequest(prisma, friend.id)).rejects.toThrow();
+  });
+
+  it('is a no-op when called on an already-ACCEPTED friend', async () => {
+    const peerIdentity = generateIdentity();
+    const incoming = await handleIncomingFriendRequest(prisma, {
+      nodeId: peerIdentity.nodeId,
+      publicKey: peerIdentity.publicKey.toString('base64'),
+      name: 'Dave',
+      address: '10.0.0.6',
+      port: 7734,
+    });
+    const first = await acceptFriendRequest(prisma, incoming.id);
+    await new Promise((r) => setTimeout(r, 5));
+    const second = await acceptFriendRequest(prisma, incoming.id);
+    expect(second.status).toBe('ACCEPTED');
+    expect(second.acceptedAt?.getTime()).toBe(first.acceptedAt?.getTime());
   });
 });
 
