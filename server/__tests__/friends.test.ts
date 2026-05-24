@@ -182,6 +182,23 @@ describe('handleIncomingFriendRequest', () => {
     const all = await prisma.friend.findMany();
     expect(all.length).toBe(1);
   });
+
+  it('updates name when upgrading an existing record matched by address+port', async () => {
+    const peerIdentity = generateIdentity();
+    await addOutgoingFriend(prisma, {
+      name: 'Placeholder Name',
+      address: '10.0.0.15',
+      port: 7734,
+    });
+    const incoming = await handleIncomingFriendRequest(prisma, {
+      nodeId: peerIdentity.nodeId,
+      publicKey: peerIdentity.publicKey.toString('base64'),
+      name: 'Their Real Name',
+      address: '10.0.0.15',
+      port: 7734,
+    });
+    expect(incoming.name).toBe('Their Real Name');
+  });
 });
 
 describe('acceptFriendRequest', () => {

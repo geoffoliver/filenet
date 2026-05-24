@@ -19,6 +19,7 @@ import {
   decodeMessage,
   decryptMessage,
   encodeMessage,
+  encryptMessage,
   generateEphemeralKeypair,
   processHelloAck,
 } from '../handshake';
@@ -372,6 +373,42 @@ describe('peer.ts dispatchMessage — inbound friend-response', () => {
 
     const friends = await prisma.friend.findMany();
     expect(friends.length).toBe(0);
+  });
+});
+
+describe('peer.ts handleMessage — onAuthenticated ordering', () => {
+  it('invokes onAuthenticated only after dispatchMessage has committed DB changes', async () => {
+    const sessionKey = Buffer.alloc(32, 0x60);
+    const peerIdentity = generateIdentity();
+    const localIdentity = generateIdentity();
+
+    await prisma.friend.create({
+      data: {
+        name: 'Ordering Test',
+        nodeId: peerIdentity.nodeId,
+        publicKey: peerIdentity.publicKey.toString('base64'),
+        address: '10.0.0.30',
+        port: 7734,
+        status: 'OUTGOING_PENDING',
+      },
+    });
+
+    const ws = makeFakeWsAuthenticated(localIdentity, prisma, sessionKey, peerIdentity.nodeId);
+    let dbStatusAtCallback: string | null | undefined;
+
+    await new Promise<void>((resolve) => {
+      handleMessage(
+        ws as any,
+        encodeMessage(encryptMessage({ type: 'friend-response', accepted: true }, sessionKey)),
+        async () => {
+          const friend = await prisma.friend.findFirst({ where: { nodeId: peerIdentity.nodeId } });
+          dbStatusAtCallback = friend?.status;
+          resolve();
+        },
+      );
+    });
+
+    expect(dbStatusAtCallback).toBe('ACCEPTED');
   });
 });
 

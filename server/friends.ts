@@ -67,6 +67,7 @@ export async function handleIncomingFriendRequest(
       data: {
         nodeId: params.nodeId,
         publicKey: params.publicKey,
+        name: params.name,
         status: 'INCOMING_PENDING',
         acceptedAt: null,
       },

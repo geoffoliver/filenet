@@ -103,8 +103,9 @@ export function handleMessage(
     if (state.phase === 'authenticated') {
       try {
         const msg = decryptMessage(wire, state.sessionKey);
-        dispatchMessage(ws, msg).catch(() => ws.close(1011, 'Internal error'));
-        onAuthenticated?.(ws, msg);
+        dispatchMessage(ws, msg)
+          .then(() => onAuthenticated?.(ws, msg))
+          .catch(() => ws.close(1011, 'Internal error'));
       } catch {
         ws.close(1008, 'Decryption failed');
       }
