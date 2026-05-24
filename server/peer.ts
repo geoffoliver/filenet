@@ -1,7 +1,7 @@
 import type { PrismaClient } from '@prisma/client';
 import type { ServerWebSocket } from 'bun';
 
-import type { FriendRequestMessage, HelloAckMessage, HelloMessage, InnerMessage } from './types';
+import type { HelloAckMessage, HelloMessage, InnerMessage } from './types';
 import {
   createHelloAck,
   decodeMessage,
@@ -12,6 +12,7 @@ import {
   generateEphemeralKeypair,
 } from './handshake';
 import { handleInboundFriendRequest, registerPeer, updatePeerPort } from './connections';
+import { FriendRequestMessageSchema } from './schemas';
 import type { Identity } from './identity';
 
 type PeerState =
@@ -110,30 +111,22 @@ async function dispatchMessage(ws: ServerWebSocket<PeerData>, msg: InnerMessage)
   if (state.phase !== 'authenticated') return;
 
   if (msg.type === 'friend-request') {
-    const raw = msg as unknown as Record<string, unknown>;
-    if (!Number.isInteger(raw.port) || (raw.port as number) < 1 || (raw.port as number) > 65535) {
-      ws.close(1008, 'Invalid port in friend-request');
+    const result = FriendRequestMessageSchema.safeParse(msg);
+    if (!result.success) {
+      ws.close(1008, 'Invalid friend-request');
       return;
     }
-    if (typeof raw.name !== 'string' || !raw.name.trim()) {
-      ws.close(1008, 'Invalid name in friend-request');
-      return;
-    }
-    if (raw.password !== undefined && typeof raw.password !== 'string') {
-      ws.close(1008, 'Invalid password in friend-request');
-      return;
-    }
-    const remoteAddress = ws.remoteAddress;
-    updatePeerPort(state.peerNodeId, msg.port);
+    const validated = result.data;
+    updatePeerPort(state.peerNodeId, validated.port);
     await handleInboundFriendRequest(
       ws.data.identity,
       ws.data.prisma,
-      msg as FriendRequestMessage,
+      validated,
       {
         nodeId: state.peerNodeId,
         publicKey: state.peerPublicKey,
-        address: remoteAddress,
-        port: msg.port,
+        address: ws.remoteAddress,
+        port: validated.port,
       },
       (response) => sendEncrypted(ws, response),
     );

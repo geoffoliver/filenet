@@ -1,6 +1,6 @@
 import type { PrismaClient } from '@prisma/client';
 
-import type { FriendRequestMessage, FriendResponseMessage, InnerMessage } from './types';
+import type { FriendRequestMessage, InnerMessage } from './types';
 import { acceptFriendRequest, handleIncomingFriendRequest, shouldAutoAccept } from './friends';
 import {
   createHello,
@@ -11,6 +11,7 @@ import {
   generateEphemeralKeypair,
   processHelloAck,
 } from './handshake';
+import { FriendResponseMessageSchema } from './schemas';
 import type { Identity } from './identity';
 import { getOrCreateSettings } from './config';
 
@@ -186,23 +187,22 @@ async function handleOutboundMessage(
   peer: { nodeId: string; publicKey: Buffer; address: string; port: number },
 ): Promise<void> {
   if (msg.type === 'friend-response') {
-    const raw = msg as unknown as Record<string, unknown>;
-    if (typeof raw.accepted !== 'boolean') return;
-    if (raw.name !== undefined && typeof raw.name !== 'string') return;
-    const response = msg as FriendResponseMessage;
+    const result = FriendResponseMessageSchema.safeParse(msg);
+    if (!result.success) return;
+    const { accepted, name } = result.data;
     const existing = await prisma.friend.findFirst({
       where: { address: peer.address, port: peer.port },
     });
     if (!existing) return;
 
-    if (response.accepted) {
+    if (accepted) {
       await acceptFriendRequest(prisma, existing.id);
       await prisma.friend.update({
         where: { id: existing.id },
         data: {
           nodeId: peer.nodeId,
           publicKey: peer.publicKey.toString('base64'),
-          ...(response.name ? { name: response.name } : {}),
+          ...(name ? { name } : {}),
         },
       });
     } else {

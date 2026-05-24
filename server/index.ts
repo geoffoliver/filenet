@@ -1,3 +1,4 @@
+import { AddFriendBodySchema, FriendActionBodySchema, PatchSettingsBodySchema } from './schemas';
 import { type PeerData, handleMessage, handleOpen } from './peer';
 import { acceptFriendRequest, addOutgoingFriend, getFriends, rejectFriendRequest } from './friends';
 import {
@@ -26,13 +27,6 @@ console.log(`Node ID:   ${identity.nodeId}`);
 console.log(`P2P port:  ${PORT}`);
 console.log(`Mgmt port: ${MGMT_PORT} (localhost only)`);
 
-const SETTINGS_PATCHABLE = new Set([
-  'name',
-  'invitePassword',
-  'autoAcceptFromAnyone',
-  'autoAcceptFromFriendsOfFriends',
-]);
-
 // Management API — localhost only, no WebSocket upgrade
 Bun.serve({
   port: MGMT_PORT,
@@ -48,40 +42,17 @@ Bun.serve({
         }
 
         if (req.method === 'POST') {
-          const rawPostBody = await req.json();
-          if (!rawPostBody || typeof rawPostBody !== 'object' || Array.isArray(rawPostBody)) {
-            return new Response('Request body must be a JSON object', { status: 400 });
+          const result = AddFriendBodySchema.safeParse(await req.json());
+          if (!result.success) {
+            return new Response(result.error.issues[0].message, { status: 400 });
           }
-          const body = rawPostBody as {
-            name: string;
-            address: string;
-            port?: number;
-            password?: string;
-          };
-          if (typeof body.name !== 'string' || !body.name.trim()) {
-            return new Response('name must be a non-empty string', { status: 400 });
-          }
-          if (typeof body.address !== 'string' || !body.address.trim()) {
-            return new Response('address must be a non-empty string', { status: 400 });
-          }
-          if (body.password !== undefined && typeof body.password !== 'string') {
-            return new Response('password must be a string', { status: 400 });
-          }
-          const port = body.port ?? 7734;
-          if (!Number.isInteger(port) || port < 1 || port > 65535) {
-            return new Response('port must be an integer between 1 and 65535', { status: 400 });
-          }
-          const friend = await addOutgoingFriend(prisma, {
-            name: body.name,
-            address: body.address,
-            port,
-          });
-          connectToPeer(identity, prisma, body.address, port, PORT, {
-            name: body.name,
-            password: body.password,
-          }).catch((err: unknown) => {
-            console.error(`Failed to connect to ${body.address}:${port}:`, err);
-          });
+          const { name, address, port, password } = result.data;
+          const friend = await addOutgoingFriend(prisma, { name, address, port });
+          connectToPeer(identity, prisma, address, port, PORT, { name, password }).catch(
+            (err: unknown) => {
+              console.error(`Failed to connect to ${address}:${port}:`, err);
+            },
+          );
           return Response.json(friend, { status: 201 });
         }
       }
@@ -93,12 +64,12 @@ Bun.serve({
         }
 
         if (req.method === 'PUT') {
-          const rawPutBody = await req.json();
-          if (!rawPutBody || typeof rawPutBody !== 'object' || Array.isArray(rawPutBody)) {
-            return new Response('Request body must be a JSON object', { status: 400 });
+          const result = FriendActionBodySchema.safeParse(await req.json());
+          if (!result.success) {
+            return new Response(result.error.issues[0].message, { status: 400 });
           }
-          const body = rawPutBody as { action: 'accept' | 'reject' };
-          if (body.action === 'accept') {
+          const { action } = result.data;
+          if (action === 'accept') {
             const updated = await acceptFriendRequest(prisma, id);
             if (updated.nodeId) {
               const peer = getConnectedPeer(updated.nodeId);
@@ -109,7 +80,7 @@ Bun.serve({
             }
             return Response.json(updated);
           }
-          if (body.action === 'reject') {
+          if (action === 'reject') {
             const friend = await prisma.friend.findUnique({ where: { id } });
             if (!friend) return new Response(`Friend ${id} not found`, { status: 404 });
             await rejectFriendRequest(prisma, id);
@@ -120,7 +91,6 @@ Bun.serve({
             }
             return new Response(null, { status: 204 });
           }
-          return new Response('action must be accept or reject', { status: 400 });
         }
 
         if (req.method === 'DELETE') {
@@ -139,37 +109,11 @@ Bun.serve({
         }
 
         if (req.method === 'PATCH') {
-          const rawPatchBody = await req.json();
-          if (!rawPatchBody || typeof rawPatchBody !== 'object' || Array.isArray(rawPatchBody)) {
-            return new Response('Request body must be a JSON object', { status: 400 });
+          const result = PatchSettingsBodySchema.safeParse(await req.json());
+          if (!result.success) {
+            return new Response(result.error.issues[0].message, { status: 400 });
           }
-          const body = rawPatchBody as Record<string, unknown>;
-          const unknown = Object.keys(body).filter((k) => !SETTINGS_PATCHABLE.has(k));
-          if (unknown.length > 0) {
-            return new Response(`Unknown fields: ${unknown.join(', ')}`, { status: 400 });
-          }
-          if ('name' in body && typeof body.name !== 'string') {
-            return new Response('name must be a string', { status: 400 });
-          }
-          if (
-            'invitePassword' in body &&
-            body.invitePassword !== null &&
-            typeof body.invitePassword !== 'string'
-          ) {
-            return new Response('invitePassword must be a string or null', { status: 400 });
-          }
-          if ('autoAcceptFromAnyone' in body && typeof body.autoAcceptFromAnyone !== 'boolean') {
-            return new Response('autoAcceptFromAnyone must be a boolean', { status: 400 });
-          }
-          if (
-            'autoAcceptFromFriendsOfFriends' in body &&
-            typeof body.autoAcceptFromFriendsOfFriends !== 'boolean'
-          ) {
-            return new Response('autoAcceptFromFriendsOfFriends must be a boolean', {
-              status: 400,
-            });
-          }
-          const updated = await updateSettings(prisma, body as any);
+          const updated = await updateSettings(prisma, result.data);
           return Response.json(sanitizeSettings(updated));
         }
       }
