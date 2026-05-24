@@ -7,10 +7,17 @@ import {
   createHello,
   createHelloAck as createHelloAck_forTest,
   decodeMessage,
+  decryptMessage,
   encodeMessage,
   generateEphemeralKeypair,
   processHelloAck,
 } from '../handshake';
+import { getOrCreateSettings, updateSettings } from '../config';
+import {
+  handleInboundFriendRequest,
+  notifyFriendAccepted,
+  notifyFriendRejected,
+} from '../connections';
 import { createPrismaClient } from '../db';
 import { generateIdentity } from '../identity';
 import { handleMessage } from '../peer';
@@ -32,6 +39,8 @@ afterAll(async () => {
 
 beforeEach(async () => {
   await prisma.identity.deleteMany();
+  await prisma.friend.deleteMany();
+  await prisma.settings.deleteMany();
 });
 
 describe('initiator handshake side (processHelloAck)', () => {
@@ -99,6 +108,91 @@ describe('full two-party handshake via handleMessage', () => {
 
     // Session keys should match
     expect(ws.data.state.sessionKey.toString('hex')).toBe(sessionKey.toString('hex'));
+  });
+});
+
+describe('handleInboundFriendRequest', () => {
+  const peer = {
+    nodeId: 'peer-node-id-abc123',
+    publicKey: Buffer.from('fake-pub-key'),
+    address: '10.0.0.1',
+    port: 7734,
+  };
+  const identity = generateIdentity();
+  const msg = { type: 'friend-request' as const, name: 'Alice', port: 7734 };
+
+  it('stores INCOMING_PENDING and sends no response when auto-accept is off', async () => {
+    await getOrCreateSettings(prisma);
+    const responses: unknown[] = [];
+    await handleInboundFriendRequest(identity, prisma, msg, peer, (r) => responses.push(r));
+    expect(responses.length).toBe(0);
+    const friends = await prisma.friend.findMany();
+    expect(friends.length).toBe(1);
+    expect(friends[0].status).toBe('INCOMING_PENDING');
+  });
+
+  it('accepts and sends friend-response when autoAcceptFromAnyone is on', async () => {
+    await updateSettings(prisma, { autoAcceptFromAnyone: true });
+    const responses: unknown[] = [];
+    await handleInboundFriendRequest(identity, prisma, msg, peer, (r) => responses.push(r));
+    expect(responses).toHaveLength(1);
+    expect((responses[0] as any).type).toBe('friend-response');
+    expect((responses[0] as any).accepted).toBe(true);
+    const friends = await prisma.friend.findMany();
+    expect(friends[0].status).toBe('ACCEPTED');
+  });
+
+  it('accepts when correct password provided', async () => {
+    await updateSettings(prisma, { invitePassword: 'sesame' });
+    const msgWithPass = { ...msg, password: 'sesame' };
+    const responses: unknown[] = [];
+    await handleInboundFriendRequest(identity, prisma, msgWithPass, peer, (r) => responses.push(r));
+    expect((responses[0] as any).accepted).toBe(true);
+  });
+});
+
+describe('notifyFriendAccepted / notifyFriendRejected', () => {
+  it('sends friend-response accepted to a connected peer', () => {
+    const sessionKey = Buffer.alloc(32, 0x42);
+    const sent: string[] = [];
+    const fakePeer = {
+      ws: { send: (m: string) => sent.push(m) } as any,
+      sessionKey,
+      peerNodeId: 'fake-node',
+      peerPublicKey: Buffer.alloc(32),
+      address: '10.0.0.1',
+      port: 7734,
+    };
+
+    notifyFriendAccepted(fakePeer, 'Bob');
+    expect(sent.length).toBe(1);
+    const wire = decodeMessage(sent[0]);
+    if (wire.type !== 'encrypted') throw new Error('expected encrypted');
+    const inner = decryptMessage(wire, sessionKey);
+    expect(inner.type).toBe('friend-response');
+    expect((inner as any).accepted).toBe(true);
+    expect((inner as any).name).toBe('Bob');
+  });
+
+  it('sends friend-response rejected to a connected peer', () => {
+    const sessionKey = Buffer.alloc(32, 0x42);
+    const sent: string[] = [];
+    const fakePeer = {
+      ws: { send: (m: string) => sent.push(m) } as any,
+      sessionKey,
+      peerNodeId: 'fake-node',
+      peerPublicKey: Buffer.alloc(32),
+      address: '10.0.0.1',
+      port: 7734,
+    };
+
+    notifyFriendRejected(fakePeer);
+    expect(sent.length).toBe(1);
+    const wire = decodeMessage(sent[0]);
+    if (wire.type !== 'encrypted') throw new Error('expected encrypted');
+    const inner = decryptMessage(wire, sessionKey);
+    expect(inner.type).toBe('friend-response');
+    expect((inner as any).accepted).toBe(false);
   });
 });
 

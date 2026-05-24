@@ -23,6 +23,18 @@ export type ConnectedPeer = {
   port: number;
 };
 
+export function notifyFriendAccepted(peer: ConnectedPeer, localName: string | null): void {
+  sendToPeer(peer, {
+    type: 'friend-response',
+    accepted: true,
+    ...(localName ? { name: localName } : {}),
+  });
+}
+
+export function notifyFriendRejected(peer: ConnectedPeer): void {
+  sendToPeer(peer, { type: 'friend-response', accepted: false });
+}
+
 const peers = new Map<string, ConnectedPeer>();
 
 export function getConnectedPeer(nodeId: string): ConnectedPeer | undefined {
@@ -173,7 +185,6 @@ export async function handleInboundFriendRequest(
       accepted: true,
       name: settings.name || undefined,
     });
-  } else {
-    sendResponse({ type: 'friend-response', accepted: false });
   }
+  // No response when queued for manual review — the user will accept/reject via the UI.
 }

@@ -3,7 +3,7 @@ import type { PrismaClient } from '@prisma/client';
 import { execSync } from 'child_process';
 import { unlinkSync } from 'fs';
 
-import { getOrCreateSettings, getSettings, updateSettings } from '../config';
+import { getOrCreateSettings, getSettings, sanitizeSettings, updateSettings } from '../config';
 import { createPrismaClient } from '../db';
 
 const TEST_DB_URL = 'file:./data/test-config.db';
@@ -80,5 +80,21 @@ describe('updateSettings', () => {
     await updateSettings(prisma, { invitePassword: 'secret123' });
     const cleared = await updateSettings(prisma, { invitePassword: null });
     expect(cleared.invitePassword).toBeNull();
+  });
+});
+
+describe('sanitizeSettings', () => {
+  it('omits invitePassword and adds hasInvitePassword: false when not set', async () => {
+    const settings = await getOrCreateSettings(prisma);
+    const safe = sanitizeSettings(settings);
+    expect('invitePassword' in safe).toBe(false);
+    expect(safe.hasInvitePassword).toBe(false);
+  });
+
+  it('reports hasInvitePassword: true when a password is set', async () => {
+    const settings = await updateSettings(prisma, { invitePassword: 'secret' });
+    const safe = sanitizeSettings(settings);
+    expect('invitePassword' in safe).toBe(false);
+    expect(safe.hasInvitePassword).toBe(true);
   });
 });

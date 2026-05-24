@@ -2,6 +2,13 @@ import type { PrismaClient, Settings } from '@prisma/client';
 
 const SETTINGS_ID = 'singleton';
 
+export type SafeSettings = Omit<Settings, 'invitePassword'> & { hasInvitePassword: boolean };
+
+export function sanitizeSettings(settings: Settings): SafeSettings {
+  const { invitePassword, ...rest } = settings;
+  return { ...rest, hasInvitePassword: invitePassword !== null };
+}
+
 export async function getSettings(prisma: PrismaClient): Promise<Settings | null> {
   return prisma.settings.findUnique({ where: { id: SETTINGS_ID } });
 }

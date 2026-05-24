@@ -6,8 +6,13 @@ import {
   rejectFriendRequest,
   removeFriend,
 } from './friends';
-import { getOrCreateSettings, updateSettings } from './config';
-import { connectToPeer } from './connections';
+import {
+  connectToPeer,
+  getConnectedPeer,
+  notifyFriendAccepted,
+  notifyFriendRejected,
+} from './connections';
+import { getOrCreateSettings, sanitizeSettings, updateSettings } from './config';
 import { createPrismaClient } from './db';
 import { getOrCreateIdentity } from './identity';
 
@@ -74,10 +79,22 @@ Bun.serve({
           const body = (await req.json()) as { action: 'accept' | 'reject' };
           if (body.action === 'accept') {
             const updated = await acceptFriendRequest(prisma, id);
+            if (updated.nodeId) {
+              const peer = getConnectedPeer(updated.nodeId);
+              if (peer) {
+                const settings = await getOrCreateSettings(prisma);
+                notifyFriendAccepted(peer, settings.name || null);
+              }
+            }
             return Response.json(updated);
           }
           if (body.action === 'reject') {
+            const friend = await prisma.friend.findUnique({ where: { id } });
             await rejectFriendRequest(prisma, id);
+            if (friend?.nodeId) {
+              const peer = getConnectedPeer(friend.nodeId);
+              if (peer) notifyFriendRejected(peer);
+            }
             return new Response(null, { status: 204 });
           }
           return new Response('action must be accept or reject', { status: 400 });
@@ -92,7 +109,7 @@ Bun.serve({
       if (url.pathname === '/api/settings') {
         if (req.method === 'GET') {
           const settings = await getOrCreateSettings(prisma);
-          return Response.json(settings);
+          return Response.json(sanitizeSettings(settings));
         }
 
         if (req.method === 'PATCH') {
@@ -102,7 +119,7 @@ Bun.serve({
             return new Response(`Unknown fields: ${unknown.join(', ')}`, { status: 400 });
           }
           const updated = await updateSettings(prisma, body as any);
-          return Response.json(updated);
+          return Response.json(sanitizeSettings(updated));
         }
       }
 
