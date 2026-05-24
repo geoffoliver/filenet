@@ -46,14 +46,14 @@ The application should let users configure certain aspects:
 - The folder where they want to download files
 - Scripts (JS/TS) to execute once a download completes
 - The port the application should listen on
-- Whehter to auto accept friend requests:
+- Whether to auto accept friend requests:
   - From people they don't know
   - From friends of friends
 - How many "degrees of separation" to share files:
   - Friends
   - Friends of friends
   - Everyone
-- The abilty to force a rescan of shared files
+- The ability to force a rescan of shared files
 
 ## UI
 
@@ -65,7 +65,7 @@ When the user first launches the app, they should be presented with a setup inte
 
 ### Home
 
-This is essentially a "dashboard" for the application. For example, it should display stats on files downloaded; statc on files shared, bytes/MB/GB/whatever downloaded, bytes/MB/GB/whatever uploaded; size of network; friends online; current transfers overview; etc..
+This is essentially a "dashboard" for the application. For example, it should display stats on files downloaded; stats on files shared, bytes/MB/GB/whatever downloaded, bytes/MB/GB/whatever uploaded; size of network; friends online; current transfers overview; etc..
 
 ### Search
 
@@ -73,7 +73,7 @@ A simple search form with an text input and a dropdown that lets the user choose
 
 ### Chat
 
-A split-pane view like Slack, Discord, or any other chat app that everyone is familar with. The left pane lists the users friends that are onilne, followed by any group chats/chat rooms the user is a member of. The right pane displays messages from the chat session that is selected in the left pane, with the newest message on the bottom. Users can create new group chats/chat rooms, and rooms should be shared across the entire network and accessible to any user of the network. Chat messages should persist for the lifetime of the page.
+A split-pane view like Slack, Discord, or any other chat app that everyone is familiar with. The left pane lists the users friends that are onilne, followed by any group chats/chat rooms the user is a member of. The right pane displays messages from the chat session that is selected in the left pane, with the newest message on the bottom. Users can create new group chats/chat rooms, and rooms should be shared across the entire network and accessible to any user of the network. Chat messages should persist for the lifetime of the page.
 
 ### Friends
 
