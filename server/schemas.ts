@@ -39,5 +39,8 @@ export const FriendRequestMessageSchema = z.object({
 export const FriendResponseMessageSchema = z.object({
   type: z.literal('friend-response'),
   accepted: z.boolean(),
-  name: z.string().optional(),
+  name: z.preprocess(
+    (v) => (typeof v === 'string' ? v.trim() || undefined : v),
+    z.string().max(200).optional(),
+  ),
 });

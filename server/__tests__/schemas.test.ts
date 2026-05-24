@@ -205,4 +205,44 @@ describe('FriendResponseMessageSchema', () => {
     });
     expect(r.success).toBe(false);
   });
+
+  it('trims whitespace from name', () => {
+    const r = FriendResponseMessageSchema.safeParse({
+      type: 'friend-response',
+      accepted: true,
+      name: '  Bob  ',
+    });
+    expect(r.success).toBe(true);
+    if (!r.success) return;
+    expect(r.data.name).toBe('Bob');
+  });
+
+  it('normalizes whitespace-only name to undefined', () => {
+    const r = FriendResponseMessageSchema.safeParse({
+      type: 'friend-response',
+      accepted: true,
+      name: '   ',
+    });
+    expect(r.success).toBe(true);
+    if (!r.success) return;
+    expect(r.data.name).toBeUndefined();
+  });
+
+  it('rejects name longer than 200 characters', () => {
+    const r = FriendResponseMessageSchema.safeParse({
+      type: 'friend-response',
+      accepted: true,
+      name: 'a'.repeat(201),
+    });
+    expect(r.success).toBe(false);
+  });
+
+  it('accepts name at exactly 200 characters', () => {
+    const r = FriendResponseMessageSchema.safeParse({
+      type: 'friend-response',
+      accepted: true,
+      name: 'a'.repeat(200),
+    });
+    expect(r.success).toBe(true);
+  });
 });

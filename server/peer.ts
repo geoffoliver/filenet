@@ -1,7 +1,14 @@
 import type { PrismaClient } from '@prisma/client';
 import type { ServerWebSocket } from 'bun';
 
+import { FriendRequestMessageSchema, FriendResponseMessageSchema } from './schemas';
 import type { HelloAckMessage, HelloMessage, InnerMessage } from './types';
+import {
+  closeAndUnregisterPeer,
+  handleInboundFriendRequest,
+  registerPeer,
+  updatePeerPort,
+} from './connections';
 import {
   createHelloAck,
   decodeMessage,
@@ -11,9 +18,8 @@ import {
   finalizeHandshake,
   generateEphemeralKeypair,
 } from './handshake';
-import { handleInboundFriendRequest, registerPeer, updatePeerPort } from './connections';
-import { FriendRequestMessageSchema } from './schemas';
 import type { Identity } from './identity';
+import { acceptFriendRequest } from './friends';
 
 type PeerState =
   | { phase: 'pending' }
@@ -106,7 +112,10 @@ export function handleMessage(
   }
 }
 
-async function dispatchMessage(ws: ServerWebSocket<PeerData>, msg: InnerMessage): Promise<void> {
+export async function dispatchMessage(
+  ws: ServerWebSocket<PeerData>,
+  msg: InnerMessage,
+): Promise<void> {
   const state = ws.data.state;
   if (state.phase !== 'authenticated') return;
 
@@ -130,6 +139,30 @@ async function dispatchMessage(ws: ServerWebSocket<PeerData>, msg: InnerMessage)
       },
       (response) => sendEncrypted(ws, response),
     );
+    return;
+  }
+
+  if (msg.type === 'friend-response') {
+    const result = FriendResponseMessageSchema.safeParse(msg);
+    if (!result.success) return;
+    const { accepted, name } = result.data;
+    const friend = await ws.data.prisma.friend.findFirst({
+      where: { nodeId: state.peerNodeId },
+    });
+    if (!friend) return;
+
+    if (accepted) {
+      await acceptFriendRequest(ws.data.prisma, friend.id);
+      if (name) {
+        await ws.data.prisma.friend.update({
+          where: { id: friend.id },
+          data: { name },
+        });
+      }
+    } else {
+      await ws.data.prisma.friend.delete({ where: { id: friend.id } });
+      closeAndUnregisterPeer(state.peerNodeId);
+    }
   }
 }
 

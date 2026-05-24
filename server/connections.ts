@@ -128,6 +128,9 @@ export async function connectToPeer(
             port,
           );
 
+          handshakeDone = true;
+          resolve(peer);
+
           await prisma.friend.updateMany({
             where: { address, port, nodeId: null, status: 'OUTGOING_PENDING' },
             data: { nodeId: wire.nodeId, publicKey: wire.publicKey },
@@ -142,9 +145,6 @@ export async function connectToPeer(
             };
             sendToPeer(peer, msg);
           }
-
-          handshakeDone = true;
-          resolve(peer);
           return;
         }
 

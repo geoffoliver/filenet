@@ -80,11 +80,20 @@ Bun.serve({
               });
             }
             const updated = await acceptFriendRequest(prisma, id);
+            const settings = await getOrCreateSettings(prisma);
+            const localName = settings.name || null;
             if (updated.nodeId) {
               const peer = getConnectedPeer(updated.nodeId);
               if (peer) {
-                const settings = await getOrCreateSettings(prisma);
-                notifyFriendAccepted(peer, settings.name || null);
+                notifyFriendAccepted(peer, localName);
+              } else {
+                connectToPeer(identity, prisma, updated.address, updated.port, PORT)
+                  .then((p) => {
+                    notifyFriendAccepted(p, localName);
+                  })
+                  .catch((err: unknown) => {
+                    console.error(`Failed to dial back ${updated.address}:${updated.port}:`, err);
+                  });
               }
             }
             return Response.json(updated);

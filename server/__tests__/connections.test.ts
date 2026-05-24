@@ -22,10 +22,10 @@ import {
   generateEphemeralKeypair,
   processHelloAck,
 } from '../handshake';
+import { dispatchMessage, handleMessage } from '../peer';
 import { getOrCreateSettings, updateSettings } from '../config';
 import { createPrismaClient } from '../db';
 import { generateIdentity } from '../identity';
-import { handleMessage } from '../peer';
 
 const TEST_DB_URL = 'file:./data/test-connections.db';
 let prisma: PrismaClient;
@@ -278,6 +278,103 @@ describe('notifyFriendAccepted / notifyFriendRejected', () => {
   });
 });
 
+describe('peer.ts dispatchMessage — inbound friend-response', () => {
+  it('accepts OUTGOING_PENDING friend and updates name when accepted=true', async () => {
+    const sessionKey = Buffer.alloc(32, 0x50);
+    const peerIdentity = generateIdentity();
+    const localIdentity = generateIdentity();
+
+    await prisma.friend.create({
+      data: {
+        name: 'Old Name',
+        nodeId: peerIdentity.nodeId,
+        publicKey: peerIdentity.publicKey.toString('base64'),
+        address: '10.0.0.20',
+        port: 7734,
+        status: 'OUTGOING_PENDING',
+      },
+    });
+
+    const ws = makeFakeWsAuthenticated(localIdentity, prisma, sessionKey, peerIdentity.nodeId);
+    await dispatchMessage(ws as any, { type: 'friend-response', accepted: true, name: 'New Name' });
+
+    const friend = await prisma.friend.findFirst({ where: { nodeId: peerIdentity.nodeId } });
+    expect(friend?.status).toBe('ACCEPTED');
+    expect(friend?.name).toBe('New Name');
+  });
+
+  it('keeps existing name when accepted=true and name is absent', async () => {
+    const sessionKey = Buffer.alloc(32, 0x51);
+    const peerIdentity = generateIdentity();
+    const localIdentity = generateIdentity();
+
+    await prisma.friend.create({
+      data: {
+        name: 'Keep Me',
+        nodeId: peerIdentity.nodeId,
+        publicKey: peerIdentity.publicKey.toString('base64'),
+        address: '10.0.0.21',
+        port: 7734,
+        status: 'OUTGOING_PENDING',
+      },
+    });
+
+    const ws = makeFakeWsAuthenticated(localIdentity, prisma, sessionKey, peerIdentity.nodeId);
+    await dispatchMessage(ws as any, { type: 'friend-response', accepted: true });
+
+    const friend = await prisma.friend.findFirst({ where: { nodeId: peerIdentity.nodeId } });
+    expect(friend?.status).toBe('ACCEPTED');
+    expect(friend?.name).toBe('Keep Me');
+  });
+
+  it('deletes friend record and closes peer when accepted=false', async () => {
+    const sessionKey = Buffer.alloc(32, 0x52);
+    const peerIdentity = generateIdentity();
+    const localIdentity = generateIdentity();
+
+    await prisma.friend.create({
+      data: {
+        name: 'Rejected',
+        nodeId: peerIdentity.nodeId,
+        publicKey: peerIdentity.publicKey.toString('base64'),
+        address: '10.0.0.22',
+        port: 7734,
+        status: 'OUTGOING_PENDING',
+      },
+    });
+
+    const fakeWs = { send: (_m: string) => {}, close: () => {} } as any;
+    registerPeer(
+      fakeWs,
+      sessionKey,
+      peerIdentity.nodeId,
+      peerIdentity.publicKey,
+      '10.0.0.22',
+      7734,
+    );
+
+    const ws = makeFakeWsAuthenticated(localIdentity, prisma, sessionKey, peerIdentity.nodeId);
+    await dispatchMessage(ws as any, { type: 'friend-response', accepted: false });
+
+    const friend = await prisma.friend.findFirst({ where: { nodeId: peerIdentity.nodeId } });
+    expect(friend).toBeNull();
+    expect(getConnectedPeer(peerIdentity.nodeId)).toBeUndefined();
+  });
+
+  it('ignores friend-response when no matching friend record exists', async () => {
+    const sessionKey = Buffer.alloc(32, 0x53);
+    const peerIdentity = generateIdentity();
+    const localIdentity = generateIdentity();
+
+    const ws = makeFakeWsAuthenticated(localIdentity, prisma, sessionKey, peerIdentity.nodeId);
+    // Should not throw
+    await dispatchMessage(ws as any, { type: 'friend-response', accepted: true, name: 'Ghost' });
+
+    const friends = await prisma.friend.findMany();
+    expect(friends.length).toBe(0);
+  });
+});
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -292,5 +389,29 @@ function makeFakeWs(identity: ReturnType<typeof generateIdentity>, sent: string[
       sent.push(msg);
     },
     close(_code: number, _reason: string) {},
+  };
+}
+
+function makeFakeWsAuthenticated(
+  identity: ReturnType<typeof generateIdentity>,
+  db: PrismaClient,
+  sessionKey: Buffer,
+  peerNodeId: string,
+) {
+  return {
+    data: {
+      identity,
+      prisma: db,
+      localPort: 7734,
+      state: {
+        phase: 'authenticated' as const,
+        sessionKey,
+        peerNodeId,
+        peerPublicKey: Buffer.alloc(32),
+      },
+    },
+    send(_msg: string) {},
+    close(_code: number, _reason: string) {},
+    remoteAddress: '10.0.0.1',
   };
 }
