@@ -15,7 +15,7 @@ import type { Identity } from './identity';
 import { getOrCreateSettings } from './config';
 
 export type ConnectedPeer = {
-  ws: WebSocket;
+  ws: { send(data: string | Uint8Array): unknown };
   sessionKey: Buffer;
   peerNodeId: string;
   peerPublicKey: Buffer;
@@ -36,6 +36,23 @@ export function notifyFriendRejected(peer: ConnectedPeer): void {
 }
 
 const peers = new Map<string, ConnectedPeer>();
+
+export function registerPeer(
+  ws: ConnectedPeer['ws'],
+  sessionKey: Buffer,
+  peerNodeId: string,
+  peerPublicKey: Buffer,
+  address: string,
+  port: number,
+): ConnectedPeer {
+  const peer: ConnectedPeer = { ws, sessionKey, peerNodeId, peerPublicKey, address, port };
+  peers.set(peerNodeId, peer);
+  return peer;
+}
+
+export function unregisterPeer(nodeId: string): void {
+  peers.delete(nodeId);
+}
 
 export function getConnectedPeer(nodeId: string): ConnectedPeer | undefined {
   return peers.get(nodeId);
@@ -161,7 +178,7 @@ async function handleOutboundMessage(
 }
 
 export async function handleInboundFriendRequest(
-  identity: Identity,
+  _identity: Identity,
   prisma: PrismaClient,
   msg: FriendRequestMessage,
   peer: { nodeId: string; publicKey: Buffer; address: string; port: number },

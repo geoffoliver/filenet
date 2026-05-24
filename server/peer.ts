@@ -11,8 +11,8 @@ import {
   finalizeHandshake,
   generateEphemeralKeypair,
 } from './handshake';
+import { handleInboundFriendRequest, registerPeer } from './connections';
 import type { Identity } from './identity';
-import { handleInboundFriendRequest } from './connections';
 
 type PeerState =
   | { phase: 'pending' }
@@ -78,12 +78,21 @@ export function handleMessage(
           Buffer.from(state.hello.publicKey, 'base64'),
           Buffer.from(wire.payload, 'base64'),
         );
+        const peerPublicKey = Buffer.from(state.hello.publicKey, 'base64');
         ws.data.state = {
           phase: 'authenticated',
           sessionKey,
           peerNodeId: state.hello.nodeId,
-          peerPublicKey: Buffer.from(state.hello.publicKey, 'base64'),
+          peerPublicKey,
         };
+        registerPeer(
+          ws,
+          sessionKey,
+          state.hello.nodeId,
+          peerPublicKey,
+          ws.remoteAddress,
+          ws.data.localPort,
+        );
       } catch {
         ws.close(1008, 'Handshake failed');
       }

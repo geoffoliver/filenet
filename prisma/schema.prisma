@@ -25,6 +25,8 @@ model Friend {
   addedAt    DateTime     @default(now())
   acceptedAt DateTime?
   updatedAt  DateTime     @updatedAt
+
+  @@unique([address, port])
 }
 
 enum FriendStatus {

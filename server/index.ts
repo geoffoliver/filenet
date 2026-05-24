@@ -11,6 +11,7 @@ import {
   getConnectedPeer,
   notifyFriendAccepted,
   notifyFriendRejected,
+  unregisterPeer,
 } from './connections';
 import { getOrCreateSettings, sanitizeSettings, updateSettings } from './config';
 import { createPrismaClient } from './db';
@@ -90,8 +91,9 @@ Bun.serve({
           }
           if (body.action === 'reject') {
             const friend = await prisma.friend.findUnique({ where: { id } });
+            if (!friend) return new Response(`Friend ${id} not found`, { status: 404 });
             await rejectFriendRequest(prisma, id);
-            if (friend?.nodeId) {
+            if (friend.nodeId) {
               const peer = getConnectedPeer(friend.nodeId);
               if (peer) notifyFriendRejected(peer);
             }
@@ -176,8 +178,9 @@ Bun.serve<PeerData>({
     message(ws, raw) {
       handleMessage(ws, raw);
     },
-    close(_ws) {
-      // TODO: remove from connected peers registry, notify UI
+    close(ws) {
+      const state = ws.data.state;
+      if (state.phase === 'authenticated') unregisterPeer(state.peerNodeId);
     },
   },
 });

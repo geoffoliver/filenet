@@ -12,12 +12,15 @@ import {
   generateEphemeralKeypair,
   processHelloAck,
 } from '../handshake';
-import { getOrCreateSettings, updateSettings } from '../config';
 import {
+  getConnectedPeer,
   handleInboundFriendRequest,
   notifyFriendAccepted,
   notifyFriendRejected,
+  registerPeer,
+  unregisterPeer,
 } from '../connections';
+import { getOrCreateSettings, updateSettings } from '../config';
 import { createPrismaClient } from '../db';
 import { generateIdentity } from '../identity';
 import { handleMessage } from '../peer';
@@ -108,6 +111,21 @@ describe('full two-party handshake via handleMessage', () => {
 
     // Session keys should match
     expect(ws.data.state.sessionKey.toString('hex')).toBe(sessionKey.toString('hex'));
+  });
+
+  it('registerPeer adds peer to registry and getConnectedPeer finds it', () => {
+    const peer1 = generateIdentity();
+    const sessionKey = Buffer.alloc(32, 0xab);
+    const fakeWs = { send: (_m: string) => {} } as any;
+
+    registerPeer(fakeWs, sessionKey, peer1.nodeId, peer1.publicKey, '10.0.0.2', 7734);
+    const found = getConnectedPeer(peer1.nodeId);
+    expect(found).toBeDefined();
+    expect(found?.peerNodeId).toBe(peer1.nodeId);
+    expect(found?.sessionKey.toString('hex')).toBe(sessionKey.toString('hex'));
+
+    unregisterPeer(peer1.nodeId);
+    expect(getConnectedPeer(peer1.nodeId)).toBeUndefined();
   });
 });
 
