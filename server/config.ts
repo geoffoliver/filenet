@@ -1,22 +1,26 @@
 import type { PrismaClient, Settings } from '@prisma/client';
 
+const SETTINGS_ID = 'singleton';
+
 export async function getSettings(prisma: PrismaClient): Promise<Settings | null> {
-  return prisma.settings.findFirst();
+  return prisma.settings.findUnique({ where: { id: SETTINGS_ID } });
 }
 
 export async function getOrCreateSettings(prisma: PrismaClient): Promise<Settings> {
-  const existing = await getSettings(prisma);
-  if (existing) return existing;
-  return prisma.settings.create({ data: {} });
+  return prisma.settings.upsert({
+    where: { id: SETTINGS_ID },
+    create: { id: SETTINGS_ID },
+    update: {},
+  });
 }
 
 export async function updateSettings(
   prisma: PrismaClient,
   patch: Partial<Omit<Settings, 'id'>>,
 ): Promise<Settings> {
-  const existing = await getOrCreateSettings(prisma);
-  return prisma.settings.update({
-    where: { id: existing.id },
-    data: patch,
+  return prisma.settings.upsert({
+    where: { id: SETTINGS_ID },
+    create: { id: SETTINGS_ID, ...patch },
+    update: patch,
   });
 }

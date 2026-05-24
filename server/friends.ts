@@ -36,8 +36,24 @@ export async function handleIncomingFriendRequest(
   prisma: PrismaClient,
   params: IncomingFriendRequestParams,
 ): Promise<Friend> {
-  const existing = await prisma.friend.findUnique({ where: { nodeId: params.nodeId } });
-  if (existing) return existing;
+  const byNodeId = await prisma.friend.findUnique({ where: { nodeId: params.nodeId } });
+  if (byNodeId) return byNodeId;
+
+  // If we have an outgoing record for the same address+port, upgrade it rather than create a duplicate.
+  const byAddress = await prisma.friend.findFirst({
+    where: { address: params.address, port: params.port },
+  });
+  if (byAddress) {
+    return prisma.friend.update({
+      where: { id: byAddress.id },
+      data: {
+        nodeId: params.nodeId,
+        publicKey: params.publicKey,
+        status: 'INCOMING_PENDING',
+      },
+    });
+  }
+
   return prisma.friend.create({
     data: {
       name: params.name,
@@ -55,7 +71,10 @@ export async function acceptFriendRequest(prisma: PrismaClient, friendId: string
   if (!friend) throw new Error(`Friend ${friendId} not found`);
   return prisma.friend.update({
     where: { id: friendId },
-    data: { status: 'ACCEPTED', acceptedAt: new Date() },
+    data: {
+      status: 'ACCEPTED',
+      acceptedAt: friend.acceptedAt ?? new Date(),
+    },
   });
 }
 

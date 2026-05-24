@@ -97,6 +97,27 @@ describe('handleIncomingFriendRequest', () => {
     expect(all.length).toBe(1);
     expect(second.id).toBe(all[0].id);
   });
+
+  it('upgrades an OUTGOING_PENDING record when the peer sends back a request', async () => {
+    const peerIdentity = generateIdentity();
+    const outgoing = await addOutgoingFriend(prisma, {
+      name: 'Dan',
+      address: '10.0.0.10',
+      port: 7734,
+    });
+    const incoming = await handleIncomingFriendRequest(prisma, {
+      nodeId: peerIdentity.nodeId,
+      publicKey: peerIdentity.publicKey.toString('base64'),
+      name: 'Dan',
+      address: '10.0.0.10',
+      port: 7734,
+    });
+    expect(incoming.id).toBe(outgoing.id);
+    expect(incoming.status).toBe('INCOMING_PENDING');
+    expect(incoming.nodeId).toBe(peerIdentity.nodeId);
+    const all = await prisma.friend.findMany();
+    expect(all.length).toBe(1);
+  });
 });
 
 describe('acceptFriendRequest', () => {
@@ -122,6 +143,21 @@ describe('acceptFriendRequest', () => {
     });
     const accepted = await acceptFriendRequest(prisma, friend.id);
     expect(accepted.status).toBe('ACCEPTED');
+  });
+
+  it('does not overwrite acceptedAt when called again on an already-accepted friend', async () => {
+    const peerIdentity = generateIdentity();
+    const incoming = await handleIncomingFriendRequest(prisma, {
+      nodeId: peerIdentity.nodeId,
+      publicKey: peerIdentity.publicKey.toString('base64'),
+      name: 'Dave',
+      address: '10.0.0.6',
+      port: 7734,
+    });
+    const first = await acceptFriendRequest(prisma, incoming.id);
+    await new Promise((r) => setTimeout(r, 5));
+    const second = await acceptFriendRequest(prisma, incoming.id);
+    expect(second.acceptedAt?.getTime()).toBe(first.acceptedAt?.getTime());
   });
 
   it('throws if friend does not exist', async () => {

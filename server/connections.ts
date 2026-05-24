@@ -127,21 +127,23 @@ async function handleOutboundMessage(
 ): Promise<void> {
   if (msg.type === 'friend-response') {
     const response = msg as FriendResponseMessage;
+    const existing = await prisma.friend.findFirst({
+      where: { address: peer.address, port: peer.port },
+    });
+    if (!existing) return;
+
     if (response.accepted) {
-      const existing = await prisma.friend.findFirst({
-        where: { address: peer.address, port: peer.port },
+      await acceptFriendRequest(prisma, existing.id);
+      await prisma.friend.update({
+        where: { id: existing.id },
+        data: {
+          nodeId: peer.nodeId,
+          publicKey: peer.publicKey.toString('base64'),
+          ...(response.name ? { name: response.name } : {}),
+        },
       });
-      if (existing) {
-        await acceptFriendRequest(prisma, existing.id);
-        await prisma.friend.update({
-          where: { id: existing.id },
-          data: {
-            nodeId: peer.nodeId,
-            publicKey: peer.publicKey.toString('base64'),
-            ...(response.name ? { name: response.name } : {}),
-          },
-        });
-      }
+    } else {
+      await prisma.friend.delete({ where: { id: existing.id } });
     }
   }
 }

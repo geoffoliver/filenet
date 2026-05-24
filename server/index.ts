@@ -13,14 +13,117 @@ import { getOrCreateIdentity } from './identity';
 
 const prisma = createPrismaClient();
 const PORT = parseInt(process.env.P2P_PORT ?? '7734');
+const MGMT_PORT = parseInt(process.env.MGMT_PORT ?? '7735');
 
 const identity = await getOrCreateIdentity(prisma);
-console.log(`Node ID:  ${identity.nodeId}`);
-console.log(`Listening on port ${PORT}`);
+console.log(`Node ID:   ${identity.nodeId}`);
+console.log(`P2P port:  ${PORT}`);
+console.log(`Mgmt port: ${MGMT_PORT} (localhost only)`);
 
+const SETTINGS_PATCHABLE = new Set([
+  'name',
+  'invitePassword',
+  'autoAcceptFromAnyone',
+  'autoAcceptFromFriendsOfFriends',
+]);
+
+// Management API — localhost only, no WebSocket upgrade
+Bun.serve({
+  port: MGMT_PORT,
+  hostname: '127.0.0.1',
+  async fetch(req) {
+    const url = new URL(req.url);
+
+    try {
+      if (url.pathname === '/api/friends') {
+        if (req.method === 'GET') {
+          const friends = await getFriends(prisma);
+          return Response.json(friends);
+        }
+
+        if (req.method === 'POST') {
+          const body = (await req.json()) as {
+            name: string;
+            address: string;
+            port?: number;
+            password?: string;
+          };
+          if (!body.name || !body.address) {
+            return new Response('name and address are required', { status: 400 });
+          }
+          const port = body.port ?? 7734;
+          const friend = await addOutgoingFriend(prisma, {
+            name: body.name,
+            address: body.address,
+            port,
+          });
+          connectToPeer(identity, prisma, body.address, port, PORT, {
+            name: body.name,
+            password: body.password,
+          }).catch((err: unknown) => {
+            console.error(`Failed to connect to ${body.address}:${port}:`, err);
+          });
+          return Response.json(friend, { status: 201 });
+        }
+      }
+
+      if (url.pathname.startsWith('/api/friends/')) {
+        const id = url.pathname.slice('/api/friends/'.length);
+
+        if (req.method === 'PUT') {
+          const body = (await req.json()) as { action: 'accept' | 'reject' };
+          if (body.action === 'accept') {
+            const updated = await acceptFriendRequest(prisma, id);
+            return Response.json(updated);
+          }
+          if (body.action === 'reject') {
+            await rejectFriendRequest(prisma, id);
+            return new Response(null, { status: 204 });
+          }
+          return new Response('action must be accept or reject', { status: 400 });
+        }
+
+        if (req.method === 'DELETE') {
+          await removeFriend(prisma, id);
+          return new Response(null, { status: 204 });
+        }
+      }
+
+      if (url.pathname === '/api/settings') {
+        if (req.method === 'GET') {
+          const settings = await getOrCreateSettings(prisma);
+          return Response.json(settings);
+        }
+
+        if (req.method === 'PATCH') {
+          const body = (await req.json()) as Record<string, unknown>;
+          const unknown = Object.keys(body).filter((k) => !SETTINGS_PATCHABLE.has(k));
+          if (unknown.length > 0) {
+            return new Response(`Unknown fields: ${unknown.join(', ')}`, { status: 400 });
+          }
+          const updated = await updateSettings(prisma, body as any);
+          return Response.json(updated);
+        }
+      }
+
+      return new Response('Not Found', { status: 404 });
+    } catch (err: unknown) {
+      const isDuplicate = err instanceof Error && err.message.startsWith('Already have a friend');
+      if (isDuplicate) return new Response((err as Error).message, { status: 409 });
+
+      const isNotFound = err instanceof Error && err.message.includes('not found');
+      if (isNotFound) return new Response((err as Error).message, { status: 404 });
+
+      console.error('Management API error:', err);
+      return new Response('Internal Server Error', { status: 500 });
+    }
+  },
+});
+
+// P2P server — public, WebSocket + pubkey endpoint only
 Bun.serve<PeerData>({
   port: PORT,
-  async fetch(req, server) {
+  fetch(req, server) {
     const url = new URL(req.url);
 
     if (url.pathname === '/pubkey') {
@@ -32,72 +135,6 @@ Bun.serve<PeerData>({
 
     if (url.pathname === '/health') {
       return Response.json({ status: 'ok', nodeId: identity.nodeId });
-    }
-
-    // Management API — friends
-    if (url.pathname === '/api/friends') {
-      if (req.method === 'GET') {
-        const friends = await getFriends(prisma);
-        return Response.json(friends);
-      }
-
-      if (req.method === 'POST') {
-        const body = (await req.json()) as {
-          name: string;
-          address: string;
-          port?: number;
-          password?: string;
-        };
-        const port = body.port ?? 7734;
-        const friend = await addOutgoingFriend(prisma, {
-          name: body.name,
-          address: body.address,
-          port,
-        });
-        connectToPeer(identity, prisma, body.address, port, PORT, {
-          name: body.name,
-          password: body.password,
-        }).catch((err: unknown) => {
-          console.error(`Failed to connect to ${body.address}:${port}:`, err);
-        });
-        return Response.json(friend, { status: 201 });
-      }
-    }
-
-    if (url.pathname.startsWith('/api/friends/')) {
-      const id = url.pathname.slice('/api/friends/'.length);
-
-      if (req.method === 'PUT') {
-        const body = (await req.json()) as { action: 'accept' | 'reject' };
-        if (body.action === 'accept') {
-          const updated = await acceptFriendRequest(prisma, id);
-          return Response.json(updated);
-        }
-        if (body.action === 'reject') {
-          await rejectFriendRequest(prisma, id);
-          return new Response(null, { status: 204 });
-        }
-        return new Response('Bad Request', { status: 400 });
-      }
-
-      if (req.method === 'DELETE') {
-        await removeFriend(prisma, id);
-        return new Response(null, { status: 204 });
-      }
-    }
-
-    // Management API — settings
-    if (url.pathname === '/api/settings') {
-      if (req.method === 'GET') {
-        const settings = await getOrCreateSettings(prisma);
-        return Response.json(settings);
-      }
-
-      if (req.method === 'PATCH') {
-        const body = (await req.json()) as Record<string, unknown>;
-        const updated = await updateSettings(prisma, body as any);
-        return Response.json(updated);
-      }
     }
 
     if (

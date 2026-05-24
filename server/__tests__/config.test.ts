@@ -46,6 +46,18 @@ describe('getOrCreateSettings', () => {
     const second = await getOrCreateSettings(prisma);
     expect(second.id).toBe(first.id);
   });
+
+  it('returns the same id across concurrent calls (singleton)', async () => {
+    const [a, b, c] = await Promise.all([
+      getOrCreateSettings(prisma),
+      getOrCreateSettings(prisma),
+      getOrCreateSettings(prisma),
+    ]);
+    expect(a.id).toBe(b.id);
+    expect(b.id).toBe(c.id);
+    const count = await prisma.settings.count();
+    expect(count).toBe(1);
+  });
 });
 
 describe('updateSettings', () => {
