@@ -1,0 +1,32 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+model Identity {
+  id         String   @id @default(cuid())
+  nodeId     String   @unique
+  publicKey  String
+  privateKey String
+  createdAt  DateTime @default(now())
+}
+
+model Friend {
+  id        String       @id @default(cuid())
+  name      String
+  nodeId    String?      @unique
+  address   String
+  port      Int          @default(7734)
+  publicKey String?
+  status    FriendStatus @default(PENDING)
+  addedAt   DateTime     @default(now())
+}
+
+enum FriendStatus {
+  PENDING
+  ACCEPTED
+  BLOCKED
+}

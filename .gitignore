@@ -1,41 +1,42 @@
-# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
-
 # dependencies
-/node_modules
-/.pnp
-.pnp.*
-.yarn/*
-!.yarn/patches
-!.yarn/plugins
-!.yarn/releases
-!.yarn/versions
-
-# testing
-/coverage
+node_modules/
 
 # next.js
-/.next/
-/out/
+.next/
+out/
 
 # production
-/build
+build/
+
+# database
+data/*.db
+data/*.db-journal
+data/*.db-shm
+data/*.db-wal
+
+# env
+.env
+.env.local
+.env.*.local
+
+# prisma generated
+prisma/generated/
 
 # misc
 .DS_Store
 *.pem
+*.tsbuildinfo
+next-env.d.ts
 
-# debug
+# logs
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
+bun-error.log*
 
-# env files (can opt-in for committing if needed)
-.env*
-
-# vercel
+# lock files not in use
+.pnp
+.pnp.*
+.yarn/
 .vercel
-
-# typescript
-*.tsbuildinfo
-next-env.d.ts
