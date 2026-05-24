@@ -48,11 +48,13 @@ Bun.serve({
           }
           const { name, address, port, password } = result.data;
           const friend = await addOutgoingFriend(prisma, { name, address, port });
-          connectToPeer(identity, prisma, address, port, PORT, { name, password }).catch(
-            (err: unknown) => {
-              console.error(`Failed to connect to ${address}:${port}:`, err);
-            },
-          );
+          const settings = await getOrCreateSettings(prisma);
+          connectToPeer(identity, prisma, address, port, PORT, {
+            name: settings.name || identity.nodeId,
+            password,
+          }).catch((err: unknown) => {
+            console.error(`Failed to connect to ${address}:${port}:`, err);
+          });
           return Response.json(friend, { status: 201 });
         }
       }
@@ -70,6 +72,13 @@ Bun.serve({
           }
           const { action } = result.data;
           if (action === 'accept') {
+            const pending = await prisma.friend.findUnique({ where: { id } });
+            if (!pending) return new Response(`Friend ${id} not found`, { status: 404 });
+            if (pending.status !== 'INCOMING_PENDING') {
+              return new Response(`Cannot accept a friend with status ${pending.status}`, {
+                status: 409,
+              });
+            }
             const updated = await acceptFriendRequest(prisma, id);
             if (updated.nodeId) {
               const peer = getConnectedPeer(updated.nodeId);
