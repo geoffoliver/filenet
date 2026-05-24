@@ -58,6 +58,9 @@ Bun.serve({
             return new Response('name and address are required', { status: 400 });
           }
           const port = body.port ?? 7734;
+          if (!Number.isInteger(port) || port < 1 || port > 65535) {
+            return new Response('port must be an integer between 1 and 65535', { status: 400 });
+          }
           const friend = await addOutgoingFriend(prisma, {
             name: body.name,
             address: body.address,
@@ -153,6 +156,8 @@ Bun.serve({
 
       const isNotFound = err instanceof Error && err.message.includes('not found');
       if (isNotFound) return new Response((err as Error).message, { status: 404 });
+
+      if (err instanceof SyntaxError) return new Response('Invalid JSON body', { status: 400 });
 
       console.error('Management API error:', err);
       return new Response('Internal Server Error', { status: 500 });

@@ -15,6 +15,15 @@ type EphemeralKeypair = ReturnType<typeof generateEphemeralKeypair>;
 
 export { generateEphemeralKeypair };
 
+function verifyNodeId(nodeId: string, publicKeyBase64: string): void {
+  const expected = crypto
+    .createHash('sha256')
+    .update(Buffer.from(publicKeyBase64, 'base64'))
+    .digest('hex')
+    .slice(0, 32);
+  if (nodeId !== expected) throw new Error('nodeId does not match public key');
+}
+
 export function createHello(identity: Identity, ephemeral: EphemeralKeypair): HelloMessage {
   return {
     type: 'hello',
@@ -51,6 +60,8 @@ export function processHelloAck(
   hello: HelloMessage,
   ack: HelloAckMessage,
 ): { sessionKey: Buffer; ready: Buffer } {
+  verifyNodeId(ack.nodeId, ack.publicKey);
+
   const receiverPubKey = Buffer.from(ack.publicKey, 'base64');
   const sigData = Buffer.concat([
     Buffer.from(hello.nonce, 'base64'),
@@ -88,6 +99,8 @@ export function finalizeHandshake(
   initiatorPublicKey: Buffer,
   encryptedReady: Buffer,
 ): Buffer {
+  verifyNodeId(hello.nodeId, hello.publicKey);
+
   const salt = Buffer.concat([
     Buffer.from(hello.nonce, 'base64'),
     Buffer.from(ack.nonce, 'base64'),

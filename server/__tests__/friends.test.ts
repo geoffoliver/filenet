@@ -82,6 +82,29 @@ describe('handleIncomingFriendRequest', () => {
     expect(friend.name).toBe('Carol');
   });
 
+  it('updates stale name/address/port when the same peer reconnects from a new location', async () => {
+    const peerIdentity = generateIdentity();
+    await handleIncomingFriendRequest(prisma, {
+      nodeId: peerIdentity.nodeId,
+      publicKey: peerIdentity.publicKey.toString('base64'),
+      name: 'OldName',
+      address: '10.0.0.5',
+      port: 7734,
+    });
+    const updated = await handleIncomingFriendRequest(prisma, {
+      nodeId: peerIdentity.nodeId,
+      publicKey: peerIdentity.publicKey.toString('base64'),
+      name: 'NewName',
+      address: '10.0.0.99',
+      port: 7800,
+    });
+    expect(updated.name).toBe('NewName');
+    expect(updated.address).toBe('10.0.0.99');
+    expect(updated.port).toBe(7800);
+    const all = await prisma.friend.findMany({ where: { nodeId: peerIdentity.nodeId } });
+    expect(all.length).toBe(1);
+  });
+
   it('does not duplicate if request already exists from same nodeId', async () => {
     const peerIdentity = generateIdentity();
     const params = {

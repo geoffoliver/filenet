@@ -84,6 +84,35 @@ describe('full handshake', () => {
     expect(() => processHelloAck(alice, aliceEph, hello, tampered)).toThrow();
   });
 
+  it('rejects hello-ack with a nodeId that does not match its public key', () => {
+    const alice = generateIdentity();
+    const bob = generateIdentity();
+    const eve = generateIdentity();
+    const aliceEph = generateEphemeralKeypair();
+
+    const hello = createHello(alice, aliceEph);
+    const { ack } = createHelloAck(bob, hello);
+    const tampered = { ...ack, nodeId: eve.nodeId };
+
+    expect(() => processHelloAck(alice, aliceEph, hello, tampered)).toThrow();
+  });
+
+  it('rejects a hello with a nodeId that does not match its public key', () => {
+    const alice = generateIdentity();
+    const bob = generateIdentity();
+    const eve = generateIdentity();
+    const aliceEph = generateEphemeralKeypair();
+
+    const hello = createHello(alice, aliceEph);
+    const tamperedHello = { ...hello, nodeId: eve.nodeId };
+    const { ack, ephemeral: bobEph } = createHelloAck(bob, tamperedHello);
+    const { ready } = processHelloAck(alice, aliceEph, tamperedHello, ack);
+
+    expect(() =>
+      finalizeHandshake(bob, bobEph, tamperedHello, ack, alice.publicKey, ready),
+    ).toThrow();
+  });
+
   it('rejects a ready message with a bad signature', () => {
     const alice = generateIdentity();
     const bob = generateIdentity();

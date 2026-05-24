@@ -110,6 +110,10 @@ async function dispatchMessage(ws: ServerWebSocket<PeerData>, msg: InnerMessage)
   if (state.phase !== 'authenticated') return;
 
   if (msg.type === 'friend-request') {
+    if (!Number.isInteger(msg.port) || msg.port < 1 || msg.port > 65535) {
+      ws.close(1008, 'Invalid port in friend-request');
+      return;
+    }
     const remoteAddress = ws.remoteAddress;
     updatePeerPort(state.peerNodeId, msg.port);
     await handleInboundFriendRequest(
