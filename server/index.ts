@@ -1,11 +1,5 @@
 import { type PeerData, handleMessage, handleOpen } from './peer';
-import {
-  acceptFriendRequest,
-  addOutgoingFriend,
-  getFriends,
-  rejectFriendRequest,
-  removeFriend,
-} from './friends';
+import { acceptFriendRequest, addOutgoingFriend, getFriends, rejectFriendRequest } from './friends';
 import {
   closeAndUnregisterPeer,
   connectToPeer,
@@ -54,7 +48,11 @@ Bun.serve({
         }
 
         if (req.method === 'POST') {
-          const body = (await req.json()) as {
+          const rawPostBody = await req.json();
+          if (!rawPostBody || typeof rawPostBody !== 'object' || Array.isArray(rawPostBody)) {
+            return new Response('Request body must be a JSON object', { status: 400 });
+          }
+          const body = rawPostBody as {
             name: string;
             address: string;
             port?: number;
@@ -86,7 +84,11 @@ Bun.serve({
         const id = url.pathname.slice('/api/friends/'.length);
 
         if (req.method === 'PUT') {
-          const body = (await req.json()) as { action: 'accept' | 'reject' };
+          const rawPutBody = await req.json();
+          if (!rawPutBody || typeof rawPutBody !== 'object' || Array.isArray(rawPutBody)) {
+            return new Response('Request body must be a JSON object', { status: 400 });
+          }
+          const body = rawPutBody as { action: 'accept' | 'reject' };
           if (body.action === 'accept') {
             const updated = await acceptFriendRequest(prisma, id);
             if (updated.nodeId) {
@@ -113,7 +115,10 @@ Bun.serve({
         }
 
         if (req.method === 'DELETE') {
-          await removeFriend(prisma, id);
+          const toDelete = await prisma.friend.findUnique({ where: { id } });
+          if (!toDelete) return new Response(`Friend ${id} not found`, { status: 404 });
+          if (toDelete.nodeId) closeAndUnregisterPeer(toDelete.nodeId);
+          await prisma.friend.delete({ where: { id } });
           return new Response(null, { status: 204 });
         }
       }
@@ -125,7 +130,11 @@ Bun.serve({
         }
 
         if (req.method === 'PATCH') {
-          const body = (await req.json()) as Record<string, unknown>;
+          const rawPatchBody = await req.json();
+          if (!rawPatchBody || typeof rawPatchBody !== 'object' || Array.isArray(rawPatchBody)) {
+            return new Response('Request body must be a JSON object', { status: 400 });
+          }
+          const body = rawPatchBody as Record<string, unknown>;
           const unknown = Object.keys(body).filter((k) => !SETTINGS_PATCHABLE.has(k));
           if (unknown.length > 0) {
             return new Response(`Unknown fields: ${unknown.join(', ')}`, { status: 400 });

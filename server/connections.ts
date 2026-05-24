@@ -98,6 +98,7 @@ export async function connectToPeer(
     let sessionKey: Buffer | null = null;
     let peerNodeId: string | null = null;
     let peerPublicKey: Buffer | null = null;
+    let handshakeDone = false;
 
     ws.onopen = () => {
       ws.send(encodeMessage(hello));
@@ -141,6 +142,7 @@ export async function connectToPeer(
             sendToPeer(peer, msg);
           }
 
+          handshakeDone = true;
           resolve(peer);
           return;
         }
@@ -155,17 +157,24 @@ export async function connectToPeer(
           });
         }
       } catch (err) {
-        reject(err);
+        if (handshakeDone) {
+          console.error(`Error handling message from ${address}:${port}:`, err);
+          if (peerNodeId) closeAndUnregisterPeer(peerNodeId);
+        } else {
+          reject(err);
+        }
       }
     };
 
-    ws.onerror = (err) => reject(err);
+    ws.onerror = (err) => {
+      if (!handshakeDone) reject(err);
+    };
     ws.onclose = (event) => {
       if (peerNodeId) {
         const current = peers.get(peerNodeId);
         if (current && (current.ws as unknown) === ws) peers.delete(peerNodeId);
       }
-      if (!sessionKey) reject(new Error(`Connection closed before handshake: ${event.reason}`));
+      if (!handshakeDone) reject(new Error(`Connection closed before handshake: ${event.reason}`));
     };
   });
 }
