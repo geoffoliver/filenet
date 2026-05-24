@@ -212,6 +212,25 @@ describe('handleInboundFriendRequest', () => {
     await handleInboundFriendRequest(identity, prisma, msgWithPass, peer, (r) => responses.push(r));
     expect((responses[0] as any).accepted).toBe(true);
   });
+
+  it('sends no response and does not accept when the matched friend is BLOCKED', async () => {
+    await updateSettings(prisma, { autoAcceptFromAnyone: true });
+    await prisma.friend.create({
+      data: {
+        name: 'Blocked',
+        nodeId: peer.nodeId,
+        publicKey: peer.publicKey.toString('base64'),
+        address: peer.address,
+        port: peer.port,
+        status: 'BLOCKED',
+      },
+    });
+    const responses: unknown[] = [];
+    await handleInboundFriendRequest(identity, prisma, msg, peer, (r) => responses.push(r));
+    expect(responses.length).toBe(0);
+    const friends = await prisma.friend.findMany();
+    expect(friends[0].status).toBe('BLOCKED');
+  });
 });
 
 describe('notifyFriendAccepted / notifyFriendRejected', () => {

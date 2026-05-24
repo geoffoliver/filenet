@@ -110,8 +110,17 @@ async function dispatchMessage(ws: ServerWebSocket<PeerData>, msg: InnerMessage)
   if (state.phase !== 'authenticated') return;
 
   if (msg.type === 'friend-request') {
-    if (!Number.isInteger(msg.port) || msg.port < 1 || msg.port > 65535) {
+    const raw = msg as unknown as Record<string, unknown>;
+    if (!Number.isInteger(raw.port) || (raw.port as number) < 1 || (raw.port as number) > 65535) {
       ws.close(1008, 'Invalid port in friend-request');
+      return;
+    }
+    if (typeof raw.name !== 'string' || !raw.name.trim()) {
+      ws.close(1008, 'Invalid name in friend-request');
+      return;
+    }
+    if (raw.password !== undefined && typeof raw.password !== 'string') {
+      ws.close(1008, 'Invalid password in friend-request');
       return;
     }
     const remoteAddress = ws.remoteAddress;

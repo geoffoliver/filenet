@@ -58,8 +58,14 @@ Bun.serve({
             port?: number;
             password?: string;
           };
-          if (!body.name || !body.address) {
-            return new Response('name and address are required', { status: 400 });
+          if (typeof body.name !== 'string' || !body.name.trim()) {
+            return new Response('name must be a non-empty string', { status: 400 });
+          }
+          if (typeof body.address !== 'string' || !body.address.trim()) {
+            return new Response('address must be a non-empty string', { status: 400 });
+          }
+          if (body.password !== undefined && typeof body.password !== 'string') {
+            return new Response('password must be a string', { status: 400 });
           }
           const port = body.port ?? 7734;
           if (!Number.isInteger(port) || port < 1 || port > 65535) {
@@ -82,6 +88,9 @@ Bun.serve({
 
       if (url.pathname.startsWith('/api/friends/')) {
         const id = url.pathname.slice('/api/friends/'.length);
+        if (!id || id.includes('/')) {
+          return new Response('Invalid friend id', { status: 400 });
+        }
 
         if (req.method === 'PUT') {
           const rawPutBody = await req.json();
@@ -170,7 +179,9 @@ Bun.serve({
       const isDuplicate = err instanceof Error && err.message.startsWith('Already have a friend');
       if (isDuplicate) return new Response((err as Error).message, { status: 409 });
 
-      const isConflict = err instanceof Error && err.message.startsWith('Cannot reject');
+      const isConflict =
+        err instanceof Error &&
+        (err.message.startsWith('Cannot reject') || err.message.startsWith('Cannot accept'));
       if (isConflict) return new Response((err as Error).message, { status: 409 });
 
       const isNotFound = err instanceof Error && err.message.includes('not found');

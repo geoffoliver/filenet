@@ -186,6 +186,9 @@ async function handleOutboundMessage(
   peer: { nodeId: string; publicKey: Buffer; address: string; port: number },
 ): Promise<void> {
   if (msg.type === 'friend-response') {
+    const raw = msg as unknown as Record<string, unknown>;
+    if (typeof raw.accepted !== 'boolean') return;
+    if (raw.name !== undefined && typeof raw.name !== 'string') return;
     const response = msg as FriendResponseMessage;
     const existing = await prisma.friend.findFirst({
       where: { address: peer.address, port: peer.port },
@@ -226,6 +229,8 @@ export async function handleInboundFriendRequest(
     address: peer.address,
     port: msg.port,
   });
+
+  if (friend.status === 'BLOCKED') return;
 
   if (autoAccept) {
     await acceptFriendRequest(prisma, friend.id);

@@ -61,6 +61,7 @@ export async function handleIncomingFriendRequest(
     where: { address: params.address, port: params.port },
   });
   if (byAddress) {
+    if (byAddress.status === 'BLOCKED') return byAddress;
     return prisma.friend.update({
       where: { id: byAddress.id },
       data: {

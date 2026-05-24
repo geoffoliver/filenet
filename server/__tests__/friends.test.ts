@@ -141,6 +141,27 @@ describe('handleIncomingFriendRequest', () => {
     expect(incoming.acceptedAt).toBeNull();
   });
 
+  it('does not upgrade a BLOCKED record matched by address+port', async () => {
+    const peerIdentity = generateIdentity();
+    const outgoing = await addOutgoingFriend(prisma, {
+      name: 'Blocked',
+      address: '10.0.0.11',
+      port: 7734,
+    });
+    await prisma.friend.update({ where: { id: outgoing.id }, data: { status: 'BLOCKED' } });
+    const returned = await handleIncomingFriendRequest(prisma, {
+      nodeId: peerIdentity.nodeId,
+      publicKey: peerIdentity.publicKey.toString('base64'),
+      name: 'Blocked',
+      address: '10.0.0.11',
+      port: 7734,
+    });
+    expect(returned.id).toBe(outgoing.id);
+    expect(returned.status).toBe('BLOCKED');
+    const all = await prisma.friend.findMany();
+    expect(all.length).toBe(1);
+  });
+
   it('upgrades an OUTGOING_PENDING record when the peer sends back a request', async () => {
     const peerIdentity = generateIdentity();
     const outgoing = await addOutgoingFriend(prisma, {
