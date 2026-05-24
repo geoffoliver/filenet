@@ -15,18 +15,29 @@ model Identity {
 }
 
 model Friend {
-  id        String       @id @default(cuid())
-  name      String
-  nodeId    String?      @unique
-  address   String
-  port      Int          @default(7734)
-  publicKey String?
-  status    FriendStatus @default(PENDING)
-  addedAt   DateTime     @default(now())
+  id         String       @id @default(cuid())
+  name       String
+  nodeId     String?      @unique
+  address    String
+  port       Int          @default(7734)
+  publicKey  String?
+  status     FriendStatus @default(OUTGOING_PENDING)
+  addedAt    DateTime     @default(now())
+  acceptedAt DateTime?
+  updatedAt  DateTime     @updatedAt
 }
 
 enum FriendStatus {
-  PENDING
+  OUTGOING_PENDING
+  INCOMING_PENDING
   ACCEPTED
   BLOCKED
+}
+
+model Settings {
+  id                          String  @id @default(cuid())
+  name                        String  @default("")
+  invitePassword              String?
+  autoAcceptFromAnyone        Boolean @default(false)
+  autoAcceptFromFriendsOfFriends Boolean @default(false)
 }

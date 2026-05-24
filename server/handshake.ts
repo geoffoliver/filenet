@@ -1,10 +1,13 @@
 import crypto from 'crypto';
 
-import type {
-  HelloAckMessage, HelloMessage, InnerMessage, WireMessage, 
-} from './types';
+import type { HelloAckMessage, HelloMessage, InnerMessage, WireMessage } from './types';
 import {
-  decrypt, deriveSessionKey, encrypt, generateEphemeralKeypair, sign, verify, 
+  decrypt,
+  deriveSessionKey,
+  encrypt,
+  generateEphemeralKeypair,
+  sign,
+  verify,
 } from './crypto';
 import type { Identity } from './identity';
 
@@ -28,10 +31,7 @@ export function createHelloAck(
 ): { ack: HelloAckMessage; ephemeral: EphemeralKeypair } {
   const ephemeral = generateEphemeralKeypair();
   const nonce = crypto.randomBytes(32).toString('base64');
-  const sigData = Buffer.concat([
-    Buffer.from(hello.nonce, 'base64'),
-    Buffer.from(nonce, 'base64'),
-  ]);
+  const sigData = Buffer.concat([Buffer.from(hello.nonce, 'base64'), Buffer.from(nonce, 'base64')]);
   return {
     ack: {
       type: 'hello-ack',

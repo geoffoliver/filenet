@@ -3,6 +3,7 @@
 ## Core / Server
 
 ### Identity & Crypto
+
 - [x] Ed25519 keypair generation and persistence (Prisma/SQLite)
 - [x] Node ID derivation (SHA-256 of public key)
 - [x] Public key HTTP endpoint (`GET /pubkey`) — unauthenticated
@@ -14,18 +15,23 @@
 - [x] Bun WebSocket server entry point (`server/index.ts`)
 
 ### Friends
-- [ ] Prisma schema: `Friend` model (already defined, needs migration)
-- [ ] Outbound connection: connect to a peer by address + port, complete handshake
-- [ ] Send `friend-request` message over encrypted connection
-- [ ] Receive and store incoming friend requests (pending state)
-- [ ] Accept / reject friend request
-- [ ] Password-based auto-accept (skip confirmation if correct password provided)
-- [ ] Auto-accept settings: from anyone / from friends-of-friends / off
-- [ ] Fetch peer's public key on first contact (`GET /pubkey`)
-- [ ] Persist friend's node ID and public key once connected
-- [ ] Remove a friend
+
+- [x] Prisma schema: `Friend` model with `OUTGOING_PENDING` / `INCOMING_PENDING` / `ACCEPTED` / `BLOCKED` statuses
+- [x] Prisma schema: `Settings` model (name, invitePassword, autoAcceptFromAnyone, autoAcceptFromFriendsOfFriends)
+- [x] Outbound connection: connect to a peer by address + port, complete handshake as initiator
+- [x] Send `friend-request` message over encrypted connection
+- [x] Receive and store incoming friend requests (pending state)
+- [x] Accept / reject friend request
+- [x] Password-based auto-accept (skip confirmation if correct password provided)
+- [x] Auto-accept settings: from anyone / password / off
+- [x] Persist friend's node ID and public key once connected
+- [x] Remove a friend
+- [x] Management HTTP API: `GET/POST /api/friends`, `PUT /api/friends/:id`, `DELETE /api/friends/:id`, `GET/PATCH /api/settings`
+- [ ] Auto-accept from friends-of-friends (requires routing layer)
+- [ ] Fetch peer's public key on first contact (`GET /pubkey`) — currently skipped (key exchanged in handshake)
 
 ### File Indexing
+
 - [ ] Prisma schema: `SharedFile` model (filename, path, size, SHA-256, mime type, metadata JSON, indexed at)
 - [ ] Configurable shared folder(s) stored in DB / config
 - [ ] Directory scanner: walk folders, hash files, upsert index
@@ -36,6 +42,7 @@
 - [ ] Remove stale index entries for deleted files
 
 ### Search
+
 - [ ] Local search (filename, file type, metadata fields)
 - [ ] Outbound search: fan out to all connected friends with a search ID + TTL
 - [ ] Inbound search: execute locally, forward to own friends (minus already-seen search IDs), return results directly to originating node
@@ -44,6 +51,7 @@
 - [ ] Direct result delivery back to the requesting node over an encrypted connection
 
 ### File Transfers
+
 - [ ] Prisma schema: `Download` model (file hash, chunks, sources, state, progress)
 - [ ] Chunk-based download protocol (request/serve specific byte ranges)
 - [ ] Multi-source downloading (same file from multiple peers simultaneously)
@@ -55,6 +63,7 @@
 - [ ] Post-download script execution (run user scripts in order, pass `BunFile` + `TransferStats`)
 
 ### Chat
+
 - [ ] Prisma schema: `ChatMessage`, `ChatRoom`, `ChatMember` models
 - [ ] One-on-one encrypted messaging over authenticated connection
 - [ ] Persist one-on-one message history indefinitely (delete on user request)
@@ -64,6 +73,7 @@
 - [ ] Online presence: track which friends are currently connected
 
 ### Configuration
+
 - [ ] Prisma schema (or config file): store all user settings
 - [ ] Profile: name, email, picture, bio, links
 - [ ] Shared folder(s) management (add / remove paths)
@@ -74,6 +84,7 @@
 - [ ] Post-download scripts list (paths + order)
 
 ### API (Next.js → P2P server bridge)
+
 - [ ] Local management WebSocket or REST API so the Next.js UI can control the P2P server
 - [ ] Expose: friend list, friend requests, search, transfers, chat, settings, stats
 
@@ -82,6 +93,7 @@
 ## UI (Next.js)
 
 ### Shell
+
 - [ ] Global layout: sticky navbar + main content area
 - [ ] Navbar: Home, Search, Chat, Friends, Transfers, Settings links
 - [ ] Navbar: search field (enter/click → navigate to Search + run query)
@@ -89,6 +101,7 @@
 - [ ] CSS module + global stylesheet scaffolding (variables, resets, base styles)
 
 ### Setup Wizard
+
 - [ ] First-launch detection (no profile configured)
 - [ ] Step: profile details (name, email, picture, bio, links)
 - [ ] Step: shared folders
@@ -98,6 +111,7 @@
 - [ ] Sensible defaults pre-filled throughout
 
 ### Home (Dashboard)
+
 - [ ] Files shared count + total size
 - [ ] Files downloaded count + total size
 - [ ] Total bytes uploaded
@@ -106,6 +120,7 @@
 - [ ] Active transfers overview (mini list)
 
 ### Search
+
 - [ ] Search form: text input + file-type dropdown (All, Audio, Video, Ebook, Document, …)
 - [ ] Trigger search on enter / button click
 - [ ] Results list: filename, size, file type, source count
@@ -113,6 +128,7 @@
 - [ ] Download button per result
 
 ### Chat
+
 - [ ] Split-pane layout
 - [ ] Left pane: online friends list + group chat / room list
 - [ ] Right pane: message thread (newest at bottom)
@@ -121,12 +137,14 @@
 - [ ] Messages persist for lifetime of the page (in-memory, not re-fetched)
 
 ### Friends
+
 - [ ] Friend list: name, avatar, friendship duration, shared file count, download/upload totals
 - [ ] Pending incoming requests with accept / reject actions
 - [ ] Add Friend form: name, address, port, optional password
 - [ ] Remove friend action (with confirmation)
 
 ### Transfers
+
 - [ ] Split-pane: uploads (top) + downloads (bottom)
 - [ ] Upload row: filename, progress bar, speed, time remaining, bytes transferred (auto-dismiss on completion)
 - [ ] Download row: filename, progress bar, speed, time remaining, bytes transferred, source count
@@ -136,6 +154,7 @@
 - [ ] Completed downloads locked (no cancel — script may have moved file)
 
 ### Settings
+
 - [ ] Profile details form
 - [ ] Shared folders: add / remove paths
 - [ ] Download folder picker
@@ -149,8 +168,8 @@
 
 ## Infrastructure
 
-- [ ] Pre-commit hooks: lint + format check (Prettier / ESLint)
-- [ ] GitHub Actions: run tests on push / PR
+- [x] Pre-commit hooks: lint + format check (Prettier / ESLint via lint-staged + husky)
+- [x] GitHub Actions: run tests on push / PR
 - [ ] GitHub Actions: release workflow (bump version, tag `v#.#.#`, publish)
 - [ ] Playwright frontend tests
 - [ ] Improve backend test coverage as features are added

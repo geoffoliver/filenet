@@ -1,8 +1,7 @@
+import type { PrismaClient } from '@prisma/client';
 import type { ServerWebSocket } from 'bun';
 
-import type {
-  HelloAckMessage, HelloMessage, InnerMessage, 
-} from './types';
+import type { FriendRequestMessage, HelloAckMessage, HelloMessage, InnerMessage } from './types';
 import {
   createHelloAck,
   decodeMessage,
@@ -13,15 +12,27 @@ import {
   generateEphemeralKeypair,
 } from './handshake';
 import type { Identity } from './identity';
+import { handleInboundFriendRequest } from './connections';
 
 type PeerState =
   | { phase: 'pending' }
-  | { phase: 'hello-sent'; hello: HelloMessage; ephemeral: ReturnType<typeof generateEphemeralKeypair> }
-  | { phase: 'ack-sent'; hello: HelloMessage; ack: HelloAckMessage; ephemeral: ReturnType<typeof generateEphemeralKeypair> }
+  | {
+      phase: 'hello-sent';
+      hello: HelloMessage;
+      ephemeral: ReturnType<typeof generateEphemeralKeypair>;
+    }
+  | {
+      phase: 'ack-sent';
+      hello: HelloMessage;
+      ack: HelloAckMessage;
+      ephemeral: ReturnType<typeof generateEphemeralKeypair>;
+    }
   | { phase: 'authenticated'; sessionKey: Buffer; peerNodeId: string; peerPublicKey: Buffer };
 
 export type PeerData = {
   identity: Identity;
+  prisma: PrismaClient;
+  localPort: number;
   state: PeerState;
 };
 
@@ -40,7 +51,10 @@ export function handleMessage(
   if (wire.type === 'hello') {
     const { ack, ephemeral } = createHelloAck(identity, wire);
     ws.data.state = {
-      phase: 'ack-sent', hello: wire, ack, ephemeral,
+      phase: 'ack-sent',
+      hello: wire,
+      ack,
+      ephemeral,
     };
     ws.send(encodeMessage(ack));
     return;
@@ -48,7 +62,6 @@ export function handleMessage(
 
   if (wire.type === 'hello-ack') {
     if (ws.data.state.phase !== 'hello-sent') return;
-    // Initiator side: handled by the connect() function (not yet implemented)
     return;
   }
 
@@ -80,11 +93,33 @@ export function handleMessage(
     if (state.phase === 'authenticated') {
       try {
         const msg = decryptMessage(wire, state.sessionKey);
+        dispatchMessage(ws, msg).catch(() => ws.close(1011, 'Internal error'));
         onAuthenticated?.(ws, msg);
       } catch {
         ws.close(1008, 'Decryption failed');
       }
     }
+  }
+}
+
+async function dispatchMessage(ws: ServerWebSocket<PeerData>, msg: InnerMessage): Promise<void> {
+  const state = ws.data.state;
+  if (state.phase !== 'authenticated') return;
+
+  if (msg.type === 'friend-request') {
+    const remoteAddress = ws.remoteAddress;
+    await handleInboundFriendRequest(
+      ws.data.identity,
+      ws.data.prisma,
+      msg as FriendRequestMessage,
+      {
+        nodeId: state.peerNodeId,
+        publicKey: state.peerPublicKey,
+        address: remoteAddress,
+        port: msg.port,
+      },
+      (response) => sendEncrypted(ws, response),
+    );
   }
 }
 

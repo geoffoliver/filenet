@@ -6,9 +6,7 @@ import {
   sign,
   verify,
 } from '../crypto';
-import {
-  describe, expect, it, 
-} from 'bun:test';
+import { describe, expect, it } from 'bun:test';
 import { generateIdentity } from '../identity';
 
 describe('sign / verify', () => {

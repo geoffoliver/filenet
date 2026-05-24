@@ -2,14 +2,18 @@ import crypto from 'crypto';
 
 export function sign(data: Buffer, privateKeyDer: Buffer): Buffer {
   const key = crypto.createPrivateKey({
-    key: privateKeyDer, format: 'der', type: 'pkcs8', 
+    key: privateKeyDer,
+    format: 'der',
+    type: 'pkcs8',
   });
   return crypto.sign(null, data, key);
 }
 
 export function verify(data: Buffer, signature: Buffer, publicKeyDer: Buffer): boolean {
   const key = crypto.createPublicKey({
-    key: publicKeyDer, format: 'der', type: 'spki', 
+    key: publicKeyDer,
+    format: 'der',
+    type: 'spki',
   });
   return crypto.verify(null, data, key, signature);
 }
@@ -28,10 +32,14 @@ export function deriveSessionKey(
   salt: Buffer,
 ): Buffer {
   const myKey = crypto.createPrivateKey({
-    key: myEphemeralPrivateDer, format: 'der', type: 'pkcs8', 
+    key: myEphemeralPrivateDer,
+    format: 'der',
+    type: 'pkcs8',
   });
   const theirKey = crypto.createPublicKey({
-    key: theirEphemeralPublicDer, format: 'der', type: 'spki', 
+    key: theirEphemeralPublicDer,
+    format: 'der',
+    type: 'spki',
   });
   const sharedSecret = crypto.diffieHellman({ privateKey: myKey, publicKey: theirKey });
   return Buffer.from(crypto.hkdfSync('sha256', sharedSecret, salt, Buffer.alloc(0), 32));

@@ -6,9 +6,7 @@ import {
   finalizeHandshake,
   processHelloAck,
 } from '../handshake';
-import {
-  describe, expect, it, 
-} from 'bun:test';
+import { describe, expect, it } from 'bun:test';
 import { generateEphemeralKeypair, verify } from '../crypto';
 import { generateIdentity } from '../identity';
 
@@ -36,7 +34,7 @@ describe('createHello', () => {
 });
 
 describe('createHelloAck', () => {
-  it('signs both nonces with the receiver\'s identity key', () => {
+  it("signs both nonces with the receiver's identity key", () => {
     const initiator = generateIdentity();
     const receiver = generateIdentity();
     const initEph = generateEphemeralKeypair();
@@ -52,9 +50,7 @@ describe('createHelloAck', () => {
       Buffer.from(hello.nonce, 'base64'),
       Buffer.from(ack.nonce, 'base64'),
     ]);
-    expect(
-      verify(sigData, Buffer.from(ack.signature, 'base64'), receiver.publicKey),
-    ).toBe(true);
+    expect(verify(sigData, Buffer.from(ack.signature, 'base64'), receiver.publicKey)).toBe(true);
   });
 });
 
@@ -67,12 +63,7 @@ describe('full handshake', () => {
     const hello = createHello(alice, aliceEph);
     const { ack, ephemeral: bobEph } = createHelloAck(bob, hello);
 
-    const { sessionKey: aliceKey, ready } = processHelloAck(
-      alice,
-      aliceEph,
-      hello,
-      ack,
-    );
+    const { sessionKey: aliceKey, ready } = processHelloAck(alice, aliceEph, hello, ack);
 
     const bobKey = finalizeHandshake(bob, bobEph, hello, ack, alice.publicKey, ready);
 
@@ -103,9 +94,7 @@ describe('full handshake', () => {
     const { ack, ephemeral: bobEph } = createHelloAck(bob, hello);
     const { ready } = processHelloAck(alice, aliceEph, hello, ack);
 
-    expect(() =>
-      finalizeHandshake(bob, bobEph, hello, ack, eve.publicKey, ready),
-    ).toThrow();
+    expect(() => finalizeHandshake(bob, bobEph, hello, ack, eve.publicKey, ready)).toThrow();
   });
 });
 

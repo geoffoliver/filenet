@@ -1,6 +1,4 @@
-import {
-  afterAll, beforeAll, beforeEach, describe, expect, it,
-} from 'bun:test';
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'bun:test';
 import {
   deriveNodeId,
   generateIdentity,
@@ -23,7 +21,9 @@ beforeAll(() => {
 
 afterAll(async () => {
   await prisma.$disconnect();
-  try { unlinkSync('./data/test-identity.db'); } catch {}
+  try {
+    unlinkSync('./data/test-identity.db');
+  } catch {}
 });
 
 beforeEach(async () => {

@@ -39,12 +39,14 @@ export type PongMessage = {
 export type FriendRequestMessage = {
   type: 'friend-request';
   name: string;
+  port: number;
   password?: string;
 };
 
 export type FriendResponseMessage = {
   type: 'friend-response';
   accepted: boolean;
+  name?: string;
 };
 
 export type InnerMessage =
