@@ -153,7 +153,7 @@ describe('indexFile', () => {
     expect(record.path).toBe(path);
     expect(record.filename).toBe('index-new.txt');
     expect(record.sha256).toHaveLength(64);
-    expect(record.size).toBeGreaterThan(0);
+    expect(record.size).toBeGreaterThan(0n);
     const count = await prisma.sharedFile.count();
     expect(count).toBe(1);
   });
@@ -163,7 +163,7 @@ describe('indexFile', () => {
     const path = join(tmpDir, 'index-size.txt');
     await writeFile(path, content);
     const record = await indexFile(prisma, path);
-    expect(record.size).toBe(Buffer.byteLength(content));
+    expect(record.size).toBe(BigInt(Buffer.byteLength(content)));
   });
 
   it('returns the existing record without re-indexing when file is unchanged', async () => {

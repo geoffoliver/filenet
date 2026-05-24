@@ -25,6 +25,10 @@ import type { Identity } from './identity';
 import { scanAndIndex } from './indexer';
 import { searchFiles } from './search';
 
+function jsonStringify(data: unknown): string {
+  return JSON.stringify(data, (_, v) => (typeof v === 'bigint' ? Number(v) : v));
+}
+
 export type ConnectPeerFn = (
   address: string,
   port: number,
@@ -153,7 +157,9 @@ export function createManagementFetch(deps: ManagementDeps): (req: Request) => P
         }
         const { q, type, limit, offset } = result.data;
         const searchResult = await searchFiles(prisma, { query: q, type, limit, offset });
-        return Response.json(searchResult);
+        return new Response(jsonStringify(searchResult), {
+          headers: { 'Content-Type': 'application/json' },
+        });
       }
 
       if (url.pathname === '/api/rescan' && req.method === 'POST') {

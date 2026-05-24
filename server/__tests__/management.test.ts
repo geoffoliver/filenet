@@ -397,7 +397,7 @@ describe('GET /api/search', () => {
         {
           path: '/music/song.mp3',
           filename: 'song.mp3',
-          size: 1000,
+          size: 1000n,
           sha256: 'a'.repeat(64),
           mimeType: 'audio/mpeg',
           metadata: null,
@@ -405,7 +405,7 @@ describe('GET /api/search', () => {
         {
           path: '/docs/readme.txt',
           filename: 'readme.txt',
-          size: 500,
+          size: 500n,
           sha256: 'b'.repeat(64),
           mimeType: 'text/plain',
           metadata: null,

@@ -51,7 +51,7 @@ model SharedFile {
   id             String    @id @default(cuid())
   path           String    @unique
   filename       String
-  size           Int
+  size           BigInt
   sha256         String
   mimeType       String?
   metadata       String?

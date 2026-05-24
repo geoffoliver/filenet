@@ -24,6 +24,8 @@ export async function searchFiles(
   const conditions: Prisma.SharedFileWhereInput[] = [];
 
   if (query) {
+    // SQLite LIKE '%q%' is case-insensitive for ASCII but prevents index use.
+    // For large collections, migrate to SQLite FTS5 via a virtual table.
     conditions.push({
       OR: [{ filename: { contains: query } }, { metadata: { contains: query } }],
     });

@@ -28,7 +28,7 @@ beforeEach(async () => {
       {
         path: '/music/hey_jude.mp3',
         filename: 'hey_jude.mp3',
-        size: 5000,
+        size: 5000n,
         sha256: 'a'.repeat(64),
         mimeType: 'audio/mpeg',
         metadata: JSON.stringify({ title: 'Hey Jude', artist: 'The Beatles', album: 'Let It Be' }),
@@ -36,7 +36,7 @@ beforeEach(async () => {
       {
         path: '/music/bohemian.flac',
         filename: 'bohemian.flac',
-        size: 8000,
+        size: 8000n,
         sha256: 'b'.repeat(64),
         mimeType: 'audio/flac',
         metadata: null,
@@ -44,7 +44,7 @@ beforeEach(async () => {
       {
         path: '/videos/movie.mp4',
         filename: 'movie.mp4',
-        size: 100000,
+        size: 100000n,
         sha256: 'c'.repeat(64),
         mimeType: 'video/mp4',
         metadata: null,
@@ -52,7 +52,7 @@ beforeEach(async () => {
       {
         path: '/docs/readme.txt',
         filename: 'readme.txt',
-        size: 500,
+        size: 500n,
         sha256: 'd'.repeat(64),
         mimeType: 'text/plain',
         metadata: null,
@@ -60,7 +60,7 @@ beforeEach(async () => {
       {
         path: '/docs/report.pdf',
         filename: 'report.pdf',
-        size: 2000,
+        size: 2000n,
         sha256: 'e'.repeat(64),
         mimeType: 'application/pdf',
         metadata: null,
@@ -68,7 +68,7 @@ beforeEach(async () => {
       {
         path: '/images/photo.jpg',
         filename: 'photo.jpg',
-        size: 300,
+        size: 300n,
         sha256: 'f'.repeat(64),
         mimeType: 'image/jpeg',
         metadata: null,
@@ -76,7 +76,7 @@ beforeEach(async () => {
       {
         path: '/ebooks/novel.epub',
         filename: 'novel.epub',
-        size: 1500,
+        size: 1500n,
         sha256: 'g'.repeat(64),
         mimeType: 'application/epub+zip',
         metadata: null,
