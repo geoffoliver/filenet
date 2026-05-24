@@ -7,6 +7,7 @@ import {
   removeFriend,
 } from './friends';
 import {
+  closeAndUnregisterPeer,
   connectToPeer,
   getConnectedPeer,
   notifyFriendAccepted,
@@ -99,6 +100,7 @@ Bun.serve({
             if (friend.nodeId) {
               const peer = getConnectedPeer(friend.nodeId);
               if (peer) notifyFriendRejected(peer);
+              closeAndUnregisterPeer(friend.nodeId);
             }
             return new Response(null, { status: 204 });
           }
@@ -206,7 +208,10 @@ Bun.serve<PeerData>({
     },
     close(ws) {
       const state = ws.data.state;
-      if (state.phase === 'authenticated') unregisterPeer(state.peerNodeId);
+      if (state.phase === 'authenticated') {
+        const current = getConnectedPeer(state.peerNodeId);
+        if (current && (current.ws as unknown) === ws) unregisterPeer(state.peerNodeId);
+      }
     },
   },
 });

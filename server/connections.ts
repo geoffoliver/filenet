@@ -15,7 +15,7 @@ import type { Identity } from './identity';
 import { getOrCreateSettings } from './config';
 
 export type ConnectedPeer = {
-  ws: { send(data: string | Uint8Array): unknown };
+  ws: { send(data: string | Uint8Array): unknown; close(): void };
   sessionKey: Buffer;
   peerNodeId: string;
   peerPublicKey: Buffer;
@@ -45,6 +45,8 @@ export function registerPeer(
   address: string,
   port: number,
 ): ConnectedPeer {
+  const existing = peers.get(peerNodeId);
+  if (existing) existing.ws.close();
   const peer: ConnectedPeer = { ws, sessionKey, peerNodeId, peerPublicKey, address, port };
   peers.set(peerNodeId, peer);
   return peer;
@@ -52,6 +54,14 @@ export function registerPeer(
 
 export function unregisterPeer(nodeId: string): void {
   peers.delete(nodeId);
+}
+
+export function closeAndUnregisterPeer(nodeId: string): void {
+  const peer = peers.get(nodeId);
+  if (peer) {
+    peers.delete(nodeId);
+    peer.ws.close();
+  }
 }
 
 export function updatePeerPort(nodeId: string, port: number): void {
@@ -107,15 +117,14 @@ export async function connectToPeer(
 
           ws.send(encodeMessage({ type: 'encrypted', payload: ready.toString('base64') }));
 
-          const peer: ConnectedPeer = {
+          const peer = registerPeer(
             ws,
-            sessionKey: sk,
-            peerNodeId: wire.nodeId,
-            peerPublicKey: Buffer.from(wire.publicKey, 'base64'),
+            sk,
+            wire.nodeId,
+            Buffer.from(wire.publicKey, 'base64'),
             address,
             port,
-          };
-          peers.set(wire.nodeId, peer);
+          );
 
           if (friendRequest) {
             const msg: FriendRequestMessage = {
@@ -147,7 +156,10 @@ export async function connectToPeer(
 
     ws.onerror = (err) => reject(err);
     ws.onclose = (event) => {
-      if (peerNodeId) peers.delete(peerNodeId);
+      if (peerNodeId) {
+        const current = peers.get(peerNodeId);
+        if (current && (current.ws as unknown) === ws) peers.delete(peerNodeId);
+      }
       if (!sessionKey) reject(new Error(`Connection closed before handshake: ${event.reason}`));
     };
   });
@@ -178,6 +190,7 @@ async function handleOutboundMessage(
       });
     } else {
       await prisma.friend.delete({ where: { id: existing.id } });
+      closeAndUnregisterPeer(peer.nodeId);
     }
   }
 }

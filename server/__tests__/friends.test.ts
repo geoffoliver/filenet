@@ -283,6 +283,11 @@ describe('shouldAutoAccept', () => {
     expect(result).toBe(true);
   });
 
+  it('returns true when invitePassword is empty string and empty string provided', async () => {
+    const settings = await updateSettings(prisma, { invitePassword: '' });
+    expect(shouldAutoAccept(settings, '')).toBe(true);
+  });
+
   it('returns false when wrong invite password provided', async () => {
     const settings = await updateSettings(prisma, { invitePassword: 'open-sesame' });
     const result = await shouldAutoAccept(settings, 'wrong-password');

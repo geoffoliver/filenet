@@ -110,6 +110,6 @@ export function shouldAutoAccept(
   providedPassword: string | undefined,
 ): boolean {
   if (settings.autoAcceptFromAnyone) return true;
-  if (settings.invitePassword && providedPassword === settings.invitePassword) return true;
+  if (settings.invitePassword !== null && providedPassword === settings.invitePassword) return true;
   return false;
 }

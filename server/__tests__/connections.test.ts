@@ -4,15 +4,7 @@ import { execSync } from 'child_process';
 import { unlinkSync } from 'fs';
 
 import {
-  createHello,
-  createHelloAck as createHelloAck_forTest,
-  decodeMessage,
-  decryptMessage,
-  encodeMessage,
-  generateEphemeralKeypair,
-  processHelloAck,
-} from '../handshake';
-import {
+  closeAndUnregisterPeer,
   getConnectedPeer,
   handleInboundFriendRequest,
   notifyFriendAccepted,
@@ -21,6 +13,15 @@ import {
   unregisterPeer,
   updatePeerPort,
 } from '../connections';
+import {
+  createHello,
+  createHelloAck as createHelloAck_forTest,
+  decodeMessage,
+  decryptMessage,
+  encodeMessage,
+  generateEphemeralKeypair,
+  processHelloAck,
+} from '../handshake';
 import { getOrCreateSettings, updateSettings } from '../config';
 import { createPrismaClient } from '../db';
 import { generateIdentity } from '../identity';
@@ -126,6 +127,35 @@ describe('full two-party handshake via handleMessage', () => {
     expect(found?.sessionKey.toString('hex')).toBe(sessionKey.toString('hex'));
 
     unregisterPeer(peer1.nodeId);
+    expect(getConnectedPeer(peer1.nodeId)).toBeUndefined();
+  });
+
+  it('registerPeer closes the old socket when a peer reconnects with the same nodeId', () => {
+    const peer1 = generateIdentity();
+    const sessionKey = Buffer.alloc(32, 0xab);
+    const closeCalls: string[] = [];
+    const oldWs = { send: (_m: string) => {}, close: () => closeCalls.push('old') } as any;
+    const newWs = { send: (_m: string) => {}, close: () => closeCalls.push('new') } as any;
+
+    registerPeer(oldWs, sessionKey, peer1.nodeId, peer1.publicKey, '10.0.0.2', 7734);
+    registerPeer(newWs, sessionKey, peer1.nodeId, peer1.publicKey, '10.0.0.2', 7734);
+
+    expect(closeCalls).toEqual(['old']);
+    expect(getConnectedPeer(peer1.nodeId)?.ws).toBe(newWs);
+
+    unregisterPeer(peer1.nodeId);
+  });
+
+  it('closeAndUnregisterPeer closes the socket and removes it from the registry', () => {
+    const peer1 = generateIdentity();
+    const sessionKey = Buffer.alloc(32, 0xcd);
+    const closed: boolean[] = [];
+    const fakeWs = { send: (_m: string) => {}, close: () => closed.push(true) } as any;
+
+    registerPeer(fakeWs, sessionKey, peer1.nodeId, peer1.publicKey, '10.0.0.4', 7734);
+    closeAndUnregisterPeer(peer1.nodeId);
+
+    expect(closed.length).toBe(1);
     expect(getConnectedPeer(peer1.nodeId)).toBeUndefined();
   });
 
