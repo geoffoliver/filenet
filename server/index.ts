@@ -120,6 +120,27 @@ Bun.serve({
           if (unknown.length > 0) {
             return new Response(`Unknown fields: ${unknown.join(', ')}`, { status: 400 });
           }
+          if ('name' in body && typeof body.name !== 'string') {
+            return new Response('name must be a string', { status: 400 });
+          }
+          if (
+            'invitePassword' in body &&
+            body.invitePassword !== null &&
+            typeof body.invitePassword !== 'string'
+          ) {
+            return new Response('invitePassword must be a string or null', { status: 400 });
+          }
+          if ('autoAcceptFromAnyone' in body && typeof body.autoAcceptFromAnyone !== 'boolean') {
+            return new Response('autoAcceptFromAnyone must be a boolean', { status: 400 });
+          }
+          if (
+            'autoAcceptFromFriendsOfFriends' in body &&
+            typeof body.autoAcceptFromFriendsOfFriends !== 'boolean'
+          ) {
+            return new Response('autoAcceptFromFriendsOfFriends must be a boolean', {
+              status: 400,
+            });
+          }
           const updated = await updateSettings(prisma, body as any);
           return Response.json(sanitizeSettings(updated));
         }

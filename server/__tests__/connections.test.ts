@@ -19,6 +19,7 @@ import {
   notifyFriendRejected,
   registerPeer,
   unregisterPeer,
+  updatePeerPort,
 } from '../connections';
 import { getOrCreateSettings, updateSettings } from '../config';
 import { createPrismaClient } from '../db';
@@ -55,7 +56,7 @@ describe('initiator handshake side (processHelloAck)', () => {
     const hello = createHello(initiator, initiatorEph);
 
     // Simulate responder generating hello-ack
-    const { ack } = createHelloAck_forTest(responder, hello, initiatorEph);
+    const { ack } = createHelloAck_forTest(responder, hello);
 
     const { sessionKey, ready } = processHelloAck(initiator, initiatorEph, hello, ack);
     expect(sessionKey).toBeInstanceOf(Buffer);
@@ -70,7 +71,7 @@ describe('initiator handshake side (processHelloAck)', () => {
     const initiatorEph = generateEphemeralKeypair();
 
     const hello = createHello(initiator, initiatorEph);
-    const { ack } = createHelloAck_forTest(attacker, hello, initiatorEph);
+    const { ack } = createHelloAck_forTest(attacker, hello);
 
     // Swap in initiator's public key to fake identity (attacker signed with wrong key)
     const tamperedAck = { ...ack, publicKey: initiator.publicKey.toString('base64') };
@@ -126,6 +127,20 @@ describe('full two-party handshake via handleMessage', () => {
 
     unregisterPeer(peer1.nodeId);
     expect(getConnectedPeer(peer1.nodeId)).toBeUndefined();
+  });
+
+  it('updatePeerPort corrects the port after a friend-request reveals the listening port', () => {
+    const peer1 = generateIdentity();
+    const sessionKey = Buffer.alloc(32, 0xcd);
+    const fakeWs = { send: (_m: string) => {} } as any;
+
+    registerPeer(fakeWs, sessionKey, peer1.nodeId, peer1.publicKey, '10.0.0.3', 0);
+    expect(getConnectedPeer(peer1.nodeId)?.port).toBe(0);
+
+    updatePeerPort(peer1.nodeId, 7734);
+    expect(getConnectedPeer(peer1.nodeId)?.port).toBe(7734);
+
+    unregisterPeer(peer1.nodeId);
   });
 });
 

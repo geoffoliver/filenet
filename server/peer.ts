@@ -11,7 +11,7 @@ import {
   finalizeHandshake,
   generateEphemeralKeypair,
 } from './handshake';
-import { handleInboundFriendRequest, registerPeer } from './connections';
+import { handleInboundFriendRequest, registerPeer, updatePeerPort } from './connections';
 import type { Identity } from './identity';
 
 type PeerState =
@@ -85,14 +85,8 @@ export function handleMessage(
           peerNodeId: state.hello.nodeId,
           peerPublicKey,
         };
-        registerPeer(
-          ws,
-          sessionKey,
-          state.hello.nodeId,
-          peerPublicKey,
-          ws.remoteAddress,
-          ws.data.localPort,
-        );
+        // Port is unknown for inbound connections until a friend-request arrives.
+        registerPeer(ws, sessionKey, state.hello.nodeId, peerPublicKey, ws.remoteAddress, 0);
       } catch {
         ws.close(1008, 'Handshake failed');
       }
@@ -117,6 +111,7 @@ async function dispatchMessage(ws: ServerWebSocket<PeerData>, msg: InnerMessage)
 
   if (msg.type === 'friend-request') {
     const remoteAddress = ws.remoteAddress;
+    updatePeerPort(state.peerNodeId, msg.port);
     await handleInboundFriendRequest(
       ws.data.identity,
       ws.data.prisma,

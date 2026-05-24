@@ -54,6 +54,11 @@ export function unregisterPeer(nodeId: string): void {
   peers.delete(nodeId);
 }
 
+export function updatePeerPort(nodeId: string, port: number): void {
+  const peer = peers.get(nodeId);
+  if (peer) peer.port = port;
+}
+
 export function getConnectedPeer(nodeId: string): ConnectedPeer | undefined {
   return peers.get(nodeId);
 }
