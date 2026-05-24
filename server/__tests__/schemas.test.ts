@@ -126,6 +126,21 @@ describe('PatchSettingsBodySchema', () => {
     expect(PatchSettingsBodySchema.safeParse(null).success).toBe(false);
     expect(PatchSettingsBodySchema.safeParse([]).success).toBe(false);
   });
+
+  it('trims whitespace from name', () => {
+    const r = PatchSettingsBodySchema.safeParse({ name: '  My Node  ' });
+    expect(r.success).toBe(true);
+    if (!r.success) return;
+    expect(r.data.name).toBe('My Node');
+  });
+
+  it('rejects name longer than 200 characters', () => {
+    expect(PatchSettingsBodySchema.safeParse({ name: 'a'.repeat(201) }).success).toBe(false);
+  });
+
+  it('accepts name at exactly 200 characters', () => {
+    expect(PatchSettingsBodySchema.safeParse({ name: 'a'.repeat(200) }).success).toBe(true);
+  });
 });
 
 describe('FriendRequestMessageSchema', () => {

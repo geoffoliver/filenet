@@ -37,7 +37,7 @@ enum FriendStatus {
 }
 
 model Settings {
-  id                          String  @id @default(cuid())
+  id                          String  @id @default("singleton")
   name                        String  @default("")
   invitePassword              String?
   autoAcceptFromAnyone        Boolean @default(false)

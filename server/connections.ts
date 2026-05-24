@@ -25,10 +25,11 @@ export type ConnectedPeer = {
 };
 
 export function notifyFriendAccepted(peer: ConnectedPeer, localName: string | null): void {
+  const name = localName?.trim().slice(0, 200) || undefined;
   sendToPeer(peer, {
     type: 'friend-response',
     accepted: true,
-    ...(localName ? { name: localName } : {}),
+    ...(name ? { name } : {}),
   });
 }
 
@@ -128,8 +129,9 @@ export async function connectToPeer(
             port,
           );
 
+          // Mark handshake done immediately so onclose won't spuriously reject
+          // if the socket closes while we're doing the DB write below.
           handshakeDone = true;
-          resolve(peer);
 
           await prisma.friend.updateMany({
             where: { address, port, nodeId: null, status: 'OUTGOING_PENDING' },
@@ -145,6 +147,8 @@ export async function connectToPeer(
             };
             sendToPeer(peer, msg);
           }
+
+          resolve(peer);
           return;
         }
 
@@ -158,11 +162,10 @@ export async function connectToPeer(
           });
         }
       } catch (err) {
+        if (peerNodeId) closeAndUnregisterPeer(peerNodeId);
+        reject(err); // no-op if already resolved; handles pre- and mid-setup failures
         if (handshakeDone) {
-          console.error(`Error handling message from ${address}:${port}:`, err);
-          if (peerNodeId) closeAndUnregisterPeer(peerNodeId);
-        } else {
-          reject(err);
+          console.error(`Error from peer ${address}:${port}:`, err);
         }
       }
     };
@@ -234,11 +237,8 @@ export async function handleInboundFriendRequest(
 
   if (autoAccept) {
     await acceptFriendRequest(prisma, friend.id);
-    sendResponse({
-      type: 'friend-response',
-      accepted: true,
-      name: settings.name || undefined,
-    });
+    const name = settings.name.trim().slice(0, 200) || undefined;
+    sendResponse({ type: 'friend-response', accepted: true, name });
   }
   // No response when queued for manual review — the user will accept/reject via the UI.
 }

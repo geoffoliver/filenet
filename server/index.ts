@@ -1,15 +1,6 @@
-import { AddFriendBodySchema, FriendActionBodySchema, PatchSettingsBodySchema } from './schemas';
 import { type PeerData, handleMessage, handleOpen } from './peer';
-import { acceptFriendRequest, addOutgoingFriend, getFriends, rejectFriendRequest } from './friends';
-import {
-  closeAndUnregisterPeer,
-  connectToPeer,
-  getConnectedPeer,
-  notifyFriendAccepted,
-  notifyFriendRejected,
-  unregisterPeer,
-} from './connections';
-import { getOrCreateSettings, sanitizeSettings, updateSettings } from './config';
+import { connectToPeer, getConnectedPeer, unregisterPeer } from './connections';
+import { createManagementFetch } from './management';
 import { createPrismaClient } from './db';
 import { getOrCreateIdentity } from './identity';
 
@@ -31,130 +22,12 @@ console.log(`Mgmt port: ${MGMT_PORT} (localhost only)`);
 Bun.serve({
   port: MGMT_PORT,
   hostname: '127.0.0.1',
-  async fetch(req) {
-    const url = new URL(req.url);
-
-    try {
-      if (url.pathname === '/api/friends') {
-        if (req.method === 'GET') {
-          const friends = await getFriends(prisma);
-          return Response.json(friends);
-        }
-
-        if (req.method === 'POST') {
-          const result = AddFriendBodySchema.safeParse(await req.json());
-          if (!result.success) {
-            return new Response(result.error.issues[0].message, { status: 400 });
-          }
-          const { name, address, port, password } = result.data;
-          const friend = await addOutgoingFriend(prisma, { name, address, port });
-          const settings = await getOrCreateSettings(prisma);
-          connectToPeer(identity, prisma, address, port, PORT, {
-            name: settings.name || identity.nodeId,
-            password,
-          }).catch((err: unknown) => {
-            console.error(`Failed to connect to ${address}:${port}:`, err);
-          });
-          return Response.json(friend, { status: 201 });
-        }
-      }
-
-      if (url.pathname.startsWith('/api/friends/')) {
-        const id = url.pathname.slice('/api/friends/'.length);
-        if (!id || id.includes('/')) {
-          return new Response('Invalid friend id', { status: 400 });
-        }
-
-        if (req.method === 'PUT') {
-          const result = FriendActionBodySchema.safeParse(await req.json());
-          if (!result.success) {
-            return new Response(result.error.issues[0].message, { status: 400 });
-          }
-          const { action } = result.data;
-          if (action === 'accept') {
-            const pending = await prisma.friend.findUnique({ where: { id } });
-            if (!pending) return new Response(`Friend ${id} not found`, { status: 404 });
-            if (pending.status !== 'INCOMING_PENDING') {
-              return new Response(`Cannot accept a friend with status ${pending.status}`, {
-                status: 409,
-              });
-            }
-            const updated = await acceptFriendRequest(prisma, id);
-            const settings = await getOrCreateSettings(prisma);
-            const localName = settings.name || null;
-            if (updated.nodeId) {
-              const peer = getConnectedPeer(updated.nodeId);
-              if (peer) {
-                notifyFriendAccepted(peer, localName);
-              } else {
-                connectToPeer(identity, prisma, updated.address, updated.port, PORT)
-                  .then((p) => {
-                    notifyFriendAccepted(p, localName);
-                  })
-                  .catch((err: unknown) => {
-                    console.error(`Failed to dial back ${updated.address}:${updated.port}:`, err);
-                  });
-              }
-            }
-            return Response.json(updated);
-          }
-          if (action === 'reject') {
-            const friend = await prisma.friend.findUnique({ where: { id } });
-            if (!friend) return new Response(`Friend ${id} not found`, { status: 404 });
-            await rejectFriendRequest(prisma, id);
-            if (friend.nodeId) {
-              const peer = getConnectedPeer(friend.nodeId);
-              if (peer) notifyFriendRejected(peer);
-              closeAndUnregisterPeer(friend.nodeId);
-            }
-            return new Response(null, { status: 204 });
-          }
-        }
-
-        if (req.method === 'DELETE') {
-          const toDelete = await prisma.friend.findUnique({ where: { id } });
-          if (!toDelete) return new Response(`Friend ${id} not found`, { status: 404 });
-          if (toDelete.nodeId) closeAndUnregisterPeer(toDelete.nodeId);
-          await prisma.friend.delete({ where: { id } });
-          return new Response(null, { status: 204 });
-        }
-      }
-
-      if (url.pathname === '/api/settings') {
-        if (req.method === 'GET') {
-          const settings = await getOrCreateSettings(prisma);
-          return Response.json(sanitizeSettings(settings));
-        }
-
-        if (req.method === 'PATCH') {
-          const result = PatchSettingsBodySchema.safeParse(await req.json());
-          if (!result.success) {
-            return new Response(result.error.issues[0].message, { status: 400 });
-          }
-          const updated = await updateSettings(prisma, result.data);
-          return Response.json(sanitizeSettings(updated));
-        }
-      }
-
-      return new Response('Not Found', { status: 404 });
-    } catch (err: unknown) {
-      const isDuplicate = err instanceof Error && err.message.startsWith('Already have a friend');
-      if (isDuplicate) return new Response((err as Error).message, { status: 409 });
-
-      const isConflict =
-        err instanceof Error &&
-        (err.message.startsWith('Cannot reject') || err.message.startsWith('Cannot accept'));
-      if (isConflict) return new Response((err as Error).message, { status: 409 });
-
-      const isNotFound = err instanceof Error && err.message.includes('not found');
-      if (isNotFound) return new Response((err as Error).message, { status: 404 });
-
-      if (err instanceof SyntaxError) return new Response('Invalid JSON body', { status: 400 });
-
-      console.error('Management API error:', err);
-      return new Response('Internal Server Error', { status: 500 });
-    }
-  },
+  fetch: createManagementFetch({
+    identity,
+    prisma,
+    connectPeer: (address, port, friendRequest) =>
+      connectToPeer(identity, prisma, address, port, PORT, friendRequest),
+  }),
 });
 
 // P2P server — public, WebSocket + pubkey endpoint only

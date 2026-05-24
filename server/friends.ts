@@ -1,5 +1,7 @@
 import type { Friend, FriendStatus, PrismaClient, Settings } from '@prisma/client';
 
+import { ConflictError, NotFoundError } from './errors';
+
 export type AddOutgoingFriendParams = {
   name: string;
   address: string;
@@ -21,7 +23,8 @@ export async function addOutgoingFriend(
   const existing = await prisma.friend.findFirst({
     where: { address: params.address, port: params.port },
   });
-  if (existing) throw new Error(`Already have a friend at ${params.address}:${params.port}`);
+  if (existing)
+    throw new ConflictError(`Already have a friend at ${params.address}:${params.port}`);
   try {
     return await prisma.friend.create({
       data: {
@@ -33,7 +36,7 @@ export async function addOutgoingFriend(
     });
   } catch (err) {
     if (err instanceof Error && 'code' in err && (err as { code: string }).code === 'P2002') {
-      throw new Error(`Already have a friend at ${params.address}:${params.port}`);
+      throw new ConflictError(`Already have a friend at ${params.address}:${params.port}`);
     }
     throw err;
   }
@@ -88,9 +91,9 @@ export async function handleIncomingFriendRequest(
 
 export async function acceptFriendRequest(prisma: PrismaClient, friendId: string): Promise<Friend> {
   const friend = await prisma.friend.findUnique({ where: { id: friendId } });
-  if (!friend) throw new Error(`Friend ${friendId} not found`);
+  if (!friend) throw new NotFoundError(`Friend ${friendId} not found`);
   if (friend.status === 'ACCEPTED') return friend;
-  if (friend.status === 'BLOCKED') throw new Error(`Cannot accept a BLOCKED friend`);
+  if (friend.status === 'BLOCKED') throw new ConflictError(`Cannot accept a BLOCKED friend`);
   return prisma.friend.update({
     where: { id: friendId },
     data: {
@@ -102,16 +105,16 @@ export async function acceptFriendRequest(prisma: PrismaClient, friendId: string
 
 export async function rejectFriendRequest(prisma: PrismaClient, friendId: string): Promise<void> {
   const friend = await prisma.friend.findUnique({ where: { id: friendId } });
-  if (!friend) throw new Error(`Friend ${friendId} not found`);
+  if (!friend) throw new NotFoundError(`Friend ${friendId} not found`);
   if (friend.status !== 'INCOMING_PENDING' && friend.status !== 'OUTGOING_PENDING') {
-    throw new Error(`Cannot reject a friend with status ${friend.status}`);
+    throw new ConflictError(`Cannot reject a friend with status ${friend.status}`);
   }
   await prisma.friend.delete({ where: { id: friendId } });
 }
 
 export async function removeFriend(prisma: PrismaClient, friendId: string): Promise<void> {
   const friend = await prisma.friend.findUnique({ where: { id: friendId } });
-  if (!friend) throw new Error(`Friend ${friendId} not found`);
+  if (!friend) throw new NotFoundError(`Friend ${friendId} not found`);
   await prisma.friend.delete({ where: { id: friendId } });
 }
 

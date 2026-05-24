@@ -20,7 +20,7 @@ export const FriendActionBodySchema = z.object({
 
 export const PatchSettingsBodySchema = z
   .object({
-    name: z.string().optional(),
+    name: z.string().trim().max(200).optional(),
     invitePassword: z.string().nullable().optional(),
     autoAcceptFromAnyone: z.boolean().optional(),
     autoAcceptFromFriendsOfFriends: z.boolean().optional(),
