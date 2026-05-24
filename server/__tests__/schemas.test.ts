@@ -6,6 +6,7 @@ import {
   FriendRequestMessageSchema,
   FriendResponseMessageSchema,
   PatchSettingsBodySchema,
+  SearchQuerySchema,
 } from '../schemas';
 
 describe('AddFriendBodySchema', () => {
@@ -204,6 +205,58 @@ describe('PatchSettingsBodySchema', () => {
 
   it('rejects non-integer rescanIntervalMinutes', () => {
     expect(PatchSettingsBodySchema.safeParse({ rescanIntervalMinutes: 1.5 }).success).toBe(false);
+  });
+});
+
+describe('SearchQuerySchema', () => {
+  it('defaults q to empty string, type to all, limit to 50, offset to 0', () => {
+    const r = SearchQuerySchema.safeParse({});
+    expect(r.success).toBe(true);
+    if (!r.success) return;
+    expect(r.data.q).toBe('');
+    expect(r.data.type).toBe('all');
+    expect(r.data.limit).toBe(50);
+    expect(r.data.offset).toBe(0);
+  });
+
+  it('accepts all valid type values', () => {
+    for (const type of ['all', 'audio', 'video', 'image', 'document', 'ebook']) {
+      expect(SearchQuerySchema.safeParse({ type }).success).toBe(true);
+    }
+  });
+
+  it('rejects invalid type', () => {
+    expect(SearchQuerySchema.safeParse({ type: 'unknown' }).success).toBe(false);
+  });
+
+  it('coerces string limit to integer', () => {
+    const r = SearchQuerySchema.safeParse({ limit: '20' });
+    expect(r.success).toBe(true);
+    if (!r.success) return;
+    expect(r.data.limit).toBe(20);
+  });
+
+  it('coerces string offset to integer', () => {
+    const r = SearchQuerySchema.safeParse({ offset: '5' });
+    expect(r.success).toBe(true);
+    if (!r.success) return;
+    expect(r.data.offset).toBe(5);
+  });
+
+  it('rejects limit of 0', () => {
+    expect(SearchQuerySchema.safeParse({ limit: '0' }).success).toBe(false);
+  });
+
+  it('rejects limit above 200', () => {
+    expect(SearchQuerySchema.safeParse({ limit: '201' }).success).toBe(false);
+  });
+
+  it('rejects negative offset', () => {
+    expect(SearchQuerySchema.safeParse({ offset: '-1' }).success).toBe(false);
+  });
+
+  it('accepts limit of 200', () => {
+    expect(SearchQuerySchema.safeParse({ limit: '200' }).success).toBe(true);
   });
 });
 

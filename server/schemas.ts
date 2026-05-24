@@ -30,6 +30,15 @@ export const PatchSettingsBodySchema = z
   })
   .strict();
 
+const coerceInt = (v: unknown) => (v !== undefined && v !== '' ? Number(v) : undefined);
+
+export const SearchQuerySchema = z.object({
+  q: z.string().optional().default(''),
+  type: z.enum(['all', 'audio', 'video', 'image', 'document', 'ebook']).optional().default('all'),
+  limit: z.preprocess(coerceInt, z.int().min(1).max(200).optional().default(50)),
+  offset: z.preprocess(coerceInt, z.int().min(0).optional().default(0)),
+});
+
 // Protocol message schemas (untrusted peer input)
 
 export const FriendRequestMessageSchema = z.object({

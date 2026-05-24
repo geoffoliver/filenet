@@ -43,7 +43,7 @@
 
 ### Search
 
-- [ ] Local search (filename, file type, metadata fields)
+- [x] Local search (filename, file type, metadata fields)
 - [ ] Outbound search: fan out to all connected friends with a search ID + TTL
 - [ ] Inbound search: execute locally, forward to own friends (minus already-seen search IDs), return results directly to originating node
 - [ ] Search deduplication (track seen search IDs to prevent cycles)

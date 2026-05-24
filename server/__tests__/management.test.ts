@@ -387,6 +387,82 @@ describe('POST /api/rescan', () => {
 });
 
 // ---------------------------------------------------------------------------
+// GET /api/search
+// ---------------------------------------------------------------------------
+
+describe('GET /api/search', () => {
+  beforeEach(async () => {
+    await prisma.sharedFile.createMany({
+      data: [
+        {
+          path: '/music/song.mp3',
+          filename: 'song.mp3',
+          size: 1000,
+          sha256: 'a'.repeat(64),
+          mimeType: 'audio/mpeg',
+          metadata: null,
+        },
+        {
+          path: '/docs/readme.txt',
+          filename: 'readme.txt',
+          size: 500,
+          sha256: 'b'.repeat(64),
+          mimeType: 'text/plain',
+          metadata: null,
+        },
+      ],
+    });
+  });
+
+  it('returns all files with empty query', async () => {
+    const res = await makeHandler()(req('/api/search'));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.total).toBe(2);
+    expect(body.files).toHaveLength(2);
+  });
+
+  it('filters by query string', async () => {
+    const res = await makeHandler()(req('/api/search?q=song'));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.total).toBe(1);
+    expect(body.files[0].filename).toBe('song.mp3');
+  });
+
+  it('filters by type', async () => {
+    const res = await makeHandler()(req('/api/search?type=audio'));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.total).toBe(1);
+    expect(body.files[0].filename).toBe('song.mp3');
+  });
+
+  it('respects limit and offset', async () => {
+    const res = await makeHandler()(req('/api/search?limit=1&offset=1'));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.files).toHaveLength(1);
+    expect(body.total).toBe(2);
+  });
+
+  it('returns 400 for invalid type', async () => {
+    const res = await makeHandler()(req('/api/search?type=unknown'));
+    expect(res.status).toBe(400);
+  });
+
+  it('returns 400 for limit below 1', async () => {
+    const res = await makeHandler()(req('/api/search?limit=0'));
+    expect(res.status).toBe(400);
+  });
+
+  it('returns 400 for negative offset', async () => {
+    const res = await makeHandler()(req('/api/search?offset=-1'));
+    expect(res.status).toBe(400);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // 404 fallback
 // ---------------------------------------------------------------------------
 

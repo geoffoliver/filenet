@@ -1,6 +1,11 @@
 import type { PrismaClient } from '@prisma/client';
 
-import { AddFriendBodySchema, FriendActionBodySchema, PatchSettingsBodySchema } from './schemas';
+import {
+  AddFriendBodySchema,
+  FriendActionBodySchema,
+  PatchSettingsBodySchema,
+  SearchQuerySchema,
+} from './schemas';
 import { ConflictError, NotFoundError } from './errors';
 import {
   type ConnectedPeer,
@@ -18,6 +23,7 @@ import {
 } from './config';
 import type { Identity } from './identity';
 import { scanAndIndex } from './indexer';
+import { searchFiles } from './search';
 
 export type ConnectPeerFn = (
   address: string,
@@ -138,6 +144,16 @@ export function createManagementFetch(deps: ManagementDeps): (req: Request) => P
           const updated = await updateSettings(prisma, result.data);
           return Response.json(sanitizeSettings(updated));
         }
+      }
+
+      if (url.pathname === '/api/search' && req.method === 'GET') {
+        const result = SearchQuerySchema.safeParse(Object.fromEntries(url.searchParams));
+        if (!result.success) {
+          return new Response(result.error.issues[0].message, { status: 400 });
+        }
+        const { q, type, limit, offset } = result.data;
+        const searchResult = await searchFiles(prisma, { query: q, type, limit, offset });
+        return Response.json(searchResult);
       }
 
       if (url.pathname === '/api/rescan' && req.method === 'POST') {
