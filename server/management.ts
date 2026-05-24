@@ -10,8 +10,14 @@ import {
   notifyFriendRejected,
 } from './connections';
 import { acceptFriendRequest, addOutgoingFriend, getFriends, rejectFriendRequest } from './friends';
-import { getOrCreateSettings, sanitizeSettings, updateSettings } from './config';
+import {
+  getOrCreateSettings,
+  parseSharedFolders,
+  sanitizeSettings,
+  updateSettings,
+} from './config';
 import type { Identity } from './identity';
+import { scanAndIndex } from './indexer';
 
 export type ConnectPeerFn = (
   address: string,
@@ -132,6 +138,13 @@ export function createManagementFetch(deps: ManagementDeps): (req: Request) => P
           const updated = await updateSettings(prisma, result.data);
           return Response.json(sanitizeSettings(updated));
         }
+      }
+
+      if (url.pathname === '/api/rescan' && req.method === 'POST') {
+        const settings = await getOrCreateSettings(prisma);
+        const folders = parseSharedFolders(settings.sharedFolders);
+        const result = await scanAndIndex(prisma, folders);
+        return Response.json(result);
       }
 
       return new Response('Not Found', { status: 404 });

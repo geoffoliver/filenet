@@ -37,9 +37,24 @@ enum FriendStatus {
 }
 
 model Settings {
-  id                          String  @id @default("singleton")
-  name                        String  @default("")
-  invitePassword              String?
-  autoAcceptFromAnyone        Boolean @default(false)
+  id                             String  @id @default("singleton")
+  name                           String  @default("")
+  invitePassword                 String?
+  autoAcceptFromAnyone           Boolean @default(false)
   autoAcceptFromFriendsOfFriends Boolean @default(false)
+  sharedFolders                  String  @default("[]")
+  downloadFolder                 String?
+}
+
+model SharedFile {
+  id             String    @id @default(cuid())
+  path           String    @unique
+  filename       String
+  size           Int
+  sha256         String
+  mimeType       String?
+  metadata       String?
+  fileModifiedAt DateTime?
+  indexedAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
 }

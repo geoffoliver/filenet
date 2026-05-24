@@ -1,6 +1,9 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'bun:test';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import type { PrismaClient } from '@prisma/client';
 import { execSync } from 'child_process';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { unlinkSync } from 'fs';
 
 import { createManagementFetch } from '../management';
@@ -9,6 +12,7 @@ import { generateIdentity } from '../identity';
 
 const TEST_DB_URL = 'file:./data/test-management.db';
 let prisma: PrismaClient;
+let tmpDir: string;
 
 const identity = generateIdentity();
 const neverConnect = async (): Promise<never> => {
@@ -31,19 +35,22 @@ function jsonReq(path: string, method: string, body: unknown) {
   });
 }
 
-beforeAll(() => {
+beforeAll(async () => {
   execSync(`bunx prisma db push --url "${TEST_DB_URL}"`, { stdio: 'pipe' });
   prisma = createPrismaClient(TEST_DB_URL);
+  tmpDir = await mkdtemp(join(tmpdir(), 'filenet-mgmt-test-'));
 });
 
 afterAll(async () => {
   await prisma.$disconnect();
+  await rm(tmpDir, { recursive: true, force: true });
   try {
     unlinkSync('./data/test-management.db');
   } catch {}
 });
 
 beforeEach(async () => {
+  await prisma.sharedFile.deleteMany();
   await prisma.friend.deleteMany();
   await prisma.settings.deleteMany();
 });
@@ -309,6 +316,73 @@ describe('PATCH /api/settings', () => {
       }),
     );
     expect(res.status).toBe(400);
+  });
+
+  it('stores and returns sharedFolders as an array', async () => {
+    const res = await makeHandler()(
+      jsonReq('/api/settings', 'PATCH', { sharedFolders: ['/music', '/videos'] }),
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.sharedFolders).toEqual(['/music', '/videos']);
+  });
+
+  it('stores and returns downloadFolder', async () => {
+    const res = await makeHandler()(
+      jsonReq('/api/settings', 'PATCH', { downloadFolder: '/downloads' }),
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.downloadFolder).toBe('/downloads');
+  });
+
+  it('clears downloadFolder when set to null', async () => {
+    await makeHandler()(jsonReq('/api/settings', 'PATCH', { downloadFolder: '/downloads' }));
+    const res = await makeHandler()(jsonReq('/api/settings', 'PATCH', { downloadFolder: null }));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.downloadFolder).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// POST /api/rescan
+// ---------------------------------------------------------------------------
+
+describe('POST /api/rescan', () => {
+  it('returns indexed and removed counts', async () => {
+    const dir = join(tmpDir, 'rescan-basic');
+    await mkdir(dir);
+    await writeFile(join(dir, 'song.txt'), 'content');
+    await makeHandler()(jsonReq('/api/settings', 'PATCH', { sharedFolders: [dir] }));
+
+    const res = await makeHandler()(req('/api/rescan', { method: 'POST' }));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.indexed).toBe(1);
+    expect(body.removed).toBe(0);
+  });
+
+  it('indexes zero files when no shared folders are configured', async () => {
+    const res = await makeHandler()(req('/api/rescan', { method: 'POST' }));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.indexed).toBe(0);
+    expect(body.removed).toBe(0);
+  });
+
+  it('reports removed count for stale entries', async () => {
+    const dir = join(tmpDir, 'rescan-stale');
+    await mkdir(dir);
+    const stalePath = join(dir, 'stale.txt');
+    await writeFile(stalePath, 'stale');
+    await makeHandler()(jsonReq('/api/settings', 'PATCH', { sharedFolders: [dir] }));
+    await makeHandler()(req('/api/rescan', { method: 'POST' }));
+    await rm(stalePath);
+    const res = await makeHandler()(req('/api/rescan', { method: 'POST' }));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.removed).toBe(1);
   });
 });
 

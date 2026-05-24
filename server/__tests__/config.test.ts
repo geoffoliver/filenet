@@ -3,7 +3,13 @@ import type { PrismaClient } from '@prisma/client';
 import { execSync } from 'child_process';
 import { unlinkSync } from 'fs';
 
-import { getOrCreateSettings, getSettings, sanitizeSettings, updateSettings } from '../config';
+import {
+  getOrCreateSettings,
+  getSettings,
+  parseSharedFolders,
+  sanitizeSettings,
+  updateSettings,
+} from '../config';
 import { createPrismaClient } from '../db';
 
 const TEST_DB_URL = 'file:./data/test-config.db';
@@ -96,5 +102,54 @@ describe('sanitizeSettings', () => {
     const safe = sanitizeSettings(settings);
     expect('invitePassword' in safe).toBe(false);
     expect(safe.hasInvitePassword).toBe(true);
+  });
+
+  it('exposes sharedFolders as a string array', async () => {
+    const settings = await updateSettings(prisma, { sharedFolders: ['/a', '/b'] });
+    const safe = sanitizeSettings(settings);
+    expect(safe.sharedFolders).toEqual(['/a', '/b']);
+  });
+
+  it('defaults sharedFolders to empty array', async () => {
+    const settings = await getOrCreateSettings(prisma);
+    const safe = sanitizeSettings(settings);
+    expect(safe.sharedFolders).toEqual([]);
+  });
+});
+
+describe('updateSettings — sharedFolders and downloadFolder', () => {
+  it('stores and retrieves sharedFolders as a string array', async () => {
+    const updated = await updateSettings(prisma, { sharedFolders: ['/music', '/videos'] });
+    const safe = sanitizeSettings(updated);
+    expect(safe.sharedFolders).toEqual(['/music', '/videos']);
+  });
+
+  it('stores and retrieves downloadFolder', async () => {
+    const updated = await updateSettings(prisma, { downloadFolder: '/downloads' });
+    expect(updated.downloadFolder).toBe('/downloads');
+  });
+
+  it('clears downloadFolder when set to null', async () => {
+    await updateSettings(prisma, { downloadFolder: '/downloads' });
+    const cleared = await updateSettings(prisma, { downloadFolder: null });
+    expect(cleared.downloadFolder).toBeNull();
+  });
+});
+
+describe('parseSharedFolders', () => {
+  it('parses a valid JSON array of strings', () => {
+    expect(parseSharedFolders('["a","b"]')).toEqual(['a', 'b']);
+  });
+
+  it('returns empty array for empty JSON array', () => {
+    expect(parseSharedFolders('[]')).toEqual([]);
+  });
+
+  it('returns empty array for invalid JSON', () => {
+    expect(parseSharedFolders('not json')).toEqual([]);
+  });
+
+  it('filters out non-string values', () => {
+    expect(parseSharedFolders('["/a", 42, null, "/b"]')).toEqual(['/a', '/b']);
   });
 });

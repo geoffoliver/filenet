@@ -141,6 +141,50 @@ describe('PatchSettingsBodySchema', () => {
   it('accepts name at exactly 200 characters', () => {
     expect(PatchSettingsBodySchema.safeParse({ name: 'a'.repeat(200) }).success).toBe(true);
   });
+
+  it('accepts a valid sharedFolders array', () => {
+    const r = PatchSettingsBodySchema.safeParse({ sharedFolders: ['/music', '/videos'] });
+    expect(r.success).toBe(true);
+    if (!r.success) return;
+    expect(r.data.sharedFolders).toEqual(['/music', '/videos']);
+  });
+
+  it('accepts an empty sharedFolders array', () => {
+    expect(PatchSettingsBodySchema.safeParse({ sharedFolders: [] }).success).toBe(true);
+  });
+
+  it('rejects sharedFolders with empty string elements', () => {
+    expect(PatchSettingsBodySchema.safeParse({ sharedFolders: [''] }).success).toBe(false);
+  });
+
+  it('rejects non-array sharedFolders', () => {
+    expect(PatchSettingsBodySchema.safeParse({ sharedFolders: '/music' }).success).toBe(false);
+  });
+
+  it('accepts a valid downloadFolder string', () => {
+    const r = PatchSettingsBodySchema.safeParse({ downloadFolder: '/downloads' });
+    expect(r.success).toBe(true);
+    if (!r.success) return;
+    expect(r.data.downloadFolder).toBe('/downloads');
+  });
+
+  it('accepts null for downloadFolder', () => {
+    const r = PatchSettingsBodySchema.safeParse({ downloadFolder: null });
+    expect(r.success).toBe(true);
+    if (!r.success) return;
+    expect(r.data.downloadFolder).toBeNull();
+  });
+
+  it('trims whitespace from downloadFolder', () => {
+    const r = PatchSettingsBodySchema.safeParse({ downloadFolder: '  /downloads  ' });
+    expect(r.success).toBe(true);
+    if (!r.success) return;
+    expect(r.data.downloadFolder).toBe('/downloads');
+  });
+
+  it('rejects empty string downloadFolder', () => {
+    expect(PatchSettingsBodySchema.safeParse({ downloadFolder: '   ' }).success).toBe(false);
+  });
 });
 
 describe('FriendRequestMessageSchema', () => {
