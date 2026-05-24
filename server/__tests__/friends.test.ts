@@ -251,6 +251,43 @@ describe('rejectFriendRequest', () => {
     const found = await prisma.friend.findUnique({ where: { id: incoming.id } });
     expect(found).toBeNull();
   });
+
+  it('removes an OUTGOING_PENDING friend record', async () => {
+    const friend = await addOutgoingFriend(prisma, {
+      name: 'Outgoing',
+      address: '10.0.0.50',
+      port: 7734,
+    });
+    await rejectFriendRequest(prisma, friend.id);
+    const found = await prisma.friend.findUnique({ where: { id: friend.id } });
+    expect(found).toBeNull();
+  });
+
+  it('throws when trying to reject an ACCEPTED friend', async () => {
+    const peerIdentity = generateIdentity();
+    const incoming = await handleIncomingFriendRequest(prisma, {
+      nodeId: peerIdentity.nodeId,
+      publicKey: peerIdentity.publicKey.toString('base64'),
+      name: 'Henry',
+      address: '10.0.0.60',
+      port: 7734,
+    });
+    await acceptFriendRequest(prisma, incoming.id);
+    await expect(rejectFriendRequest(prisma, incoming.id)).rejects.toThrow();
+  });
+
+  it('throws when trying to reject a BLOCKED friend', async () => {
+    const peerIdentity = generateIdentity();
+    const friend = await handleIncomingFriendRequest(prisma, {
+      nodeId: peerIdentity.nodeId,
+      publicKey: peerIdentity.publicKey.toString('base64'),
+      name: 'Ivan',
+      address: '10.0.0.70',
+      port: 7734,
+    });
+    await prisma.friend.update({ where: { id: friend.id }, data: { status: 'BLOCKED' } });
+    await expect(rejectFriendRequest(prisma, friend.id)).rejects.toThrow();
+  });
 });
 
 describe('removeFriend', () => {

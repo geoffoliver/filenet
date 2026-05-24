@@ -19,8 +19,13 @@ import { createPrismaClient } from './db';
 import { getOrCreateIdentity } from './identity';
 
 const prisma = createPrismaClient();
-const PORT = parseInt(process.env.P2P_PORT ?? '7734');
-const MGMT_PORT = parseInt(process.env.MGMT_PORT ?? '7735');
+const PORT = parseInt(process.env.P2P_PORT ?? '7734', 10);
+const MGMT_PORT = parseInt(process.env.MGMT_PORT ?? '7735', 10);
+if (isNaN(PORT) || PORT < 1 || PORT > 65535)
+  throw new Error(`Invalid P2P_PORT: "${process.env.P2P_PORT ?? ''}"`);
+if (isNaN(MGMT_PORT) || MGMT_PORT < 1 || MGMT_PORT > 65535)
+  throw new Error(`Invalid MGMT_PORT: "${process.env.MGMT_PORT ?? ''}"`);
+if (PORT === MGMT_PORT) throw new Error('P2P_PORT and MGMT_PORT must be different');
 
 const identity = await getOrCreateIdentity(prisma);
 console.log(`Node ID:   ${identity.nodeId}`);
@@ -155,6 +160,9 @@ Bun.serve({
     } catch (err: unknown) {
       const isDuplicate = err instanceof Error && err.message.startsWith('Already have a friend');
       if (isDuplicate) return new Response((err as Error).message, { status: 409 });
+
+      const isConflict = err instanceof Error && err.message.startsWith('Cannot reject');
+      if (isConflict) return new Response((err as Error).message, { status: 409 });
 
       const isNotFound = err instanceof Error && err.message.includes('not found');
       if (isNotFound) return new Response((err as Error).message, { status: 404 });

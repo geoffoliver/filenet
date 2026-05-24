@@ -126,6 +126,11 @@ export async function connectToPeer(
             port,
           );
 
+          await prisma.friend.updateMany({
+            where: { address, port, nodeId: null, status: 'OUTGOING_PENDING' },
+            data: { nodeId: wire.nodeId, publicKey: wire.publicKey },
+          });
+
           if (friendRequest) {
             const msg: FriendRequestMessage = {
               type: 'friend-request',

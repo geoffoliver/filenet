@@ -22,14 +22,21 @@ export async function addOutgoingFriend(
     where: { address: params.address, port: params.port },
   });
   if (existing) throw new Error(`Already have a friend at ${params.address}:${params.port}`);
-  return prisma.friend.create({
-    data: {
-      name: params.name,
-      address: params.address,
-      port: params.port,
-      status: 'OUTGOING_PENDING',
-    },
-  });
+  try {
+    return await prisma.friend.create({
+      data: {
+        name: params.name,
+        address: params.address,
+        port: params.port,
+        status: 'OUTGOING_PENDING',
+      },
+    });
+  } catch (err) {
+    if (err instanceof Error && 'code' in err && (err as { code: string }).code === 'P2002') {
+      throw new Error(`Already have a friend at ${params.address}:${params.port}`);
+    }
+    throw err;
+  }
 }
 
 export async function handleIncomingFriendRequest(
@@ -92,6 +99,11 @@ export async function acceptFriendRequest(prisma: PrismaClient, friendId: string
 }
 
 export async function rejectFriendRequest(prisma: PrismaClient, friendId: string): Promise<void> {
+  const friend = await prisma.friend.findUnique({ where: { id: friendId } });
+  if (!friend) throw new Error(`Friend ${friendId} not found`);
+  if (friend.status !== 'INCOMING_PENDING' && friend.status !== 'OUTGOING_PENDING') {
+    throw new Error(`Cannot reject a friend with status ${friend.status}`);
+  }
   await prisma.friend.delete({ where: { id: friendId } });
 }
 
