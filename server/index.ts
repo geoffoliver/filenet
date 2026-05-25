@@ -1,8 +1,10 @@
 import { type PeerData, handleMessage, handleOpen } from './peer';
 import { connectToPeer, getConnectedPeer, unregisterPeer } from './connections';
+import { getOrCreateSettings, parseSharedFolders } from './config';
 import { createManagementFetch } from './management';
 import { createPrismaClient } from './db';
 import { getOrCreateIdentity } from './identity';
+import { startPeriodicRescan } from './indexer';
 
 const prisma = createPrismaClient();
 const PORT = parseInt(process.env.P2P_PORT ?? '7734', 10);
@@ -17,6 +19,21 @@ const identity = await getOrCreateIdentity(prisma);
 console.log(`Node ID:   ${identity.nodeId}`);
 console.log(`P2P port:  ${PORT}`);
 console.log(`Mgmt port: ${MGMT_PORT} (localhost only)`);
+
+const stopRescan = startPeriodicRescan(
+  prisma,
+  async () => {
+    const s = await getOrCreateSettings(prisma);
+    return parseSharedFolders(s.sharedFolders);
+  },
+  async () => {
+    const s = await getOrCreateSettings(prisma);
+    return s.rescanIntervalMinutes;
+  },
+);
+
+process.on('SIGTERM', stopRescan);
+process.on('SIGINT', stopRescan);
 
 // Management API — localhost only, no WebSocket upgrade
 Bun.serve({

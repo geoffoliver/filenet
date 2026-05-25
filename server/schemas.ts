@@ -24,8 +24,27 @@ export const PatchSettingsBodySchema = z
     invitePassword: z.string().nullable().optional(),
     autoAcceptFromAnyone: z.boolean().optional(),
     autoAcceptFromFriendsOfFriends: z.boolean().optional(),
+    sharedFolders: z.array(z.string().trim().min(1)).optional(),
+    downloadFolder: z.string().trim().min(1).nullable().optional(),
+    rescanIntervalMinutes: z.int().min(0).max(35791).optional(),
   })
   .strict();
+
+const coerceInt = (v: unknown) => {
+  if (v === undefined) return undefined;
+  const s = typeof v === 'string' ? v.trim() : String(v);
+  return s === '' ? undefined : Number(s);
+};
+
+export const SearchQuerySchema = z.object({
+  q: z.string().optional().default(''),
+  type: z.preprocess(
+    (v) => (typeof v === 'string' && v.trim() === '' ? undefined : v),
+    z.enum(['all', 'audio', 'video', 'image', 'document', 'ebook']).optional().default('all'),
+  ),
+  limit: z.preprocess(coerceInt, z.int().min(1).max(200).optional().default(50)),
+  offset: z.preprocess(coerceInt, z.int().min(0).optional().default(0)),
+});
 
 // Protocol message schemas (untrusted peer input)
 

@@ -32,18 +32,19 @@
 
 ### File Indexing
 
-- [ ] Prisma schema: `SharedFile` model (filename, path, size, SHA-256, mime type, metadata JSON, indexed at)
-- [ ] Configurable shared folder(s) stored in DB / config
-- [ ] Directory scanner: walk folders, hash files, upsert index
-- [ ] Metadata extraction — audio (artist, album, track, duration, bitrate), video (duration, chapters), ebook, documents
-- [ ] Detect changed files (mtime / size delta before re-hashing)
-- [ ] Periodic background rescan (configurable interval)
-- [ ] Manual rescan trigger (API endpoint)
-- [ ] Remove stale index entries for deleted files
+- [x] Prisma schema: `SharedFile` model (filename, path, size, SHA-256, mime type, metadata JSON, indexed at)
+- [x] Configurable shared folder(s) stored in DB / config
+- [x] Directory scanner: walk folders, hash files, upsert index
+- [x] Metadata extraction — audio/video (artist, album, track, duration, bitrate, etc.) via music-metadata
+- [ ] Metadata extraction — ebook, document, and image metadata (not yet implemented)
+- [x] Detect changed files (mtime / size delta before re-hashing)
+- [x] Periodic background rescan (configurable interval)
+- [x] Manual rescan trigger (API endpoint)
+- [x] Remove stale index entries for deleted files
 
 ### Search
 
-- [ ] Local search (filename, file type, metadata fields)
+- [x] Local search (filename, file type, metadata fields)
 - [ ] Outbound search: fan out to all connected friends with a search ID + TTL
 - [ ] Inbound search: execute locally, forward to own friends (minus already-seen search IDs), return results directly to originating node
 - [ ] Search deduplication (track seen search IDs to prevent cycles)

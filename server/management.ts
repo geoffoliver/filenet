@@ -1,6 +1,11 @@
-import type { PrismaClient } from '@prisma/client';
+import type { PrismaClient, SharedFile } from '@prisma/client';
 
-import { AddFriendBodySchema, FriendActionBodySchema, PatchSettingsBodySchema } from './schemas';
+import {
+  AddFriendBodySchema,
+  FriendActionBodySchema,
+  PatchSettingsBodySchema,
+  SearchQuerySchema,
+} from './schemas';
 import { ConflictError, NotFoundError } from './errors';
 import {
   type ConnectedPeer,
@@ -10,8 +15,43 @@ import {
   notifyFriendRejected,
 } from './connections';
 import { acceptFriendRequest, addOutgoingFriend, getFriends, rejectFriendRequest } from './friends';
-import { getOrCreateSettings, sanitizeSettings, updateSettings } from './config';
+import {
+  getOrCreateSettings,
+  parseSharedFolders,
+  sanitizeSettings,
+  updateSettings,
+} from './config';
 import type { Identity } from './identity';
+import { scanAndIndex } from './indexer';
+import { searchFiles } from './search';
+
+type SharedFileDto = {
+  id: string;
+  path: string;
+  filename: string;
+  size: string;
+  sha256: string;
+  mimeType: string | null;
+  metadata: string | null;
+  fileModifiedAt: string | null;
+  indexedAt: string;
+  updatedAt: string;
+};
+
+function toSharedFileDto(file: SharedFile): SharedFileDto {
+  return {
+    id: file.id,
+    path: file.path,
+    filename: file.filename,
+    size: file.size.toString(),
+    sha256: file.sha256,
+    mimeType: file.mimeType,
+    metadata: file.metadata,
+    fileModifiedAt: file.fileModifiedAt?.toISOString() ?? null,
+    indexedAt: file.indexedAt.toISOString(),
+    updatedAt: file.updatedAt.toISOString(),
+  };
+}
 
 export type ConnectPeerFn = (
   address: string,
@@ -132,6 +172,29 @@ export function createManagementFetch(deps: ManagementDeps): (req: Request) => P
           const updated = await updateSettings(prisma, result.data);
           return Response.json(sanitizeSettings(updated));
         }
+      }
+
+      if (url.pathname === '/api/search' && req.method === 'GET') {
+        const result = SearchQuerySchema.safeParse(Object.fromEntries(url.searchParams));
+        if (!result.success) {
+          return new Response(result.error.issues[0].message, { status: 400 });
+        }
+        const { q, type, limit, offset } = result.data;
+        const searchResult = await searchFiles(prisma, { query: q, type, limit, offset });
+        return Response.json({
+          files: searchResult.files.map(toSharedFileDto),
+          total: searchResult.total,
+        });
+      }
+
+      if (url.pathname === '/api/rescan' && req.method === 'POST') {
+        const settings = await getOrCreateSettings(prisma);
+        const folders = parseSharedFolders(settings.sharedFolders);
+        const result = await scanAndIndex(prisma, folders);
+        if (result.skipped) {
+          return new Response('Scan already in progress', { status: 409 });
+        }
+        return Response.json({ indexed: result.indexed, removed: result.removed });
       }
 
       return new Response('Not Found', { status: 404 });

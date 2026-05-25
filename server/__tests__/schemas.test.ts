@@ -6,6 +6,7 @@ import {
   FriendRequestMessageSchema,
   FriendResponseMessageSchema,
   PatchSettingsBodySchema,
+  SearchQuerySchema,
 } from '../schemas';
 
 describe('AddFriendBodySchema', () => {
@@ -140,6 +141,170 @@ describe('PatchSettingsBodySchema', () => {
 
   it('accepts name at exactly 200 characters', () => {
     expect(PatchSettingsBodySchema.safeParse({ name: 'a'.repeat(200) }).success).toBe(true);
+  });
+
+  it('accepts a valid sharedFolders array', () => {
+    const r = PatchSettingsBodySchema.safeParse({ sharedFolders: ['/music', '/videos'] });
+    expect(r.success).toBe(true);
+    if (!r.success) return;
+    expect(r.data.sharedFolders).toEqual(['/music', '/videos']);
+  });
+
+  it('accepts an empty sharedFolders array', () => {
+    expect(PatchSettingsBodySchema.safeParse({ sharedFolders: [] }).success).toBe(true);
+  });
+
+  it('rejects sharedFolders with empty string elements', () => {
+    expect(PatchSettingsBodySchema.safeParse({ sharedFolders: [''] }).success).toBe(false);
+  });
+
+  it('rejects sharedFolders with whitespace-only elements', () => {
+    expect(PatchSettingsBodySchema.safeParse({ sharedFolders: ['   '] }).success).toBe(false);
+  });
+
+  it('trims whitespace from sharedFolders elements', () => {
+    const r = PatchSettingsBodySchema.safeParse({ sharedFolders: ['  /music  ', '/videos'] });
+    expect(r.success).toBe(true);
+    if (!r.success) return;
+    expect(r.data.sharedFolders).toEqual(['/music', '/videos']);
+  });
+
+  it('rejects non-array sharedFolders', () => {
+    expect(PatchSettingsBodySchema.safeParse({ sharedFolders: '/music' }).success).toBe(false);
+  });
+
+  it('accepts a valid downloadFolder string', () => {
+    const r = PatchSettingsBodySchema.safeParse({ downloadFolder: '/downloads' });
+    expect(r.success).toBe(true);
+    if (!r.success) return;
+    expect(r.data.downloadFolder).toBe('/downloads');
+  });
+
+  it('accepts null for downloadFolder', () => {
+    const r = PatchSettingsBodySchema.safeParse({ downloadFolder: null });
+    expect(r.success).toBe(true);
+    if (!r.success) return;
+    expect(r.data.downloadFolder).toBeNull();
+  });
+
+  it('trims whitespace from downloadFolder', () => {
+    const r = PatchSettingsBodySchema.safeParse({ downloadFolder: '  /downloads  ' });
+    expect(r.success).toBe(true);
+    if (!r.success) return;
+    expect(r.data.downloadFolder).toBe('/downloads');
+  });
+
+  it('rejects empty string downloadFolder', () => {
+    expect(PatchSettingsBodySchema.safeParse({ downloadFolder: '   ' }).success).toBe(false);
+  });
+
+  it('accepts rescanIntervalMinutes of 0 (disabled)', () => {
+    const r = PatchSettingsBodySchema.safeParse({ rescanIntervalMinutes: 0 });
+    expect(r.success).toBe(true);
+  });
+
+  it('accepts a positive rescanIntervalMinutes', () => {
+    const r = PatchSettingsBodySchema.safeParse({ rescanIntervalMinutes: 60 });
+    expect(r.success).toBe(true);
+    if (!r.success) return;
+    expect(r.data.rescanIntervalMinutes).toBe(60);
+  });
+
+  it('rejects negative rescanIntervalMinutes', () => {
+    expect(PatchSettingsBodySchema.safeParse({ rescanIntervalMinutes: -1 }).success).toBe(false);
+  });
+
+  it('rejects non-integer rescanIntervalMinutes', () => {
+    expect(PatchSettingsBodySchema.safeParse({ rescanIntervalMinutes: 1.5 }).success).toBe(false);
+  });
+
+  it('rejects rescanIntervalMinutes above 35791 (setInterval overflow guard)', () => {
+    expect(PatchSettingsBodySchema.safeParse({ rescanIntervalMinutes: 35792 }).success).toBe(false);
+  });
+
+  it('accepts rescanIntervalMinutes at the maximum (35791)', () => {
+    const r = PatchSettingsBodySchema.safeParse({ rescanIntervalMinutes: 35791 });
+    expect(r.success).toBe(true);
+  });
+});
+
+describe('SearchQuerySchema', () => {
+  it('defaults q to empty string, type to all, limit to 50, offset to 0', () => {
+    const r = SearchQuerySchema.safeParse({});
+    expect(r.success).toBe(true);
+    if (!r.success) return;
+    expect(r.data.q).toBe('');
+    expect(r.data.type).toBe('all');
+    expect(r.data.limit).toBe(50);
+    expect(r.data.offset).toBe(0);
+  });
+
+  it('accepts all valid type values', () => {
+    for (const type of ['all', 'audio', 'video', 'image', 'document', 'ebook']) {
+      expect(SearchQuerySchema.safeParse({ type }).success).toBe(true);
+    }
+  });
+
+  it('rejects invalid type', () => {
+    expect(SearchQuerySchema.safeParse({ type: 'unknown' }).success).toBe(false);
+  });
+
+  it('coerces string limit to integer', () => {
+    const r = SearchQuerySchema.safeParse({ limit: '20' });
+    expect(r.success).toBe(true);
+    if (!r.success) return;
+    expect(r.data.limit).toBe(20);
+  });
+
+  it('coerces string offset to integer', () => {
+    const r = SearchQuerySchema.safeParse({ offset: '5' });
+    expect(r.success).toBe(true);
+    if (!r.success) return;
+    expect(r.data.offset).toBe(5);
+  });
+
+  it('rejects limit of 0', () => {
+    expect(SearchQuerySchema.safeParse({ limit: '0' }).success).toBe(false);
+  });
+
+  it('rejects limit above 200', () => {
+    expect(SearchQuerySchema.safeParse({ limit: '201' }).success).toBe(false);
+  });
+
+  it('rejects negative offset', () => {
+    expect(SearchQuerySchema.safeParse({ offset: '-1' }).success).toBe(false);
+  });
+
+  it('accepts limit of 200', () => {
+    expect(SearchQuerySchema.safeParse({ limit: '200' }).success).toBe(true);
+  });
+
+  it('treats whitespace-only limit as absent and uses default', () => {
+    const r = SearchQuerySchema.safeParse({ limit: '   ' });
+    expect(r.success).toBe(true);
+    if (!r.success) return;
+    expect(r.data.limit).toBe(50);
+  });
+
+  it('treats whitespace-only offset as absent and uses default', () => {
+    const r = SearchQuerySchema.safeParse({ offset: '   ' });
+    expect(r.success).toBe(true);
+    if (!r.success) return;
+    expect(r.data.offset).toBe(0);
+  });
+
+  it('treats empty string type as absent and defaults to all', () => {
+    const r = SearchQuerySchema.safeParse({ type: '' });
+    expect(r.success).toBe(true);
+    if (!r.success) return;
+    expect(r.data.type).toBe('all');
+  });
+
+  it('treats whitespace-only type as absent and defaults to all', () => {
+    const r = SearchQuerySchema.safeParse({ type: '   ' });
+    expect(r.success).toBe(true);
+    if (!r.success) return;
+    expect(r.data.type).toBe('all');
   });
 });
 
