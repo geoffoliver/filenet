@@ -211,6 +211,84 @@ describe('handleSearchRequest', () => {
     const forwarded = sent.filter((s) => (s.msg as SearchRequestMessage).type === 'search-request');
     expect(forwarded).toHaveLength(0);
   });
+
+  it('truncates filename, mimeType, and metadata to schema limits before sending', async () => {
+    await prisma.sharedFile.create({
+      data: {
+        path: '/trunc/file.bin',
+        filename: 'trunc_' + 'y'.repeat(1000),
+        size: 100n,
+        sha256: 'd'.repeat(64),
+        mimeType: 'audio/' + 'z'.repeat(200),
+        metadata: 'M'.repeat(5000),
+      },
+    });
+
+    const fromPeer = makePeer('peer-trunc');
+    const sent: { peer: ConnectedPeer; msg: InnerMessage }[] = [];
+    const msg: SearchRequestMessage = {
+      type: 'search-request',
+      searchId: crypto.randomUUID(),
+      originNodeId: 'peer-trunc',
+      query: 'trunc_',
+      fileType: 'all',
+      ttl: 1,
+    };
+
+    await handleSearchRequest(msg, prisma, identity, fromPeer, [], captureAll(sent));
+
+    expect(sent).toHaveLength(1);
+    const item = (sent[0].msg as SearchResultMessage).results.find(
+      (r) => r.sha256 === 'd'.repeat(64),
+    )!;
+    expect(item.filename.length).toBeLessThanOrEqual(1000);
+    expect(item.mimeType!.length).toBeLessThanOrEqual(200);
+    expect(item.metadata!.length).toBeLessThanOrEqual(4096);
+  });
+
+  it('swallows sendFn error when sending results to requester', async () => {
+    const dir = join(tmpDir, 'send-err-result');
+    await mkdir(dir);
+    await writeFile(join(dir, 'errfile.mp3'), 'data');
+    await indexFile(prisma, join(dir, 'errfile.mp3'));
+
+    const fromPeer = makePeer('peer-send-err');
+    const throwFn = () => {
+      throw new Error('send failed');
+    };
+    const msg: SearchRequestMessage = {
+      type: 'search-request',
+      searchId: crypto.randomUUID(),
+      originNodeId: 'peer-send-err',
+      query: 'errfile',
+      fileType: 'all',
+      ttl: 1,
+    };
+
+    await expect(
+      handleSearchRequest(msg, prisma, identity, fromPeer, [], throwFn),
+    ).resolves.toBeUndefined();
+  });
+
+  it('swallows sendFn error when forwarding request to peers', async () => {
+    const fromPeer = makePeer('peer-fwd-err-from');
+    const toPeer = makePeer('peer-fwd-err-to');
+    const throwFn = () => {
+      throw new Error('send failed');
+    };
+    const msg: SearchRequestMessage = {
+      type: 'search-request',
+      searchId: crypto.randomUUID(),
+      originNodeId: 'peer-fwd-err-from',
+      query: 'anything',
+      fileType: 'all',
+      ttl: 2,
+    };
+
+    await expect(
+      handleSearchRequest(msg, prisma, identity, fromPeer, [fromPeer, toPeer], throwFn),
+    ).resolves.toBeUndefined();
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -319,6 +397,40 @@ describe('handleSearchResult', () => {
       captureAll(relayed),
     );
     expect(relayed).toHaveLength(0);
+  });
+
+  it('swallows sendFn error when relaying result to upstream peer', async () => {
+    const returnPeer = makePeer('upstream-err');
+    const relayMsg: SearchRequestMessage = {
+      type: 'search-request',
+      searchId: crypto.randomUUID(),
+      originNodeId: 'origin',
+      query: 'relay-err',
+      fileType: 'all',
+      ttl: 2,
+    };
+
+    await handleSearchRequest(relayMsg, prisma, identity, returnPeer, [], captureAll([]));
+
+    const resultMsg: SearchResultMessage = {
+      type: 'search-result',
+      searchId: relayMsg.searchId,
+      fromNodeId: 'downstream',
+      results: [
+        {
+          filename: 'a.mp3',
+          size: '100',
+          sha256: 'e'.repeat(64),
+          mimeType: null,
+          metadata: null,
+        },
+      ],
+    };
+
+    const throwFn = () => {
+      throw new Error('relay send failed');
+    };
+    expect(() => handleSearchResult(resultMsg, throwFn)).not.toThrow();
   });
 });
 

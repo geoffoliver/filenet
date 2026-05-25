@@ -469,6 +469,39 @@ describe('GET /api/search', () => {
     const res = await makeHandler()(req('/api/search?offset=-1'));
     expect(res.status).toBe(400);
   });
+
+  it('network=true returns empty network array when accepted friends are not connected', async () => {
+    await prisma.friend.create({
+      data: {
+        name: 'Bob',
+        address: '127.0.0.1',
+        port: 7734,
+        nodeId: 'bob-node',
+        status: 'ACCEPTED',
+      },
+    });
+    const res = await makeHandler()(req('/api/search?network=true'));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(Array.isArray(body.network)).toBe(true);
+    expect(body.network).toHaveLength(0);
+  });
+
+  it('network=true does not fan out to pending friends', async () => {
+    await prisma.friend.create({
+      data: {
+        name: 'Pending',
+        address: '127.0.0.1',
+        port: 7734,
+        nodeId: 'pending-node',
+        status: 'INCOMING_PENDING',
+      },
+    });
+    const res = await makeHandler()(req('/api/search?network=true'));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.network).toHaveLength(0);
+  });
 });
 
 // ---------------------------------------------------------------------------

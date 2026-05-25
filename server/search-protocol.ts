@@ -49,7 +49,7 @@ function pruneExpired(): void {
 function markSeen(searchId: string): boolean {
   if (seenSearchIds.has(searchId)) return false;
   seenSearchIds.set(searchId, Date.now());
-  if (seenSearchIds.size > 10_000) pruneExpired();
+  if (seenSearchIds.size > 10_000 || searchRoutes.size > 10_000) pruneExpired();
   return true;
 }
 
@@ -77,7 +77,11 @@ export function handleSearchResult(
     }
   } else {
     // We're a relay — forward the result back up the chain
-    sendFn(route.returnPeer, msg);
+    try {
+      sendFn(route.returnPeer, msg);
+    } catch {
+      // relay peer disconnected — nothing to do
+    }
   }
 }
 
@@ -110,14 +114,18 @@ export async function handleSearchRequest(
       searchId: msg.searchId,
       fromNodeId: identity.nodeId,
       results: files.map((f) => ({
-        filename: f.filename,
+        filename: f.filename.slice(0, 1000),
         size: f.size.toString(),
         sha256: f.sha256,
-        mimeType: f.mimeType,
-        metadata: f.metadata,
+        mimeType: f.mimeType?.slice(0, 200) ?? null,
+        metadata: f.metadata?.slice(0, 4096) ?? null,
       })),
     };
-    sendFn(fromPeer, resultMsg);
+    try {
+      sendFn(fromPeer, resultMsg);
+    } catch {
+      // requester disconnected before results arrived
+    }
   }
 
   // Forward with TTL decremented, skipping the peer that sent it to us
@@ -125,7 +133,11 @@ export async function handleSearchRequest(
     const forward: SearchRequestMessage = { ...msg, ttl: msg.ttl - 1 };
     for (const peer of allPeers) {
       if (peer.peerNodeId !== fromPeer.peerNodeId) {
-        sendFn(peer, forward);
+        try {
+          sendFn(peer, forward);
+        } catch {
+          // peer disconnected — skip
+        }
       }
     }
   }

@@ -182,10 +182,20 @@ export function createManagementFetch(deps: ManagementDeps): (req: Request) => P
           return new Response(result.error.issues[0].message, { status: 400 });
         }
         const { q, type, limit, offset, network } = result.data;
+        const acceptedFriends = network
+          ? await prisma.friend.findMany({
+              where: { status: 'ACCEPTED', nodeId: { not: null } },
+              select: { nodeId: true },
+            })
+          : [];
+        const acceptedNodeIds = new Set(acceptedFriends.map((f) => f.nodeId as string));
+        const acceptedPeers = getAllConnectedPeers().filter((p) =>
+          acceptedNodeIds.has(p.peerNodeId),
+        );
         const [localResult, networkResults] = await Promise.all([
           searchFiles(prisma, { query: q, type, limit, offset }),
           network
-            ? initiateNetworkSearch(identity, getAllConnectedPeers(), { query: q, fileType: type })
+            ? initiateNetworkSearch(identity, acceptedPeers, { query: q, fileType: type })
             : Promise.resolve([]),
         ]);
         return Response.json({

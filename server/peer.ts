@@ -178,14 +178,21 @@ export async function dispatchMessage(
   if (msg.type === 'search-request') {
     const result = SearchRequestMessageSchema.safeParse(msg);
     if (!result.success) return; // malformed — drop
+    const acceptedFriends = await ws.data.prisma.friend.findMany({
+      where: { status: 'ACCEPTED', nodeId: { not: null } },
+      select: { nodeId: true },
+    });
+    const acceptedNodeIds = new Set(acceptedFriends.map((f) => f.nodeId as string));
+    if (!acceptedNodeIds.has(state.peerNodeId)) return; // not an accepted friend — drop
     const fromPeer = getConnectedPeer(state.peerNodeId);
     if (!fromPeer) return;
+    const acceptedPeers = getAllConnectedPeers().filter((p) => acceptedNodeIds.has(p.peerNodeId));
     await handleSearchRequest(
       result.data,
       ws.data.prisma,
       ws.data.identity,
       fromPeer,
-      getAllConnectedPeers(),
+      acceptedPeers,
     );
     return;
   }
@@ -193,6 +200,10 @@ export async function dispatchMessage(
   if (msg.type === 'search-result') {
     const result = SearchResultMessageSchema.safeParse(msg);
     if (!result.success) return; // malformed — drop
+    const isFriend = await ws.data.prisma.friend.findFirst({
+      where: { nodeId: state.peerNodeId, status: 'ACCEPTED' },
+    });
+    if (!isFriend) return; // not an accepted friend — drop
     handleSearchResult(result.data);
     return;
   }
