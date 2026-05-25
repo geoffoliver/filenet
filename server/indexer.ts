@@ -1,5 +1,5 @@
 import { basename, extname, join, sep } from 'node:path';
-import { lstat, readdir, stat } from 'node:fs/promises';
+import { lstat, readdir } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 
@@ -103,7 +103,13 @@ export async function indexFile(
   path: string,
   lastSeenAt: Date = new Date(),
 ): Promise<SharedFile> {
-  const s = await stat(path, { bigint: true });
+  const s = await lstat(path, { bigint: true });
+  if (!s.isFile()) {
+    // Path is no longer a regular file (e.g. replaced by a symlink) — treat as gone
+    const err = new Error(`not a regular file: ${path}`) as NodeJS.ErrnoException;
+    err.code = 'ENOENT';
+    throw err;
+  }
   const size = s.size;
   const fileModifiedAt = new Date(Number(s.mtimeMs));
 

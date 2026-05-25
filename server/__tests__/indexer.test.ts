@@ -259,6 +259,21 @@ describe('indexFile', () => {
     expect(second.indexedAt.getTime()).toBeGreaterThan(first.indexedAt.getTime());
   });
 
+  it('rejects a symlink — does not follow it (TOCTOU guard)', async () => {
+    const target = join(tmpDir, 'symlink-target.txt');
+    const link = join(tmpDir, 'symlink-link.txt');
+    await writeFile(target, 'real content');
+    await symlink(target, link);
+    await expect(indexFile(prisma, link)).rejects.toMatchObject({ code: 'ENOENT' });
+    expect(await prisma.sharedFile.count()).toBe(0);
+  });
+
+  it('rejects a directory path', async () => {
+    const dir = join(tmpDir, 'index-dir-reject');
+    await mkdir(dir);
+    await expect(indexFile(prisma, dir)).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
   it('does not update indexedAt on cache hit', async () => {
     const path = join(tmpDir, 'index-indexedat-noop.txt');
     await writeFile(path, 'stable');
