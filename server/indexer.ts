@@ -152,8 +152,8 @@ let scanning = false;
 export async function scanAndIndex(
   prisma: PrismaClient,
   folders: string[],
-): Promise<{ indexed: number; removed: number }> {
-  if (scanning) return { indexed: 0, removed: 0 };
+): Promise<{ indexed: number; removed: number; skipped: boolean }> {
+  if (scanning) return { indexed: 0, removed: 0, skipped: true };
   scanning = true;
   try {
     const scanStart = new Date();
@@ -188,7 +188,7 @@ export async function scanAndIndex(
     }
 
     const removed = await removeStaleEntries(prisma, scanStart, inaccessibleRoots);
-    return { indexed, removed };
+    return { indexed, removed, skipped: false };
   } finally {
     scanning = false;
   }

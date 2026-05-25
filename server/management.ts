@@ -191,7 +191,10 @@ export function createManagementFetch(deps: ManagementDeps): (req: Request) => P
         const settings = await getOrCreateSettings(prisma);
         const folders = parseSharedFolders(settings.sharedFolders);
         const result = await scanAndIndex(prisma, folders);
-        return Response.json(result);
+        if (result.skipped) {
+          return new Response('Scan already in progress', { status: 409 });
+        }
+        return Response.json({ indexed: result.indexed, removed: result.removed });
       }
 
       return new Response('Not Found', { status: 404 });

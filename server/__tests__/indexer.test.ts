@@ -302,6 +302,7 @@ describe('scanAndIndex', () => {
     const result = await scanAndIndex(prisma, []);
     expect(result.indexed).toBe(0);
     expect(result.removed).toBe(0);
+    expect(result.skipped).toBe(false);
   });
 
   it('indexes all files in a directory and returns correct count', async () => {
@@ -348,7 +349,7 @@ describe('scanAndIndex', () => {
     expect(await prisma.sharedFile.count()).toBe(1);
   });
 
-  it('returns zero and skips when a scan is already in progress', async () => {
+  it('returns skipped: true when a scan is already in progress', async () => {
     const dir = join(tmpDir, 'scan-concurrent');
     await mkdir(dir);
     await writeFile(join(dir, 'file.txt'), 'data');
@@ -356,9 +357,14 @@ describe('scanAndIndex', () => {
       scanAndIndex(prisma, [dir]),
       scanAndIndex(prisma, [dir]),
     ]);
-    // One scan ran, the other was skipped
-    expect(first.indexed + second.indexed).toBeGreaterThanOrEqual(1);
-    expect(first.indexed === 0 || second.indexed === 0).toBe(true);
+    // Exactly one ran, the other was skipped
+    const skippedOne = [first, second].find((r) => r.skipped);
+    const ranOne = [first, second].find((r) => !r.skipped);
+    expect(skippedOne).toBeDefined();
+    expect(ranOne).toBeDefined();
+    expect(skippedOne!.indexed).toBe(0);
+    expect(skippedOne!.removed).toBe(0);
+    expect(ranOne!.indexed).toBeGreaterThanOrEqual(1);
   });
 
   it('preserves indexed files when their shared folder is temporarily inaccessible', async () => {
