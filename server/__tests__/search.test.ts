@@ -225,3 +225,44 @@ describe('searchFiles — pagination', () => {
     expect(result.files).toHaveLength(7);
   });
 });
+
+// ---------------------------------------------------------------------------
+// stable sort
+// ---------------------------------------------------------------------------
+
+describe('searchFiles — stable sort', () => {
+  beforeEach(async () => {
+    await prisma.sharedFile.deleteMany();
+    await prisma.sharedFile.createMany({
+      data: [
+        {
+          path: '/a/dup.txt',
+          filename: 'dup.txt',
+          size: 100n,
+          sha256: 'x'.repeat(64),
+          mimeType: 'text/plain',
+          metadata: null,
+        },
+        {
+          path: '/b/dup.txt',
+          filename: 'dup.txt',
+          size: 200n,
+          sha256: 'y'.repeat(64),
+          mimeType: 'text/plain',
+          metadata: null,
+        },
+      ],
+    });
+  });
+
+  it('returns consistent pages when filenames collide', async () => {
+    const page1 = await searchFiles(prisma, { query: '', limit: 1, offset: 0 });
+    const page2 = await searchFiles(prisma, { query: '', limit: 1, offset: 1 });
+    expect(page1.total).toBe(2);
+    expect(page2.total).toBe(2);
+    expect(page1.files[0].id).not.toBe(page2.files[0].id);
+    // Together the two pages cover both records without duplication
+    const ids = new Set([page1.files[0].id, page2.files[0].id]);
+    expect(ids.size).toBe(2);
+  });
+});

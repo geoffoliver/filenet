@@ -21,8 +21,6 @@ const AUDIO_EXTENSIONS = new Set([
 
 const VIDEO_EXTENSIONS = new Set(['.avi', '.m4v', '.mkv', '.mov', '.mp4', '.webm', '.wmv']);
 
-const STALE_DELETE_CHUNK = 500;
-
 export async function hashFile(path: string): Promise<string> {
   return new Promise((resolve, reject) => {
     const hash = createHash('sha256');
@@ -95,7 +93,11 @@ export async function scanDirectory(dir: string): Promise<string[]> {
   return results;
 }
 
-export async function indexFile(prisma: PrismaClient, path: string): Promise<SharedFile> {
+export async function indexFile(
+  prisma: PrismaClient,
+  path: string,
+  lastSeenAt: Date = new Date(),
+): Promise<SharedFile> {
   const s = await stat(path, { bigint: true });
   const size = s.size;
   const fileModifiedAt = new Date(Number(s.mtimeMs));
@@ -106,7 +108,7 @@ export async function indexFile(prisma: PrismaClient, path: string): Promise<Sha
     existing.size === size &&
     existing.fileModifiedAt?.getTime() === fileModifiedAt.getTime()
   ) {
-    return existing;
+    return prisma.sharedFile.update({ where: { path }, data: { lastSeenAt } });
   }
 
   const sha256 = await hashFile(path);
@@ -117,64 +119,41 @@ export async function indexFile(prisma: PrismaClient, path: string): Promise<Sha
 
   return prisma.sharedFile.upsert({
     where: { path },
-    create: { path, filename, size, sha256, mimeType, metadata, fileModifiedAt },
-    update: { filename, size, sha256, mimeType, metadata, fileModifiedAt },
+    create: { path, filename, size, sha256, mimeType, metadata, fileModifiedAt, lastSeenAt },
+    update: { filename, size, sha256, mimeType, metadata, fileModifiedAt, lastSeenAt },
   });
 }
 
-export async function removeStaleEntries(
-  prisma: PrismaClient,
-  activePaths: Set<string>,
-): Promise<number> {
-  let removed = 0;
-  let lastPath: string | undefined;
-
-  for (;;) {
-    const page = await prisma.sharedFile.findMany({
-      select: { path: true },
-      take: STALE_DELETE_CHUNK,
-      where: lastPath !== undefined ? { path: { gt: lastPath } } : undefined,
-      orderBy: { path: 'asc' },
-    });
-
-    if (page.length === 0) break;
-    lastPath = page[page.length - 1].path;
-
-    const stale = page.filter((f) => !activePaths.has(f.path)).map((f) => f.path);
-    if (stale.length > 0) {
-      const { count } = await prisma.sharedFile.deleteMany({
-        where: { path: { in: stale } },
-      });
-      removed += count;
-    }
-
-    if (page.length < STALE_DELETE_CHUNK) break;
-  }
-
-  return removed;
+export async function removeStaleEntries(prisma: PrismaClient, scanStart: Date): Promise<number> {
+  const { count } = await prisma.sharedFile.deleteMany({
+    where: { lastSeenAt: { lt: scanStart } },
+  });
+  return count;
 }
 
 export async function scanAndIndex(
   prisma: PrismaClient,
   folders: string[],
 ): Promise<{ indexed: number; removed: number }> {
-  const activePaths = new Set<string>();
-  for (const folder of folders) {
-    for (const p of await scanDirectory(folder)) activePaths.add(p);
-  }
-
+  const scanStart = new Date();
+  const seen = new Set<string>();
   let indexed = 0;
-  for (const path of activePaths) {
-    try {
-      await indexFile(prisma, path);
-      indexed++;
-    } catch (err) {
-      const code = (err as NodeJS.ErrnoException).code;
-      if (code !== 'ENOENT' && code !== 'EACCES') throw err;
+
+  for (const folder of folders) {
+    for (const path of await scanDirectory(folder)) {
+      if (seen.has(path)) continue;
+      seen.add(path);
+      try {
+        await indexFile(prisma, path, scanStart);
+        indexed++;
+      } catch (err) {
+        const code = (err as NodeJS.ErrnoException).code;
+        if (code !== 'ENOENT' && code !== 'EACCES') throw err;
+      }
     }
   }
 
-  const removed = await removeStaleEntries(prisma, activePaths);
+  const removed = await removeStaleEntries(prisma, scanStart);
   return { indexed, removed };
 }
 

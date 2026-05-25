@@ -210,32 +210,35 @@ describe('indexFile', () => {
 // ---------------------------------------------------------------------------
 
 describe('removeStaleEntries', () => {
-  it('removes records whose paths are not in the active set', async () => {
+  it('removes records with lastSeenAt before scanStart', async () => {
     const path = join(tmpDir, 'stale-remove.txt');
     await writeFile(path, 'stale');
-    await indexFile(prisma, path);
-    const removed = await removeStaleEntries(prisma, new Set());
+    // Index with an old timestamp to simulate a prior scan
+    await indexFile(prisma, path, new Date(1000));
+    const removed = await removeStaleEntries(prisma, new Date());
     expect(removed).toBe(1);
     expect(await prisma.sharedFile.findFirst({ where: { path } })).toBeNull();
   });
 
-  it('keeps records whose paths are in the active set', async () => {
+  it('keeps records with lastSeenAt equal to scanStart', async () => {
+    const scanStart = new Date();
     const path = join(tmpDir, 'active-keep.txt');
     await writeFile(path, 'active');
-    await indexFile(prisma, path);
-    const removed = await removeStaleEntries(prisma, new Set([path]));
+    await indexFile(prisma, path, scanStart);
+    const removed = await removeStaleEntries(prisma, scanStart);
     expect(removed).toBe(0);
     expect(await prisma.sharedFile.findFirst({ where: { path } })).not.toBeNull();
   });
 
   it('removes only stale records when active and stale records coexist', async () => {
+    const scanStart = new Date();
     const activePath = join(tmpDir, 'coexist-active.txt');
     const stalePath = join(tmpDir, 'coexist-stale.txt');
     await writeFile(activePath, 'active');
     await writeFile(stalePath, 'stale');
-    await indexFile(prisma, activePath);
-    await indexFile(prisma, stalePath);
-    const removed = await removeStaleEntries(prisma, new Set([activePath]));
+    await indexFile(prisma, activePath, scanStart);
+    await indexFile(prisma, stalePath, new Date(1000)); // old scan
+    const removed = await removeStaleEntries(prisma, scanStart);
     expect(removed).toBe(1);
     expect(await prisma.sharedFile.count()).toBe(1);
   });

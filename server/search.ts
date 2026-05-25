@@ -45,7 +45,7 @@ export async function searchFiles(
       where,
       take: limit,
       skip: offset,
-      orderBy: { filename: 'asc' },
+      orderBy: [{ filename: 'asc' }, { id: 'asc' }],
     }),
     prisma.sharedFile.count({ where }),
   ]);
