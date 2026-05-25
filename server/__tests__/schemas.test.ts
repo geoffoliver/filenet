@@ -292,6 +292,20 @@ describe('SearchQuerySchema', () => {
     if (!r.success) return;
     expect(r.data.offset).toBe(0);
   });
+
+  it('treats empty string type as absent and defaults to all', () => {
+    const r = SearchQuerySchema.safeParse({ type: '' });
+    expect(r.success).toBe(true);
+    if (!r.success) return;
+    expect(r.data.type).toBe('all');
+  });
+
+  it('treats whitespace-only type as absent and defaults to all', () => {
+    const r = SearchQuerySchema.safeParse({ type: '   ' });
+    expect(r.success).toBe(true);
+    if (!r.success) return;
+    expect(r.data.type).toBe('all');
+  });
 });
 
 describe('FriendRequestMessageSchema', () => {

@@ -98,19 +98,25 @@ describe('extractMetadata', () => {
 // scanDirectory
 // ---------------------------------------------------------------------------
 
+async function collect(gen: AsyncIterable<string>): Promise<string[]> {
+  const results: string[] = [];
+  for await (const f of gen) results.push(f);
+  return results;
+}
+
 describe('scanDirectory', () => {
-  it('returns empty array for an empty directory', async () => {
+  it('yields no paths for an empty directory', async () => {
     const dir = join(tmpDir, 'scan-empty');
     await mkdir(dir);
-    expect(await scanDirectory(dir)).toEqual([]);
+    expect(await collect(scanDirectory(dir))).toEqual([]);
   });
 
-  it('returns files in a flat directory', async () => {
+  it('yields files in a flat directory', async () => {
     const dir = join(tmpDir, 'scan-flat');
     await mkdir(dir);
     await writeFile(join(dir, 'a.txt'), 'a');
     await writeFile(join(dir, 'b.txt'), 'b');
-    const files = await scanDirectory(dir);
+    const files = await collect(scanDirectory(dir));
     expect(files.sort()).toEqual([join(dir, 'a.txt'), join(dir, 'b.txt')]);
   });
 
@@ -120,7 +126,7 @@ describe('scanDirectory', () => {
     await mkdir(join(dir, 'sub'));
     await writeFile(join(dir, 'root.txt'), 'r');
     await writeFile(join(dir, 'sub', 'nested.txt'), 'n');
-    const files = await scanDirectory(dir);
+    const files = await collect(scanDirectory(dir));
     expect(files.sort()).toEqual([join(dir, 'root.txt'), join(dir, 'sub', 'nested.txt')]);
   });
 
@@ -131,13 +137,12 @@ describe('scanDirectory', () => {
     await writeFile(join(dir, 'visible.txt'), 'v');
     await writeFile(join(dir, '.hidden.txt'), 'h');
     await writeFile(join(dir, '.hidden-dir', 'inside.txt'), 'i');
-    const files = await scanDirectory(dir);
+    const files = await collect(scanDirectory(dir));
     expect(files).toEqual([join(dir, 'visible.txt')]);
   });
 
-  it('returns empty array for a nonexistent directory', async () => {
-    const files = await scanDirectory(join(tmpDir, 'does-not-exist'));
-    expect(files).toEqual([]);
+  it('yields nothing for a nonexistent directory', async () => {
+    expect(await collect(scanDirectory(join(tmpDir, 'does-not-exist')))).toEqual([]);
   });
 
   it('ignores symlinks', async () => {
@@ -145,7 +150,7 @@ describe('scanDirectory', () => {
     await mkdir(dir);
     await writeFile(join(dir, 'real.txt'), 'real');
     await symlink(join(dir, 'real.txt'), join(dir, 'link.txt'));
-    const files = await scanDirectory(dir);
+    const files = await collect(scanDirectory(dir));
     expect(files).toEqual([join(dir, 'real.txt')]);
   });
 });
@@ -315,6 +320,19 @@ describe('scanAndIndex', () => {
     await scanAndIndex(prisma, [dir]);
     await scanAndIndex(prisma, [dir]);
     expect(await prisma.sharedFile.count()).toBe(1);
+  });
+
+  it('returns zero and skips when a scan is already in progress', async () => {
+    const dir = join(tmpDir, 'scan-concurrent');
+    await mkdir(dir);
+    await writeFile(join(dir, 'file.txt'), 'data');
+    const [first, second] = await Promise.all([
+      scanAndIndex(prisma, [dir]),
+      scanAndIndex(prisma, [dir]),
+    ]);
+    // One scan ran, the other was skipped
+    expect(first.indexed + second.indexed).toBeGreaterThanOrEqual(1);
+    expect(first.indexed === 0 || second.indexed === 0).toBe(true);
   });
 });
 

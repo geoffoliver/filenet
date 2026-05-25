@@ -57,40 +57,33 @@ export async function extractMetadata(path: string): Promise<Record<string, unkn
   }
 }
 
-export async function scanDirectory(dir: string): Promise<string[]> {
-  const results: string[] = [];
-
-  async function walk(current: string): Promise<void> {
-    let entries: string[];
+export async function* scanDirectory(dir: string): AsyncGenerator<string> {
+  let entries: string[];
+  try {
+    entries = await readdir(dir);
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === 'ENOENT' || code === 'EACCES') return;
+    throw err;
+  }
+  for (const entry of entries) {
+    if (entry.startsWith('.')) continue;
+    const fullPath = join(dir, entry);
+    let s;
     try {
-      entries = await readdir(current);
+      s = await lstat(fullPath);
     } catch (err) {
       const code = (err as NodeJS.ErrnoException).code;
-      if (code === 'ENOENT' || code === 'EACCES') return;
+      if (code === 'ENOENT' || code === 'EACCES') continue;
       throw err;
     }
-    for (const entry of entries) {
-      if (entry.startsWith('.')) continue;
-      const fullPath = join(current, entry);
-      let s;
-      try {
-        s = await lstat(fullPath);
-      } catch (err) {
-        const code = (err as NodeJS.ErrnoException).code;
-        if (code === 'ENOENT' || code === 'EACCES') continue;
-        throw err;
-      }
-      if (s.isSymbolicLink()) continue;
-      if (s.isDirectory()) {
-        await walk(fullPath);
-      } else if (s.isFile()) {
-        results.push(fullPath);
-      }
+    if (s.isSymbolicLink()) continue;
+    if (s.isDirectory()) {
+      yield* scanDirectory(fullPath);
+    } else if (s.isFile()) {
+      yield fullPath;
     }
   }
-
-  await walk(dir);
-  return results;
 }
 
 export async function indexFile(
@@ -140,30 +133,38 @@ export async function removeStaleEntries(prisma: PrismaClient, scanStart: Date):
   return count;
 }
 
+let scanning = false;
+
 export async function scanAndIndex(
   prisma: PrismaClient,
   folders: string[],
 ): Promise<{ indexed: number; removed: number }> {
-  const scanStart = new Date();
-  const seen = new Set<string>();
-  let indexed = 0;
+  if (scanning) return { indexed: 0, removed: 0 };
+  scanning = true;
+  try {
+    const scanStart = new Date();
+    const seen = new Set<string>();
+    let indexed = 0;
 
-  for (const folder of folders) {
-    for (const path of await scanDirectory(folder)) {
-      if (seen.has(path)) continue;
-      seen.add(path);
-      try {
-        await indexFile(prisma, path, scanStart);
-        indexed++;
-      } catch (err) {
-        const code = (err as NodeJS.ErrnoException).code;
-        if (code !== 'ENOENT' && code !== 'EACCES') throw err;
+    for (const folder of folders) {
+      for await (const path of scanDirectory(folder)) {
+        if (seen.has(path)) continue;
+        seen.add(path);
+        try {
+          await indexFile(prisma, path, scanStart);
+          indexed++;
+        } catch (err) {
+          const code = (err as NodeJS.ErrnoException).code;
+          if (code !== 'ENOENT' && code !== 'EACCES') throw err;
+        }
       }
     }
-  }
 
-  const removed = await removeStaleEntries(prisma, scanStart);
-  return { indexed, removed };
+    const removed = await removeStaleEntries(prisma, scanStart);
+    return { indexed, removed };
+  } finally {
+    scanning = false;
+  }
 }
 
 export function startPeriodicRescan(
@@ -172,16 +173,10 @@ export function startPeriodicRescan(
   intervalMinutes: number,
 ): () => void {
   if (intervalMinutes <= 0) return () => {};
-  let running = false;
   const id = setInterval(() => {
-    if (running) return;
-    running = true;
     getFolders()
       .then((folders) => scanAndIndex(prisma, folders))
-      .catch((err) => console.error('Periodic rescan failed:', err))
-      .finally(() => {
-        running = false;
-      });
+      .catch((err) => console.error('Periodic rescan failed:', err));
   }, intervalMinutes * 60_000);
   return () => clearInterval(id);
 }
