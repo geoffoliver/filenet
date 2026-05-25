@@ -63,7 +63,7 @@ export async function* scanDirectory(dir: string): AsyncGenerator<string> {
     entries = await readdir(dir);
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code;
-    if (code === 'ENOENT' || code === 'EACCES') return;
+    if (code === 'ENOENT' || code === 'EACCES' || code === 'ENOTDIR') return;
     throw err;
   }
   for (const entry of entries) {
@@ -74,7 +74,7 @@ export async function* scanDirectory(dir: string): AsyncGenerator<string> {
       s = await lstat(fullPath);
     } catch (err) {
       const code = (err as NodeJS.ErrnoException).code;
-      if (code === 'ENOENT' || code === 'EACCES') continue;
+      if (code === 'ENOENT' || code === 'EACCES' || code === 'ENOTDIR') continue;
       throw err;
     }
     if (s.isSymbolicLink()) continue;
@@ -163,11 +163,16 @@ export async function scanAndIndex(
 
     for (const folder of folders) {
       try {
-        await stat(folder);
+        const folderStat = await lstat(folder);
+        if (!folderStat.isDirectory()) {
+          // Regular file, symlink, or other non-directory — preserve its entries
+          inaccessibleRoots.push(folder);
+          continue;
+        }
       } catch (err) {
         const code = (err as NodeJS.ErrnoException).code;
-        if (code === 'ENOENT' || code === 'EACCES') {
-          // Folder is temporarily unavailable — preserve its indexed entries
+        if (code === 'ENOENT' || code === 'EACCES' || code === 'ENOTDIR') {
+          // Folder is unavailable — preserve its indexed entries
           inaccessibleRoots.push(folder);
           continue;
         }
@@ -182,7 +187,7 @@ export async function scanAndIndex(
           indexed++;
         } catch (err) {
           const code = (err as NodeJS.ErrnoException).code;
-          if (code !== 'ENOENT' && code !== 'EACCES') throw err;
+          if (code !== 'ENOENT' && code !== 'EACCES' && code !== 'ENOTDIR') throw err;
         }
       }
     }
@@ -217,7 +222,16 @@ export function startPeriodicRescan(
     if (stopped) return;
     try {
       const intervalMinutes = await getIntervalMinutes();
-      if (intervalMinutes <= 0 || stopped) return;
+      if (stopped) return;
+      if (intervalMinutes <= 0) {
+        // Disabled for now — re-check in 1 minute in case it's later enabled via settings
+        timerId = setTimeout(
+          () =>
+            scheduleNext().catch((err) => console.error('Periodic rescan schedule failed:', err)),
+          60_000,
+        );
+        return;
+      }
       timerId = setTimeout(
         () => tick().catch((err) => console.error('Periodic rescan tick failed:', err)),
         intervalMinutes * 60_000,

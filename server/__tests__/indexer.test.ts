@@ -153,6 +153,12 @@ describe('scanDirectory', () => {
     const files = await collect(scanDirectory(dir));
     expect(files).toEqual([join(dir, 'real.txt')]);
   });
+
+  it('yields nothing when path points to a file instead of a directory (ENOTDIR)', async () => {
+    const filePath = join(tmpDir, 'not-a-dir.txt');
+    await writeFile(filePath, 'I am a file');
+    expect(await collect(scanDirectory(filePath))).toEqual([]);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -365,6 +371,25 @@ describe('scanAndIndex', () => {
     expect(skippedOne!.indexed).toBe(0);
     expect(skippedOne!.removed).toBe(0);
     expect(ranOne!.indexed).toBeGreaterThanOrEqual(1);
+  });
+
+  it('treats a regular file configured as a shared folder as inaccessible', async () => {
+    const filePath = join(tmpDir, 'shared-folder-is-file.txt');
+    await writeFile(filePath, 'I am a file, not a folder');
+    const result = await scanAndIndex(prisma, [filePath]);
+    expect(result.indexed).toBe(0);
+    expect(result.skipped).toBe(false);
+  });
+
+  it('treats a symlink configured as a shared folder as inaccessible', async () => {
+    const realDir = join(tmpDir, 'symlink-target-dir');
+    await mkdir(realDir);
+    await writeFile(join(realDir, 'inner.txt'), 'content');
+    const linkPath = join(tmpDir, 'symlink-shared-folder');
+    await symlink(realDir, linkPath);
+    const result = await scanAndIndex(prisma, [linkPath]);
+    expect(result.indexed).toBe(0);
+    expect(result.skipped).toBe(false);
   });
 
   it('preserves indexed files when their shared folder is temporarily inaccessible', async () => {
