@@ -35,7 +35,8 @@
 - [x] Prisma schema: `SharedFile` model (filename, path, size, SHA-256, mime type, metadata JSON, indexed at)
 - [x] Configurable shared folder(s) stored in DB / config
 - [x] Directory scanner: walk folders, hash files, upsert index
-- [x] Metadata extraction — audio (artist, album, track, duration, bitrate), video (duration, chapters), ebook, documents
+- [x] Metadata extraction — audio/video (artist, album, track, duration, bitrate, etc.) via music-metadata
+- [ ] Metadata extraction — ebook, document, and image metadata (not yet implemented)
 - [x] Detect changed files (mtime / size delta before re-hashing)
 - [x] Periodic background rescan (configurable interval)
 - [x] Manual rescan trigger (API endpoint)

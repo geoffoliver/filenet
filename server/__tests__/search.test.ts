@@ -119,6 +119,12 @@ describe('searchFiles — query matching', () => {
     expect(result.files[0].filename).toBe('hey_jude.mp3');
   });
 
+  it('matches path directory components', async () => {
+    const result = await searchFiles(prisma, { query: 'videos' });
+    expect(result.total).toBe(1);
+    expect(result.files[0].filename).toBe('movie.mp4');
+  });
+
   it('returns empty results when no files match', async () => {
     const result = await searchFiles(prisma, { query: 'zzznomatch' });
     expect(result.total).toBe(0);
