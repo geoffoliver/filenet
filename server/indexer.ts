@@ -138,9 +138,10 @@ export async function removeStaleEntries(
         : {
             lastSeenAt: { lt: scanStart },
             NOT: {
-              OR: protectedRoots.map((root) => ({
-                path: { startsWith: root.endsWith(sep) ? root : root + sep },
-              })),
+              OR: protectedRoots.flatMap((root) => {
+                const normalized = root.endsWith(sep) ? root.slice(0, -1) : root;
+                return [{ path: normalized }, { path: { startsWith: normalized + sep } }];
+              }),
             },
           },
   });
@@ -209,8 +210,8 @@ export function startPeriodicRescan(
 
   async function tick() {
     if (stopped) return;
-    const folders = await getFolders();
     try {
+      const folders = await getFolders();
       await scanAndIndex(prisma, folders);
     } catch (err) {
       console.error('Periodic rescan failed:', err);
@@ -220,25 +221,26 @@ export function startPeriodicRescan(
 
   async function scheduleNext() {
     if (stopped) return;
+    let intervalMinutes = 0;
     try {
-      const intervalMinutes = await getIntervalMinutes();
-      if (stopped) return;
-      if (intervalMinutes <= 0) {
-        // Disabled for now — re-check in 1 minute in case it's later enabled via settings
-        timerId = setTimeout(
-          () =>
-            scheduleNext().catch((err) => console.error('Periodic rescan schedule failed:', err)),
-          60_000,
-        );
-        return;
-      }
-      timerId = setTimeout(
-        () => tick().catch((err) => console.error('Periodic rescan tick failed:', err)),
-        intervalMinutes * 60_000,
-      );
+      intervalMinutes = await getIntervalMinutes();
     } catch (err) {
       console.error('Failed to read rescan interval:', err);
+      // Fall through with intervalMinutes = 0, scheduling a retry below
     }
+    if (stopped) return;
+    if (!Number.isFinite(intervalMinutes) || intervalMinutes <= 0) {
+      // Disabled or invalid — re-check in 1 minute in case it's later enabled via settings
+      timerId = setTimeout(
+        () => scheduleNext().catch((err) => console.error('Periodic rescan schedule failed:', err)),
+        60_000,
+      );
+      return;
+    }
+    timerId = setTimeout(
+      () => tick().catch((err) => console.error('Periodic rescan tick failed:', err)),
+      intervalMinutes * 60_000,
+    );
   }
 
   scheduleNext().catch((err) => console.error('Periodic rescan init failed:', err));

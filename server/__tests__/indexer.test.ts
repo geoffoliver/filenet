@@ -297,6 +297,16 @@ describe('removeStaleEntries', () => {
     expect(await prisma.sharedFile.findFirst({ where: { path: protectedPath } })).not.toBeNull();
     expect(await prisma.sharedFile.findFirst({ where: { path: stalePath } })).toBeNull();
   });
+
+  it('preserves a stale record whose path exactly equals the protected root', async () => {
+    const filePath = join(tmpDir, 'exact-root-match.txt');
+    await writeFile(filePath, 'exact');
+    await indexFile(prisma, filePath, new Date(1000));
+    // Protect the file's own path (as if it were a non-directory "shared folder")
+    const removed = await removeStaleEntries(prisma, new Date(), [filePath]);
+    expect(removed).toBe(0);
+    expect(await prisma.sharedFile.findFirst({ where: { path: filePath } })).not.toBeNull();
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -494,5 +504,36 @@ describe('startPeriodicRescan', () => {
     stop();
     // after the first call, interval drops to 20ms — we may get more calls
     expect(calls).toBeGreaterThanOrEqual(1);
+  });
+
+  it('reschedules after getFolders throws', async () => {
+    let calls = 0;
+    let shouldThrow = true;
+    const getFolders = async () => {
+      calls++;
+      if (shouldThrow) {
+        shouldThrow = false;
+        throw new Error('transient getFolders error');
+      }
+      return [];
+    };
+    const stop = startPeriodicRescan(prisma, getFolders, async () => 25 / 60_000);
+    await Bun.sleep(100);
+    stop();
+    // First call throws, but rescan is rescheduled and fires again
+    expect(calls).toBeGreaterThanOrEqual(2);
+  });
+
+  it('does not fire immediately when getIntervalMinutes returns NaN', async () => {
+    let calls = 0;
+    const getFolders = async () => {
+      calls++;
+      return [];
+    };
+    const stop = startPeriodicRescan(prisma, getFolders, async () => NaN);
+    await Bun.sleep(50);
+    stop();
+    // NaN → treated as disabled → 60-second fallback, not an immediate fire
+    expect(calls).toBe(0);
   });
 });
