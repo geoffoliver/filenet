@@ -66,8 +66,10 @@ export async function scanDirectory(dir: string): Promise<string[]> {
     let entries: string[];
     try {
       entries = await readdir(current);
-    } catch {
-      return;
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code === 'ENOENT' || code === 'EACCES') return;
+      throw err;
     }
     for (const entry of entries) {
       if (entry.startsWith('.')) continue;
@@ -83,7 +85,7 @@ export async function scanDirectory(dir: string): Promise<string[]> {
       if (s.isSymbolicLink()) continue;
       if (s.isDirectory()) {
         await walk(fullPath);
-      } else {
+      } else if (s.isFile()) {
         results.push(fullPath);
       }
     }
@@ -94,9 +96,9 @@ export async function scanDirectory(dir: string): Promise<string[]> {
 }
 
 export async function indexFile(prisma: PrismaClient, path: string): Promise<SharedFile> {
-  const s = await stat(path);
-  const size = BigInt(s.size);
-  const fileModifiedAt = new Date(s.mtimeMs);
+  const s = await stat(path, { bigint: true });
+  const size = s.size;
+  const fileModifiedAt = new Date(Number(s.mtimeMs));
 
   const existing = await prisma.sharedFile.findUnique({ where: { path } });
   if (
