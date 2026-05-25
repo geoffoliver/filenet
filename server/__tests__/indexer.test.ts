@@ -203,6 +203,24 @@ describe('indexFile', () => {
     const record = await indexFile(prisma, path);
     expect(record.mimeType).toBeTruthy();
   });
+
+  it('updates indexedAt when file content changes', async () => {
+    const path = join(tmpDir, 'index-indexedat.txt');
+    await writeFile(path, 'original');
+    const first = await indexFile(prisma, path);
+    await Bun.sleep(5);
+    await writeFile(path, 'changed content');
+    const second = await indexFile(prisma, path);
+    expect(second.indexedAt.getTime()).toBeGreaterThan(first.indexedAt.getTime());
+  });
+
+  it('does not update indexedAt on cache hit', async () => {
+    const path = join(tmpDir, 'index-indexedat-noop.txt');
+    await writeFile(path, 'stable');
+    const first = await indexFile(prisma, path);
+    const second = await indexFile(prisma, path);
+    expect(second.indexedAt.getTime()).toBe(first.indexedAt.getTime());
+  });
 });
 
 // ---------------------------------------------------------------------------

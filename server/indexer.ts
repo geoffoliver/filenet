@@ -120,7 +120,16 @@ export async function indexFile(
   return prisma.sharedFile.upsert({
     where: { path },
     create: { path, filename, size, sha256, mimeType, metadata, fileModifiedAt, lastSeenAt },
-    update: { filename, size, sha256, mimeType, metadata, fileModifiedAt, lastSeenAt },
+    update: {
+      filename,
+      size,
+      sha256,
+      mimeType,
+      metadata,
+      fileModifiedAt,
+      lastSeenAt,
+      indexedAt: new Date(),
+    },
   });
 }
 

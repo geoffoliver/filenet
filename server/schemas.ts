@@ -30,7 +30,11 @@ export const PatchSettingsBodySchema = z
   })
   .strict();
 
-const coerceInt = (v: unknown) => (v !== undefined && v !== '' ? Number(v) : undefined);
+const coerceInt = (v: unknown) => {
+  if (v === undefined) return undefined;
+  const s = typeof v === 'string' ? v.trim() : String(v);
+  return s === '' ? undefined : Number(s);
+};
 
 export const SearchQuerySchema = z.object({
   q: z.string().optional().default(''),

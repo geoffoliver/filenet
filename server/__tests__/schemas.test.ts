@@ -278,6 +278,20 @@ describe('SearchQuerySchema', () => {
   it('accepts limit of 200', () => {
     expect(SearchQuerySchema.safeParse({ limit: '200' }).success).toBe(true);
   });
+
+  it('treats whitespace-only limit as absent and uses default', () => {
+    const r = SearchQuerySchema.safeParse({ limit: '   ' });
+    expect(r.success).toBe(true);
+    if (!r.success) return;
+    expect(r.data.limit).toBe(50);
+  });
+
+  it('treats whitespace-only offset as absent and uses default', () => {
+    const r = SearchQuerySchema.safeParse({ offset: '   ' });
+    expect(r.success).toBe(true);
+    if (!r.success) return;
+    expect(r.data.offset).toBe(0);
+  });
 });
 
 describe('FriendRequestMessageSchema', () => {
