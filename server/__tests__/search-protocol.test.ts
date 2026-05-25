@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'bun:test';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import crypto from 'node:crypto';
 import { execSync } from 'child_process';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
