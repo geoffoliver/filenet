@@ -126,17 +126,31 @@ export async function removeStaleEntries(
   prisma: PrismaClient,
   activePaths: Set<string>,
 ): Promise<number> {
-  const indexed = await prisma.sharedFile.findMany({ select: { path: true } });
-  const stale = indexed.filter((f) => !activePaths.has(f.path)).map((f) => f.path);
-  if (stale.length === 0) return 0;
-
   let removed = 0;
-  for (let i = 0; i < stale.length; i += STALE_DELETE_CHUNK) {
-    const { count } = await prisma.sharedFile.deleteMany({
-      where: { path: { in: stale.slice(i, i + STALE_DELETE_CHUNK) } },
+  let lastPath: string | undefined;
+
+  for (;;) {
+    const page = await prisma.sharedFile.findMany({
+      select: { path: true },
+      take: STALE_DELETE_CHUNK,
+      where: lastPath !== undefined ? { path: { gt: lastPath } } : undefined,
+      orderBy: { path: 'asc' },
     });
-    removed += count;
+
+    if (page.length === 0) break;
+    lastPath = page[page.length - 1].path;
+
+    const stale = page.filter((f) => !activePaths.has(f.path)).map((f) => f.path);
+    if (stale.length > 0) {
+      const { count } = await prisma.sharedFile.deleteMany({
+        where: { path: { in: stale } },
+      });
+      removed += count;
+    }
+
+    if (page.length < STALE_DELETE_CHUNK) break;
   }
+
   return removed;
 }
 
@@ -144,23 +158,23 @@ export async function scanAndIndex(
   prisma: PrismaClient,
   folders: string[],
 ): Promise<{ indexed: number; removed: number }> {
-  const allPaths: string[] = [];
+  const activePaths = new Set<string>();
   for (const folder of folders) {
-    const files = await scanDirectory(folder);
-    allPaths.push(...files);
+    for (const p of await scanDirectory(folder)) activePaths.add(p);
   }
 
   let indexed = 0;
-  for (const path of allPaths) {
+  for (const path of activePaths) {
     try {
       await indexFile(prisma, path);
       indexed++;
     } catch (err) {
-      if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code !== 'ENOENT' && code !== 'EACCES') throw err;
     }
   }
 
-  const removed = await removeStaleEntries(prisma, new Set(allPaths));
+  const removed = await removeStaleEntries(prisma, activePaths);
   return { indexed, removed };
 }
 

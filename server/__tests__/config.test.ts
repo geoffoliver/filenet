@@ -124,6 +124,14 @@ describe('updateSettings — sharedFolders and downloadFolder', () => {
     expect(safe.sharedFolders).toEqual(['/music', '/videos']);
   });
 
+  it('deduplicates sharedFolders on write', async () => {
+    const updated = await updateSettings(prisma, {
+      sharedFolders: ['/music', '/videos', '/music'],
+    });
+    const safe = sanitizeSettings(updated);
+    expect(safe.sharedFolders).toEqual(['/music', '/videos']);
+  });
+
   it('stores and retrieves downloadFolder', async () => {
     const updated = await updateSettings(prisma, { downloadFolder: '/downloads' });
     expect(updated.downloadFolder).toBe('/downloads');

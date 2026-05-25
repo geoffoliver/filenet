@@ -31,10 +31,15 @@ export function parseSharedFolders(raw: string): string[] {
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
     const seen = new Set<string>();
-    return parsed
-      .filter((x): x is string => typeof x === 'string')
-      .map((s) => s.trim())
-      .filter((s) => s.length > 0 && !seen.has(s) && seen.add(s) !== undefined);
+    const result: string[] = [];
+    for (const x of parsed) {
+      if (typeof x !== 'string') continue;
+      const trimmed = x.trim();
+      if (trimmed.length === 0 || seen.has(trimmed)) continue;
+      seen.add(trimmed);
+      result.push(trimmed);
+    }
+    return result;
   } catch {
     return [];
   }
@@ -59,7 +64,7 @@ export async function updateSettings(
   const { sharedFolders, ...rest } = patch;
   const data: Partial<Settings> = { ...rest };
   if (sharedFolders !== undefined) {
-    data.sharedFolders = JSON.stringify(sharedFolders);
+    data.sharedFolders = JSON.stringify([...new Set(sharedFolders)]);
   }
   return prisma.settings.upsert({
     where: { id: SETTINGS_ID },

@@ -422,6 +422,15 @@ describe('GET /api/search', () => {
     expect(body.files).toHaveLength(2);
   });
 
+  it('serializes size as a string', async () => {
+    const res = await makeHandler()(req('/api/search'));
+    const body = await res.json();
+    // files ordered by filename asc: readme.txt (500), song.mp3 (1000)
+    expect(body.files[0].filename).toBe('readme.txt');
+    expect(body.files[0].size).toBe('500');
+    expect(typeof body.files[0].size).toBe('string');
+  });
+
   it('filters by query string', async () => {
     const res = await makeHandler()(req('/api/search?q=song'));
     expect(res.status).toBe(200);

@@ -26,7 +26,7 @@ export const PatchSettingsBodySchema = z
     autoAcceptFromFriendsOfFriends: z.boolean().optional(),
     sharedFolders: z.array(z.string().trim().min(1)).optional(),
     downloadFolder: z.string().trim().min(1).nullable().optional(),
-    rescanIntervalMinutes: z.int().min(0).optional(),
+    rescanIntervalMinutes: z.int().min(0).max(35791).optional(),
   })
   .strict();
 

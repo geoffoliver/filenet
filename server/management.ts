@@ -1,4 +1,4 @@
-import type { PrismaClient } from '@prisma/client';
+import type { PrismaClient, SharedFile } from '@prisma/client';
 
 import {
   AddFriendBodySchema,
@@ -25,8 +25,32 @@ import type { Identity } from './identity';
 import { scanAndIndex } from './indexer';
 import { searchFiles } from './search';
 
-function jsonStringify(data: unknown): string {
-  return JSON.stringify(data, (_, v) => (typeof v === 'bigint' ? v.toString() : v));
+type SharedFileDto = {
+  id: string;
+  path: string;
+  filename: string;
+  size: string;
+  sha256: string;
+  mimeType: string | null;
+  metadata: string | null;
+  fileModifiedAt: string | null;
+  indexedAt: string;
+  updatedAt: string;
+};
+
+function toSharedFileDto(file: SharedFile): SharedFileDto {
+  return {
+    id: file.id,
+    path: file.path,
+    filename: file.filename,
+    size: file.size.toString(),
+    sha256: file.sha256,
+    mimeType: file.mimeType,
+    metadata: file.metadata,
+    fileModifiedAt: file.fileModifiedAt?.toISOString() ?? null,
+    indexedAt: file.indexedAt.toISOString(),
+    updatedAt: file.updatedAt.toISOString(),
+  };
 }
 
 export type ConnectPeerFn = (
@@ -157,8 +181,9 @@ export function createManagementFetch(deps: ManagementDeps): (req: Request) => P
         }
         const { q, type, limit, offset } = result.data;
         const searchResult = await searchFiles(prisma, { query: q, type, limit, offset });
-        return new Response(jsonStringify(searchResult), {
-          headers: { 'Content-Type': 'application/json' },
+        return Response.json({
+          files: searchResult.files.map(toSharedFileDto),
+          total: searchResult.total,
         });
       }
 

@@ -158,6 +158,17 @@ describe('PatchSettingsBodySchema', () => {
     expect(PatchSettingsBodySchema.safeParse({ sharedFolders: [''] }).success).toBe(false);
   });
 
+  it('rejects sharedFolders with whitespace-only elements', () => {
+    expect(PatchSettingsBodySchema.safeParse({ sharedFolders: ['   '] }).success).toBe(false);
+  });
+
+  it('trims whitespace from sharedFolders elements', () => {
+    const r = PatchSettingsBodySchema.safeParse({ sharedFolders: ['  /music  ', '/videos'] });
+    expect(r.success).toBe(true);
+    if (!r.success) return;
+    expect(r.data.sharedFolders).toEqual(['/music', '/videos']);
+  });
+
   it('rejects non-array sharedFolders', () => {
     expect(PatchSettingsBodySchema.safeParse({ sharedFolders: '/music' }).success).toBe(false);
   });
@@ -205,6 +216,15 @@ describe('PatchSettingsBodySchema', () => {
 
   it('rejects non-integer rescanIntervalMinutes', () => {
     expect(PatchSettingsBodySchema.safeParse({ rescanIntervalMinutes: 1.5 }).success).toBe(false);
+  });
+
+  it('rejects rescanIntervalMinutes above 35791 (setInterval overflow guard)', () => {
+    expect(PatchSettingsBodySchema.safeParse({ rescanIntervalMinutes: 35792 }).success).toBe(false);
+  });
+
+  it('accepts rescanIntervalMinutes at the maximum (35791)', () => {
+    const r = PatchSettingsBodySchema.safeParse({ rescanIntervalMinutes: 35791 });
+    expect(r.success).toBe(true);
   });
 });
 
