@@ -160,6 +160,23 @@ describe('scanDirectory', () => {
     expect(await collect(scanDirectory(filePath))).toEqual([]);
   });
 
+  it('reports entries whose lstat fails as inaccessible', async () => {
+    // Remove execute permission on parent so lstat of children fails with EACCES
+    const dir = join(tmpDir, 'scan-lstat-eacces');
+    const subDir = join(dir, 'sub');
+    await mkdir(dir);
+    await mkdir(subDir);
+    await writeFile(join(subDir, 'file.txt'), 'content');
+    const inaccessibleDirs = new Set<string>();
+    await chmod(dir, 0o400); // readable but not executable — lstat on children fails
+    try {
+      await collect(scanDirectory(dir, false, inaccessibleDirs));
+      expect(inaccessibleDirs.has(subDir)).toBe(true);
+    } finally {
+      await chmod(dir, 0o755);
+    }
+  });
+
   it('reports inaccessible subdirectories via inaccessibleDirs set', async () => {
     const dir = join(tmpDir, 'scan-report-inaccessible');
     const subDir = join(dir, 'locked-sub');

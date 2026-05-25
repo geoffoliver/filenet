@@ -81,7 +81,12 @@ export async function* scanDirectory(
       s = await lstat(fullPath);
     } catch (err) {
       const code = (err as NodeJS.ErrnoException).code;
-      if (code === 'ENOENT' || code === 'EACCES' || code === 'ENOTDIR') continue;
+      if (code === 'ENOENT') continue;
+      if (code === 'EACCES' || code === 'ENOTDIR') {
+        // Can't read metadata — protect both this path and any descendants it may have
+        inaccessibleDirs?.add(fullPath);
+        continue;
+      }
       throw err;
     }
     if (s.isSymbolicLink()) continue;
