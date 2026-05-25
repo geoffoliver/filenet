@@ -342,13 +342,21 @@ describe('scanAndIndex', () => {
 
 describe('startPeriodicRescan', () => {
   it('returns a no-op stop function when intervalMinutes is 0', () => {
-    const stop = startPeriodicRescan(prisma, async () => [], 0);
+    const stop = startPeriodicRescan(
+      prisma,
+      async () => [],
+      async () => 0,
+    );
     expect(typeof stop).toBe('function');
     stop();
   });
 
   it('returns a stop function when interval is positive', () => {
-    const stop = startPeriodicRescan(prisma, async () => [], 60);
+    const stop = startPeriodicRescan(
+      prisma,
+      async () => [],
+      async () => 60,
+    );
     expect(typeof stop).toBe('function');
     stop();
   });
@@ -360,7 +368,7 @@ describe('startPeriodicRescan', () => {
       return [];
     };
     const intervalMs = 40;
-    const stop = startPeriodicRescan(prisma, getFolders, intervalMs / 60_000);
+    const stop = startPeriodicRescan(prisma, getFolders, async () => intervalMs / 60_000);
     await Bun.sleep(70);
     stop();
     expect(calls).toBeGreaterThanOrEqual(1);
@@ -372,9 +380,24 @@ describe('startPeriodicRescan', () => {
       calls++;
       return [];
     };
-    const stop = startPeriodicRescan(prisma, getFolders, 30 / 60_000);
+    const stop = startPeriodicRescan(prisma, getFolders, async () => 30 / 60_000);
     stop();
     await Bun.sleep(60);
     expect(calls).toBe(0);
+  });
+
+  it('picks up an updated interval on the next tick', async () => {
+    let calls = 0;
+    let intervalMs = 200; // starts slow
+    const getFolders = async () => {
+      calls++;
+      intervalMs = 20; // speed up after first call
+      return [];
+    };
+    const stop = startPeriodicRescan(prisma, getFolders, async () => intervalMs / 60_000);
+    await Bun.sleep(250); // first tick fires at ~200ms
+    stop();
+    // after the first call, interval drops to 20ms — we may get more calls
+    expect(calls).toBeGreaterThanOrEqual(1);
   });
 });

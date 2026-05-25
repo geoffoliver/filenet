@@ -20,15 +20,20 @@ console.log(`Node ID:   ${identity.nodeId}`);
 console.log(`P2P port:  ${PORT}`);
 console.log(`Mgmt port: ${MGMT_PORT} (localhost only)`);
 
-const initialSettings = await getOrCreateSettings(prisma);
-startPeriodicRescan(
+const stopRescan = startPeriodicRescan(
   prisma,
   async () => {
     const s = await getOrCreateSettings(prisma);
     return parseSharedFolders(s.sharedFolders);
   },
-  initialSettings.rescanIntervalMinutes,
+  async () => {
+    const s = await getOrCreateSettings(prisma);
+    return s.rescanIntervalMinutes;
+  },
 );
+
+process.on('SIGTERM', stopRescan);
+process.on('SIGINT', stopRescan);
 
 // Management API — localhost only, no WebSocket upgrade
 Bun.serve({

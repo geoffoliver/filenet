@@ -170,13 +170,43 @@ export async function scanAndIndex(
 export function startPeriodicRescan(
   prisma: PrismaClient,
   getFolders: () => Promise<string[]>,
-  intervalMinutes: number,
+  getIntervalMinutes: () => Promise<number>,
 ): () => void {
-  if (intervalMinutes <= 0) return () => {};
-  const id = setInterval(() => {
-    getFolders()
-      .then((folders) => scanAndIndex(prisma, folders))
-      .catch((err) => console.error('Periodic rescan failed:', err));
-  }, intervalMinutes * 60_000);
-  return () => clearInterval(id);
+  let stopped = false;
+  let timerId: ReturnType<typeof setTimeout> | null = null;
+
+  async function tick() {
+    if (stopped) return;
+    const folders = await getFolders();
+    try {
+      await scanAndIndex(prisma, folders);
+    } catch (err) {
+      console.error('Periodic rescan failed:', err);
+    }
+    if (!stopped) scheduleNext();
+  }
+
+  async function scheduleNext() {
+    if (stopped) return;
+    try {
+      const intervalMinutes = await getIntervalMinutes();
+      if (intervalMinutes <= 0 || stopped) return;
+      timerId = setTimeout(
+        () => tick().catch((err) => console.error('Periodic rescan tick failed:', err)),
+        intervalMinutes * 60_000,
+      );
+    } catch (err) {
+      console.error('Failed to read rescan interval:', err);
+    }
+  }
+
+  scheduleNext().catch((err) => console.error('Periodic rescan init failed:', err));
+
+  return () => {
+    stopped = true;
+    if (timerId !== null) {
+      clearTimeout(timerId);
+      timerId = null;
+    }
+  };
 }
