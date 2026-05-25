@@ -14,7 +14,9 @@ import type { Identity } from './identity';
 
 export const DEFAULT_TTL = 3;
 export const SEARCH_TIMEOUT_MS = 5_000;
+export const MAX_NETWORK_RESULTS = 200;
 const ROUTE_EXPIRY_MS = 10 * 60 * 1_000;
+const PRUNE_INTERVAL_MS = 60_000;
 const VALID_FILE_TYPES = new Set<string>(['all', 'audio', 'video', 'image', 'document', 'ebook']);
 
 export type NetworkResult = SearchResultItem & { nodeId: string };
@@ -36,8 +38,11 @@ const searchRoutes = new Map<string, { returnPeer: ConnectedPeer | null; expires
 // Pending outbound searches waiting to collect results
 const pendingSearches = new Map<string, PendingSearch>();
 
+let lastPruneAt = 0;
+
 function pruneExpired(): void {
   const now = Date.now();
+  lastPruneAt = now;
   for (const [id, ts] of seenSearchIds) {
     if (ts < now - ROUTE_EXPIRY_MS) seenSearchIds.delete(id);
   }
@@ -48,8 +53,15 @@ function pruneExpired(): void {
 
 function markSeen(searchId: string): boolean {
   if (seenSearchIds.has(searchId)) return false;
-  seenSearchIds.set(searchId, Date.now());
-  if (seenSearchIds.size > 10_000 || searchRoutes.size > 10_000) pruneExpired();
+  const now = Date.now();
+  seenSearchIds.set(searchId, now);
+  if (
+    seenSearchIds.size > 10_000 ||
+    searchRoutes.size > 10_000 ||
+    now - lastPruneAt > PRUNE_INTERVAL_MS
+  ) {
+    pruneExpired();
+  }
   return true;
 }
 
@@ -65,10 +77,11 @@ export function handleSearchResult(
   if (!route) return;
 
   if (route.returnPeer === null) {
-    // We originated this search — collect results
+    // We originated this search — collect results up to the cap
     const pending = pendingSearches.get(msg.searchId);
     if (!pending) return;
     for (const item of msg.results) {
+      if (pending.results.length >= MAX_NETWORK_RESULTS) break;
       const key = `${msg.fromNodeId}:${item.sha256}`;
       if (!pending.seenKeys.has(key)) {
         pending.seenKeys.add(key);
@@ -128,7 +141,7 @@ export async function handleSearchRequest(
     }
   }
 
-  // Forward with TTL decremented, skipping the peer that sent it to us
+  // Forward with TTL decremented; ttl=1 means "process locally only, do not forward"
   if (msg.ttl > 1) {
     const forward: SearchRequestMessage = { ...msg, ttl: msg.ttl - 1 };
     for (const peer of allPeers) {
@@ -179,7 +192,11 @@ export async function initiateNetworkSearch(
     };
 
     for (const peer of peers) {
-      sendFn(peer, msg);
+      try {
+        sendFn(peer, msg);
+      } catch {
+        // peer disconnected before search could be sent
+      }
     }
   });
 }

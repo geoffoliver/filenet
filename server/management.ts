@@ -124,7 +124,11 @@ export function createManagementFetch(deps: ManagementDeps): (req: Request) => P
             if (updated.nodeId) {
               const peer = getConnectedPeer(updated.nodeId);
               if (peer) {
-                notifyFriendAccepted(peer, localName);
+                try {
+                  notifyFriendAccepted(peer, localName);
+                } catch {
+                  // peer disconnected between lookup and send
+                }
               } else {
                 connectPeer(updated.address, updated.port)
                   .then((p) => {
@@ -144,7 +148,13 @@ export function createManagementFetch(deps: ManagementDeps): (req: Request) => P
             await rejectFriendRequest(prisma, id);
             if (friend.nodeId) {
               const peer = getConnectedPeer(friend.nodeId);
-              if (peer) notifyFriendRejected(peer);
+              if (peer) {
+                try {
+                  notifyFriendRejected(peer);
+                } catch {
+                  // peer disconnected between lookup and send
+                }
+              }
               closeAndUnregisterPeer(friend.nodeId);
             }
             return new Response(null, { status: 204 });

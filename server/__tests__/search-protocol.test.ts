@@ -9,6 +9,7 @@ import type { PrismaClient } from '@prisma/client';
 
 import {
   DEFAULT_TTL,
+  MAX_NETWORK_RESULTS,
   handleSearchRequest,
   handleSearchResult,
   initiateNetworkSearch,
@@ -501,5 +502,53 @@ describe('initiateNetworkSearch', () => {
 
     const results = await networkResultsPromise;
     expect(results.filter((r) => r.sha256 === 'c'.repeat(64))).toHaveLength(1);
+  });
+
+  it('caps collected results at MAX_NETWORK_RESULTS', async () => {
+    const peer = makePeer('cap-peer');
+    const sent: { peer: ConnectedPeer; msg: InnerMessage }[] = [];
+
+    const networkResultsPromise = initiateNetworkSearch(
+      identity,
+      [peer],
+      { query: 'cap-test', fileType: 'all' },
+      200,
+      captureAll(sent),
+    );
+
+    await Bun.sleep(10);
+    const reqMsg = sent[0].msg as SearchRequestMessage;
+
+    for (let i = 0; i < MAX_NETWORK_RESULTS + 10; i++) {
+      const sha256 = i.toString(16).padStart(64, '0');
+      handleSearchResult({
+        type: 'search-result',
+        searchId: reqMsg.searchId,
+        fromNodeId: 'cap-peer',
+        results: [
+          { filename: `file${i}.mp3`, size: '100', sha256, mimeType: null, metadata: null },
+        ],
+      });
+    }
+
+    const results = await networkResultsPromise;
+    expect(results.length).toBeLessThanOrEqual(MAX_NETWORK_RESULTS);
+  });
+
+  it('does not throw when sendFn throws during fan-out', async () => {
+    const peer = makePeer('throw-fanout-peer');
+    const throwFn = () => {
+      throw new Error('send failed during fan-out');
+    };
+
+    await expect(
+      initiateNetworkSearch(
+        identity,
+        [peer],
+        { query: 'throw-fanout', fileType: 'all' },
+        100,
+        throwFn,
+      ),
+    ).resolves.toEqual([]);
   });
 });

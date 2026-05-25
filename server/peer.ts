@@ -178,14 +178,18 @@ export async function dispatchMessage(
   if (msg.type === 'search-request') {
     const result = SearchRequestMessageSchema.safeParse(msg);
     if (!result.success) return; // malformed — drop
+    // Targeted check first so non-friends can't trigger a full-table scan
+    const senderFriend = await ws.data.prisma.friend.findFirst({
+      where: { nodeId: state.peerNodeId, status: 'ACCEPTED' },
+    });
+    if (!senderFriend) return; // not an accepted friend — drop
+    const fromPeer = getConnectedPeer(state.peerNodeId);
+    if (!fromPeer) return;
     const acceptedFriends = await ws.data.prisma.friend.findMany({
       where: { status: 'ACCEPTED', nodeId: { not: null } },
       select: { nodeId: true },
     });
     const acceptedNodeIds = new Set(acceptedFriends.map((f) => f.nodeId as string));
-    if (!acceptedNodeIds.has(state.peerNodeId)) return; // not an accepted friend — drop
-    const fromPeer = getConnectedPeer(state.peerNodeId);
-    if (!fromPeer) return;
     const acceptedPeers = getAllConnectedPeers().filter((p) => acceptedNodeIds.has(p.peerNodeId));
     await handleSearchRequest(
       result.data,
@@ -204,7 +208,8 @@ export async function dispatchMessage(
       where: { nodeId: state.peerNodeId, status: 'ACCEPTED' },
     });
     if (!isFriend) return; // not an accepted friend — drop
-    handleSearchResult(result.data);
+    // Override fromNodeId with the actual sender to prevent spoofing
+    handleSearchResult({ ...result.data, fromNodeId: state.peerNodeId });
     return;
   }
 }

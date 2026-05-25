@@ -10,7 +10,7 @@ import type { PrismaClient } from '@prisma/client';
 import type { ServerWebSocket } from 'bun';
 
 import { type ConnectedPeer, registerPeer, unregisterPeer } from '../connections';
-import { DEFAULT_TTL, handleSearchResult, initiateNetworkSearch } from '../search-protocol';
+import { DEFAULT_TTL, initiateNetworkSearch } from '../search-protocol';
 import type { InnerMessage, SearchRequestMessage, SearchResultMessage } from '../types';
 import { type PeerData, dispatchMessage } from '../peer';
 import { createPrismaClient } from '../db';
@@ -315,11 +315,68 @@ describe('dispatchMessage — search-result auth gate', () => {
 });
 
 // ---------------------------------------------------------------------------
-// handleSearchResult relay — re-export for coverage
+// fromNodeId spoof prevention
 // ---------------------------------------------------------------------------
 
-describe('handleSearchResult (re-exported)', () => {
-  it('is the same function used by dispatchMessage', () => {
-    expect(typeof handleSearchResult).toBe('function');
+describe('dispatchMessage — fromNodeId override', () => {
+  it('overrides spoofed fromNodeId with the actual sender peerNodeId', async () => {
+    const friendNodeId = 'spoof-friend-' + crypto.randomUUID();
+    await prisma.friend.create({
+      data: {
+        name: 'Friend',
+        address: '127.0.0.1',
+        port: 7734,
+        nodeId: friendNodeId,
+        status: 'ACCEPTED',
+      },
+    });
+
+    const dummyPeer = {
+      peerNodeId: 'dummy-spoof',
+      peerPublicKey: Buffer.alloc(32),
+      address: '127.0.0.1',
+      port: 7734,
+      sessionKey: Buffer.alloc(32),
+      ws: { send() {}, close() {} },
+    } as ConnectedPeer;
+    const searchSent: { peer: ConnectedPeer; msg: InnerMessage }[] = [];
+    const searchPromise = initiateNetworkSearch(
+      identity,
+      [dummyPeer],
+      { query: 'spoof-test', fileType: 'all' },
+      200,
+      captureAll(searchSent),
+    );
+
+    await Bun.sleep(10);
+    const searchId = (searchSent[0].msg as SearchRequestMessage).searchId;
+
+    const { dispatchWs, mockWs } = makeMockWs(friendNodeId);
+    registerPeer(mockWs, Buffer.alloc(32), friendNodeId, Buffer.alloc(32), '127.0.0.1', 0);
+
+    // Friend tries to claim the result came from 'impersonated-node', not themselves
+    const resultMsg: SearchResultMessage = {
+      type: 'search-result',
+      searchId,
+      fromNodeId: 'impersonated-node',
+      results: [
+        {
+          filename: 'spoofed.mp3',
+          size: '100',
+          sha256: '2'.repeat(64),
+          mimeType: null,
+          metadata: null,
+        },
+      ],
+    };
+
+    await dispatchMessage(dispatchWs, resultMsg);
+    unregisterPeer(friendNodeId);
+
+    const results = await searchPromise;
+    const found = results.find((r) => r.sha256 === '2'.repeat(64));
+    expect(found).toBeDefined();
+    expect(found?.nodeId).toBe(friendNodeId); // attributed to actual sender
+    expect(found?.nodeId).not.toBe('impersonated-node'); // not the spoofed ID
   });
 });
