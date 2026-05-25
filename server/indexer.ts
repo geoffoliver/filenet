@@ -113,15 +113,16 @@ export async function indexFile(
   const size = s.size;
   const fileModifiedAt = new Date(Number(s.mtimeMs));
 
-  const existing = await prisma.sharedFile.findUnique({ where: { path } });
-  if (
-    existing &&
-    existing.size === size &&
-    existing.fileModifiedAt?.getTime() === fileModifiedAt.getTime()
-  ) {
-    return prisma.sharedFile.update({ where: { path }, data: { lastSeenAt } });
+  // Fast path: if size and mtime match, touch lastSeenAt without re-hashing
+  const hit = await prisma.sharedFile.updateMany({
+    where: { path, size, fileModifiedAt },
+    data: { lastSeenAt },
+  });
+  if (hit.count > 0) {
+    return prisma.sharedFile.findUniqueOrThrow({ where: { path } });
   }
 
+  // File is new or content changed — full re-index
   const sha256 = await hashFile(path);
   const mimeType = Bun.file(path).type || null;
   const metaObj = await extractMetadata(path);
@@ -165,6 +166,9 @@ export async function removeStaleEntries(
   });
   return count;
 }
+
+// 35791 * 60_000 ms = 2_147_460_000 ms, just under setTimeout's 32-bit signed limit (2_147_483_647)
+const MAX_RESCAN_INTERVAL_MINUTES = 35791;
 
 let scanning = false;
 
@@ -270,8 +274,12 @@ export function startPeriodicRescan(
       // Fall through with intervalMinutes = 0, scheduling a retry below
     }
     if (stopped) return;
-    if (!Number.isFinite(intervalMinutes) || intervalMinutes <= 0) {
-      // Disabled or invalid — re-check in 1 minute in case it's later enabled via settings
+    if (
+      !Number.isFinite(intervalMinutes) ||
+      intervalMinutes <= 0 ||
+      intervalMinutes > MAX_RESCAN_INTERVAL_MINUTES
+    ) {
+      // Disabled, invalid, or would overflow setTimeout's 32-bit ms limit — re-check in 1 minute
       timerId = setTimeout(
         () => scheduleNext().catch((err) => console.error('Periodic rescan schedule failed:', err)),
         60_000,

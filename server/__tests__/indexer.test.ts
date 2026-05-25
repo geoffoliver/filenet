@@ -633,6 +633,19 @@ describe('startPeriodicRescan', () => {
     expect(calls).toBeGreaterThanOrEqual(2);
   });
 
+  it('does not fire immediately when getIntervalMinutes returns a value that would overflow setTimeout', async () => {
+    let calls = 0;
+    const getFolders = async () => {
+      calls++;
+      return [];
+    };
+    // 35792 * 60_000 > 2^31 - 1 — would overflow setTimeout's 32-bit ms limit
+    const stop = startPeriodicRescan(prisma, getFolders, async () => 35792);
+    await Bun.sleep(50);
+    stop();
+    expect(calls).toBe(0);
+  });
+
   it('does not fire immediately when getIntervalMinutes returns NaN', async () => {
     let calls = 0;
     const getFolders = async () => {
