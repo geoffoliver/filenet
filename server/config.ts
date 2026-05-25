@@ -29,7 +29,12 @@ export function sanitizeSettings(settings: Settings): SafeSettings {
 export function parseSharedFolders(raw: string): string[] {
   try {
     const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed.filter((x): x is string => typeof x === 'string') : [];
+    if (!Array.isArray(parsed)) return [];
+    const seen = new Set<string>();
+    return parsed
+      .filter((x): x is string => typeof x === 'string')
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0 && !seen.has(s) && seen.add(s) !== undefined);
   } catch {
     return [];
   }

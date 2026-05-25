@@ -170,4 +170,20 @@ describe('parseSharedFolders', () => {
   it('filters out non-string values', () => {
     expect(parseSharedFolders('["/a", 42, null, "/b"]')).toEqual(['/a', '/b']);
   });
+
+  it('trims whitespace from folder paths', () => {
+    expect(parseSharedFolders('[" /music ", "/videos"]')).toEqual(['/music', '/videos']);
+  });
+
+  it('filters out blank strings after trimming', () => {
+    expect(parseSharedFolders('["/music", "   ", "/videos"]')).toEqual(['/music', '/videos']);
+  });
+
+  it('deduplicates identical paths', () => {
+    expect(parseSharedFolders('["/music", "/music", "/videos"]')).toEqual(['/music', '/videos']);
+  });
+
+  it('deduplicates paths that are identical after trimming', () => {
+    expect(parseSharedFolders('["/music", " /music ", "/videos"]')).toEqual(['/music', '/videos']);
+  });
 });

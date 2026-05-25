@@ -26,7 +26,7 @@ import { scanAndIndex } from './indexer';
 import { searchFiles } from './search';
 
 function jsonStringify(data: unknown): string {
-  return JSON.stringify(data, (_, v) => (typeof v === 'bigint' ? Number(v) : v));
+  return JSON.stringify(data, (_, v) => (typeof v === 'bigint' ? v.toString() : v));
 }
 
 export type ConnectPeerFn = (

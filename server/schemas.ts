@@ -24,7 +24,7 @@ export const PatchSettingsBodySchema = z
     invitePassword: z.string().nullable().optional(),
     autoAcceptFromAnyone: z.boolean().optional(),
     autoAcceptFromFriendsOfFriends: z.boolean().optional(),
-    sharedFolders: z.array(z.string().min(1)).optional(),
+    sharedFolders: z.array(z.string().trim().min(1)).optional(),
     downloadFolder: z.string().trim().min(1).nullable().optional(),
     rescanIntervalMinutes: z.int().min(0).optional(),
   })

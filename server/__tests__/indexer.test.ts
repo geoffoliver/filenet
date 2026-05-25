@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'bun:test';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
 import { execSync } from 'child_process';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -138,6 +138,15 @@ describe('scanDirectory', () => {
   it('returns empty array for a nonexistent directory', async () => {
     const files = await scanDirectory(join(tmpDir, 'does-not-exist'));
     expect(files).toEqual([]);
+  });
+
+  it('ignores symlinks', async () => {
+    const dir = join(tmpDir, 'scan-symlinks');
+    await mkdir(dir);
+    await writeFile(join(dir, 'real.txt'), 'real');
+    await symlink(join(dir, 'real.txt'), join(dir, 'link.txt'));
+    const files = await scanDirectory(dir);
+    expect(files).toEqual([join(dir, 'real.txt')]);
   });
 });
 

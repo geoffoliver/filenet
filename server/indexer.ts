@@ -1,5 +1,5 @@
 import { basename, extname, join } from 'node:path';
-import { readdir, stat } from 'node:fs/promises';
+import { lstat, readdir, stat } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 
@@ -74,12 +74,13 @@ export async function scanDirectory(dir: string): Promise<string[]> {
       const fullPath = join(current, entry);
       let s;
       try {
-        s = await stat(fullPath);
+        s = await lstat(fullPath);
       } catch (err) {
         const code = (err as NodeJS.ErrnoException).code;
         if (code === 'ENOENT' || code === 'EACCES') continue;
         throw err;
       }
+      if (s.isSymbolicLink()) continue;
       if (s.isDirectory()) {
         await walk(fullPath);
       } else {
