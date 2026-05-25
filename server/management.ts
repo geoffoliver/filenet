@@ -10,6 +10,7 @@ import { ConflictError, NotFoundError } from './errors';
 import {
   type ConnectedPeer,
   closeAndUnregisterPeer,
+  getAllConnectedPeers,
   getConnectedPeer,
   notifyFriendAccepted,
   notifyFriendRejected,
@@ -22,6 +23,7 @@ import {
   updateSettings,
 } from './config';
 import type { Identity } from './identity';
+import { initiateNetworkSearch } from './search-protocol';
 import { scanAndIndex } from './indexer';
 import { searchFiles } from './search';
 
@@ -179,11 +181,17 @@ export function createManagementFetch(deps: ManagementDeps): (req: Request) => P
         if (!result.success) {
           return new Response(result.error.issues[0].message, { status: 400 });
         }
-        const { q, type, limit, offset } = result.data;
-        const searchResult = await searchFiles(prisma, { query: q, type, limit, offset });
+        const { q, type, limit, offset, network } = result.data;
+        const [localResult, networkResults] = await Promise.all([
+          searchFiles(prisma, { query: q, type, limit, offset }),
+          network
+            ? initiateNetworkSearch(identity, getAllConnectedPeers(), { query: q, fileType: type })
+            : Promise.resolve([]),
+        ]);
         return Response.json({
-          files: searchResult.files.map(toSharedFileDto),
-          total: searchResult.total,
+          files: localResult.files.map(toSharedFileDto),
+          total: localResult.total,
+          network: networkResults,
         });
       }
 

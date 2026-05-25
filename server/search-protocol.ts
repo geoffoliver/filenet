@@ -1,0 +1,173 @@
+import crypto from 'node:crypto';
+
+import type { PrismaClient } from '@prisma/client';
+
+import { type ConnectedPeer, sendToPeer } from './connections';
+import { type FileType, searchFiles } from './search';
+import type {
+  InnerMessage,
+  SearchRequestMessage,
+  SearchResultItem,
+  SearchResultMessage,
+} from './types';
+import type { Identity } from './identity';
+
+export const DEFAULT_TTL = 3;
+export const SEARCH_TIMEOUT_MS = 5_000;
+const ROUTE_EXPIRY_MS = 10 * 60 * 1_000;
+const VALID_FILE_TYPES = new Set<string>(['all', 'audio', 'video', 'image', 'document', 'ebook']);
+
+export type NetworkResult = SearchResultItem & { nodeId: string };
+
+type PendingSearch = {
+  results: NetworkResult[];
+  seenKeys: Set<string>;
+  timer: ReturnType<typeof setTimeout>;
+  resolve: (results: NetworkResult[]) => void;
+};
+
+// Seen search IDs — prevents processing the same search twice (cycle prevention)
+const seenSearchIds = new Map<string, number>(); // searchId → timestamp
+
+// Return paths — who to relay results back to for each in-flight search
+// returnPeer === null means this node originated the search
+const searchRoutes = new Map<string, { returnPeer: ConnectedPeer | null; expiresAt: number }>();
+
+// Pending outbound searches waiting to collect results
+const pendingSearches = new Map<string, PendingSearch>();
+
+function pruneExpired(): void {
+  const now = Date.now();
+  for (const [id, ts] of seenSearchIds) {
+    if (ts < now - ROUTE_EXPIRY_MS) seenSearchIds.delete(id);
+  }
+  for (const [id, route] of searchRoutes) {
+    if (now > route.expiresAt) searchRoutes.delete(id);
+  }
+}
+
+function markSeen(searchId: string): boolean {
+  if (seenSearchIds.has(searchId)) return false;
+  seenSearchIds.set(searchId, Date.now());
+  if (seenSearchIds.size > 10_000) pruneExpired();
+  return true;
+}
+
+function coerceFileType(raw: string): FileType {
+  return VALID_FILE_TYPES.has(raw) ? (raw as FileType) : 'all';
+}
+
+export function handleSearchResult(
+  msg: SearchResultMessage,
+  sendFn: (peer: ConnectedPeer, msg: InnerMessage) => void = sendToPeer,
+): void {
+  const route = searchRoutes.get(msg.searchId);
+  if (!route) return;
+
+  if (route.returnPeer === null) {
+    // We originated this search — collect results
+    const pending = pendingSearches.get(msg.searchId);
+    if (!pending) return;
+    for (const item of msg.results) {
+      const key = `${msg.fromNodeId}:${item.sha256}`;
+      if (!pending.seenKeys.has(key)) {
+        pending.seenKeys.add(key);
+        pending.results.push({ ...item, nodeId: msg.fromNodeId });
+      }
+    }
+  } else {
+    // We're a relay — forward the result back up the chain
+    sendFn(route.returnPeer, msg);
+  }
+}
+
+export async function handleSearchRequest(
+  msg: SearchRequestMessage,
+  prisma: PrismaClient,
+  identity: Identity,
+  fromPeer: ConnectedPeer,
+  allPeers: ConnectedPeer[],
+  sendFn: (peer: ConnectedPeer, msg: InnerMessage) => void = sendToPeer,
+): Promise<void> {
+  if (!markSeen(msg.searchId)) return; // already seen — drop (cycle prevention)
+
+  searchRoutes.set(msg.searchId, {
+    returnPeer: fromPeer,
+    expiresAt: Date.now() + ROUTE_EXPIRY_MS,
+  });
+
+  // Execute local search and return any matching results to the sender
+  const { files } = await searchFiles(prisma, {
+    query: msg.query,
+    type: coerceFileType(msg.fileType),
+    limit: 50,
+    offset: 0,
+  });
+
+  if (files.length > 0) {
+    const resultMsg: SearchResultMessage = {
+      type: 'search-result',
+      searchId: msg.searchId,
+      fromNodeId: identity.nodeId,
+      results: files.map((f) => ({
+        filename: f.filename,
+        size: f.size.toString(),
+        sha256: f.sha256,
+        mimeType: f.mimeType,
+        metadata: f.metadata,
+      })),
+    };
+    sendFn(fromPeer, resultMsg);
+  }
+
+  // Forward with TTL decremented, skipping the peer that sent it to us
+  if (msg.ttl > 1) {
+    const forward: SearchRequestMessage = { ...msg, ttl: msg.ttl - 1 };
+    for (const peer of allPeers) {
+      if (peer.peerNodeId !== fromPeer.peerNodeId) {
+        sendFn(peer, forward);
+      }
+    }
+  }
+}
+
+export async function initiateNetworkSearch(
+  identity: Identity,
+  peers: ConnectedPeer[],
+  params: { query: string; fileType: string },
+  timeoutMs = SEARCH_TIMEOUT_MS,
+  sendFn: (peer: ConnectedPeer, msg: InnerMessage) => void = sendToPeer,
+): Promise<NetworkResult[]> {
+  if (peers.length === 0) return [];
+
+  const searchId = crypto.randomUUID();
+  markSeen(searchId);
+  searchRoutes.set(searchId, { returnPeer: null, expiresAt: Date.now() + ROUTE_EXPIRY_MS });
+
+  return new Promise((resolve) => {
+    const pending: PendingSearch = {
+      results: [],
+      seenKeys: new Set(),
+      timer: setTimeout(() => {
+        pendingSearches.delete(searchId);
+        searchRoutes.delete(searchId);
+        resolve(pending.results);
+      }, timeoutMs),
+      resolve,
+    };
+    pendingSearches.set(searchId, pending);
+
+    const msg: SearchRequestMessage = {
+      type: 'search-request',
+      searchId,
+      originNodeId: identity.nodeId,
+      query: params.query,
+      fileType: params.fileType,
+      ttl: DEFAULT_TTL,
+    };
+
+    for (const peer of peers) {
+      sendFn(peer, msg);
+    }
+  });
+}

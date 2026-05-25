@@ -1,10 +1,17 @@
 import type { PrismaClient } from '@prisma/client';
 import type { ServerWebSocket } from 'bun';
 
-import { FriendRequestMessageSchema, FriendResponseMessageSchema } from './schemas';
+import {
+  FriendRequestMessageSchema,
+  FriendResponseMessageSchema,
+  SearchRequestMessageSchema,
+  SearchResultMessageSchema,
+} from './schemas';
 import type { HelloAckMessage, HelloMessage, InnerMessage } from './types';
 import {
   closeAndUnregisterPeer,
+  getAllConnectedPeers,
+  getConnectedPeer,
   handleInboundFriendRequest,
   registerPeer,
   updatePeerPort,
@@ -18,6 +25,7 @@ import {
   finalizeHandshake,
   generateEphemeralKeypair,
 } from './handshake';
+import { handleSearchRequest, handleSearchResult } from './search-protocol';
 import type { Identity } from './identity';
 import { acceptFriendRequest } from './friends';
 
@@ -164,6 +172,29 @@ export async function dispatchMessage(
       await ws.data.prisma.friend.delete({ where: { id: friend.id } });
       closeAndUnregisterPeer(state.peerNodeId);
     }
+    return;
+  }
+
+  if (msg.type === 'search-request') {
+    const result = SearchRequestMessageSchema.safeParse(msg);
+    if (!result.success) return; // malformed — drop
+    const fromPeer = getConnectedPeer(state.peerNodeId);
+    if (!fromPeer) return;
+    await handleSearchRequest(
+      result.data,
+      ws.data.prisma,
+      ws.data.identity,
+      fromPeer,
+      getAllConnectedPeers(),
+    );
+    return;
+  }
+
+  if (msg.type === 'search-result') {
+    const result = SearchResultMessageSchema.safeParse(msg);
+    if (!result.success) return; // malformed — drop
+    handleSearchResult(result.data);
+    return;
   }
 }
 

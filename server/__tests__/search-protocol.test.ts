@@ -1,0 +1,393 @@
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'bun:test';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { execSync } from 'child_process';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
+import { unlinkSync } from 'fs';
+
+import type { PrismaClient } from '@prisma/client';
+
+import {
+  DEFAULT_TTL,
+  handleSearchRequest,
+  handleSearchResult,
+  initiateNetworkSearch,
+} from '../search-protocol';
+import type { InnerMessage, SearchRequestMessage, SearchResultMessage } from '../types';
+import type { ConnectedPeer } from '../connections';
+import type { Identity } from '../identity';
+import { createPrismaClient } from '../db';
+import { indexFile } from '../indexer';
+
+const TEST_DB_URL = 'file:./data/test-search-protocol.db';
+let prisma: PrismaClient;
+let tmpDir: string;
+
+const identity: Identity = {
+  nodeId: 'test-node-id',
+  publicKey: Buffer.alloc(32),
+  privateKey: Buffer.alloc(64),
+};
+
+function makePeer(nodeId: string): ConnectedPeer & { sent: InnerMessage[] } {
+  const sent: InnerMessage[] = [];
+  return {
+    peerNodeId: nodeId,
+    peerPublicKey: Buffer.alloc(32),
+    address: '127.0.0.1',
+    port: 7734,
+    sessionKey: Buffer.alloc(32),
+    ws: { send() {}, close() {} },
+    sent,
+  };
+}
+
+function captureAll(log: { peer: ConnectedPeer; msg: InnerMessage }[]) {
+  return (peer: ConnectedPeer, msg: InnerMessage) => log.push({ peer, msg });
+}
+
+beforeAll(async () => {
+  execSync(`bunx prisma db push --url "${TEST_DB_URL}"`, { stdio: 'pipe' });
+  prisma = createPrismaClient(TEST_DB_URL);
+  tmpDir = await mkdtemp(join(tmpdir(), 'filenet-search-proto-'));
+});
+
+afterAll(async () => {
+  await prisma.$disconnect();
+  await rm(tmpDir, { recursive: true, force: true });
+  try {
+    unlinkSync('./data/test-search-protocol.db');
+  } catch {}
+});
+
+beforeEach(async () => {
+  await prisma.sharedFile.deleteMany();
+});
+
+// ---------------------------------------------------------------------------
+// handleSearchRequest
+// ---------------------------------------------------------------------------
+
+describe('handleSearchRequest', () => {
+  it('returns local results to the sender', async () => {
+    const dir = join(tmpDir, 'hsr-basic');
+    await mkdir(dir);
+    const filePath = join(dir, 'hello.mp3');
+    await writeFile(filePath, 'fake audio');
+    await indexFile(prisma, filePath);
+
+    const fromPeer = makePeer('peer-A');
+    const sent: { peer: ConnectedPeer; msg: InnerMessage }[] = [];
+    const msg: SearchRequestMessage = {
+      type: 'search-request',
+      searchId: crypto.randomUUID(),
+      originNodeId: 'peer-A',
+      query: 'hello',
+      fileType: 'all',
+      ttl: DEFAULT_TTL,
+    };
+
+    await handleSearchRequest(msg, prisma, identity, fromPeer, [], captureAll(sent));
+
+    expect(sent).toHaveLength(1);
+    expect(sent[0].peer.peerNodeId).toBe('peer-A');
+    const result = sent[0].msg as SearchResultMessage;
+    expect(result.type).toBe('search-result');
+    expect(result.searchId).toBe(msg.searchId);
+    expect(result.fromNodeId).toBe(identity.nodeId);
+    expect(result.results.length).toBeGreaterThanOrEqual(1);
+    expect(result.results[0].filename).toBe('hello.mp3');
+  });
+
+  it('sends no result when query matches nothing', async () => {
+    const fromPeer = makePeer('peer-B');
+    const sent: { peer: ConnectedPeer; msg: InnerMessage }[] = [];
+    const msg: SearchRequestMessage = {
+      type: 'search-request',
+      searchId: crypto.randomUUID(),
+      originNodeId: 'peer-B',
+      query: 'zzz-nothing-matches-zzz',
+      fileType: 'all',
+      ttl: DEFAULT_TTL,
+    };
+
+    await handleSearchRequest(msg, prisma, identity, fromPeer, [], captureAll(sent));
+    expect(sent).toHaveLength(0);
+  });
+
+  it('forwards the request to other peers with TTL decremented', async () => {
+    const fromPeer = makePeer('peer-C');
+    const forwardPeer = makePeer('peer-D');
+    const sent: { peer: ConnectedPeer; msg: InnerMessage }[] = [];
+    const msg: SearchRequestMessage = {
+      type: 'search-request',
+      searchId: crypto.randomUUID(),
+      originNodeId: 'peer-C',
+      query: 'anything',
+      fileType: 'all',
+      ttl: 2,
+    };
+
+    await handleSearchRequest(
+      msg,
+      prisma,
+      identity,
+      fromPeer,
+      [fromPeer, forwardPeer],
+      captureAll(sent),
+    );
+
+    const forwarded = sent.filter((s) => s.peer.peerNodeId === 'peer-D');
+    expect(forwarded).toHaveLength(1);
+    expect((forwarded[0].msg as SearchRequestMessage).ttl).toBe(1);
+    expect((forwarded[0].msg as SearchRequestMessage).searchId).toBe(msg.searchId);
+  });
+
+  it('does not forward when TTL is 1', async () => {
+    const fromPeer = makePeer('peer-E');
+    const otherPeer = makePeer('peer-F');
+    const sent: { peer: ConnectedPeer; msg: InnerMessage }[] = [];
+    const msg: SearchRequestMessage = {
+      type: 'search-request',
+      searchId: crypto.randomUUID(),
+      originNodeId: 'peer-E',
+      query: 'test',
+      fileType: 'all',
+      ttl: 1,
+    };
+
+    await handleSearchRequest(
+      msg,
+      prisma,
+      identity,
+      fromPeer,
+      [fromPeer, otherPeer],
+      captureAll(sent),
+    );
+
+    const forwarded = sent.filter((s) => s.peer.peerNodeId === 'peer-F');
+    expect(forwarded).toHaveLength(0);
+  });
+
+  it('drops a duplicate search ID (cycle prevention)', async () => {
+    const fromPeer = makePeer('peer-G');
+    const sent: { peer: ConnectedPeer; msg: InnerMessage }[] = [];
+    const msg: SearchRequestMessage = {
+      type: 'search-request',
+      searchId: crypto.randomUUID(),
+      originNodeId: 'peer-G',
+      query: 'test',
+      fileType: 'all',
+      ttl: DEFAULT_TTL,
+    };
+
+    await handleSearchRequest(msg, prisma, identity, fromPeer, [], captureAll(sent));
+    sent.length = 0; // clear
+    await handleSearchRequest(msg, prisma, identity, fromPeer, [], captureAll(sent));
+    expect(sent).toHaveLength(0); // second call dropped
+  });
+
+  it('does not forward back to the peer that sent the request', async () => {
+    const fromPeer = makePeer('peer-H');
+    const sent: { peer: ConnectedPeer; msg: InnerMessage }[] = [];
+    const msg: SearchRequestMessage = {
+      type: 'search-request',
+      searchId: crypto.randomUUID(),
+      originNodeId: 'peer-H',
+      query: 'test',
+      fileType: 'all',
+      ttl: 3,
+    };
+
+    await handleSearchRequest(
+      msg,
+      prisma,
+      identity,
+      fromPeer,
+      [fromPeer], // only peer is the sender
+      captureAll(sent),
+    );
+
+    const forwarded = sent.filter((s) => (s.msg as SearchRequestMessage).type === 'search-request');
+    expect(forwarded).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// handleSearchResult
+// ---------------------------------------------------------------------------
+
+describe('handleSearchResult', () => {
+  it('collects results into a pending search', async () => {
+    const peers = [makePeer('relay-1')];
+    const networkResultsPromise = initiateNetworkSearch(
+      identity,
+      peers,
+      { query: 'test', fileType: 'all' },
+      500,
+      captureAll([]),
+    );
+
+    // Simulate the peer sending a result back
+    // Get the searchId that was sent to the peer
+    const sent: { peer: ConnectedPeer; msg: InnerMessage }[] = [];
+    const networkResultsPromise2 = initiateNetworkSearch(
+      identity,
+      peers,
+      { query: 'find-me', fileType: 'all' },
+      200,
+      captureAll(sent),
+    );
+
+    await Bun.sleep(10); // let the search be initiated
+    expect(sent.length).toBeGreaterThanOrEqual(1);
+    const reqMsg = sent[0].msg as SearchRequestMessage;
+    expect(reqMsg.type).toBe('search-request');
+
+    const resultMsg: SearchResultMessage = {
+      type: 'search-result',
+      searchId: reqMsg.searchId,
+      fromNodeId: 'relay-1',
+      results: [
+        {
+          filename: 'found.mp3',
+          size: '1234',
+          sha256: 'a'.repeat(64),
+          mimeType: 'audio/mpeg',
+          metadata: null,
+        },
+      ],
+    };
+    handleSearchResult(resultMsg);
+
+    const results = await networkResultsPromise2;
+    expect(results).toHaveLength(1);
+    expect(results[0].filename).toBe('found.mp3');
+    expect(results[0].nodeId).toBe('relay-1');
+
+    // Clean up first search
+    await networkResultsPromise;
+  });
+
+  it('relays results back up the chain to the return peer', async () => {
+    const returnPeer = makePeer('upstream');
+    const relay: { peer: ConnectedPeer; msg: InnerMessage }[] = [];
+    const relayMsg: SearchRequestMessage = {
+      type: 'search-request',
+      searchId: crypto.randomUUID(),
+      originNodeId: 'origin-node',
+      query: 'relay-test',
+      fileType: 'all',
+      ttl: 2,
+    };
+
+    // Process as relay (returnPeer is upstream)
+    await handleSearchRequest(relayMsg, prisma, identity, returnPeer, [], captureAll(relay));
+
+    // Now a downstream peer sends us a result for this search
+    const resultMsg: SearchResultMessage = {
+      type: 'search-result',
+      searchId: relayMsg.searchId,
+      fromNodeId: 'downstream',
+      results: [
+        {
+          filename: 'relay.txt',
+          size: '99',
+          sha256: 'b'.repeat(64),
+          mimeType: 'text/plain',
+          metadata: null,
+        },
+      ],
+    };
+    const relayed: { peer: ConnectedPeer; msg: InnerMessage }[] = [];
+    handleSearchResult(resultMsg, captureAll(relayed));
+
+    expect(relayed).toHaveLength(1);
+    expect(relayed[0].peer.peerNodeId).toBe('upstream');
+    expect((relayed[0].msg as SearchResultMessage).results[0].filename).toBe('relay.txt');
+  });
+
+  it('ignores results for unknown search IDs', () => {
+    const relayed: { peer: ConnectedPeer; msg: InnerMessage }[] = [];
+    handleSearchResult(
+      {
+        type: 'search-result',
+        searchId: crypto.randomUUID(), // unknown ID
+        fromNodeId: 'someone',
+        results: [],
+      },
+      captureAll(relayed),
+    );
+    expect(relayed).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// initiateNetworkSearch
+// ---------------------------------------------------------------------------
+
+describe('initiateNetworkSearch', () => {
+  it('returns empty immediately when there are no peers', async () => {
+    const results = await initiateNetworkSearch(identity, [], { query: 'test', fileType: 'all' });
+    expect(results).toEqual([]);
+  });
+
+  it('resolves after timeout with whatever results arrived', async () => {
+    const peer = makePeer('slow-peer');
+    const sent: { peer: ConnectedPeer; msg: InnerMessage }[] = [];
+
+    const start = Date.now();
+    const results = await initiateNetworkSearch(
+      identity,
+      [peer],
+      { query: 'timeout-test', fileType: 'all' },
+      100,
+      captureAll(sent),
+    );
+    const elapsed = Date.now() - start;
+
+    expect(elapsed).toBeGreaterThanOrEqual(90);
+    expect(results).toEqual([]); // no results sent back
+  });
+
+  it('deduplicates results with the same sha256 from the same node', async () => {
+    const peer = makePeer('dedup-peer');
+    const sent: { peer: ConnectedPeer; msg: InnerMessage }[] = [];
+
+    const networkResultsPromise = initiateNetworkSearch(
+      identity,
+      [peer],
+      { query: 'dedup', fileType: 'all' },
+      200,
+      captureAll(sent),
+    );
+
+    await Bun.sleep(10);
+    const reqMsg = sent[0].msg as SearchRequestMessage;
+
+    const duplicate = {
+      filename: 'song.mp3',
+      size: '5000',
+      sha256: 'c'.repeat(64),
+      mimeType: 'audio/mpeg',
+      metadata: null,
+    };
+
+    // Send same result twice
+    handleSearchResult({
+      type: 'search-result',
+      searchId: reqMsg.searchId,
+      fromNodeId: 'dedup-peer',
+      results: [duplicate],
+    });
+    handleSearchResult({
+      type: 'search-result',
+      searchId: reqMsg.searchId,
+      fromNodeId: 'dedup-peer',
+      results: [duplicate],
+    });
+
+    const results = await networkResultsPromise;
+    expect(results.filter((r) => r.sha256 === 'c'.repeat(64))).toHaveLength(1);
+  });
+});

@@ -49,12 +49,38 @@ export type FriendResponseMessage = {
   name?: string;
 };
 
+export type SearchResultItem = {
+  filename: string;
+  size: string; // BigInt serialized as string
+  sha256: string;
+  mimeType: string | null;
+  metadata: string | null;
+};
+
+export type SearchRequestMessage = {
+  type: 'search-request';
+  searchId: string; // UUID
+  originNodeId: string;
+  query: string;
+  fileType: string;
+  ttl: number;
+};
+
+export type SearchResultMessage = {
+  type: 'search-result';
+  searchId: string;
+  fromNodeId: string;
+  results: SearchResultItem[];
+};
+
 export type InnerMessage =
   | ReadyMessage
   | PingMessage
   | PongMessage
   | FriendRequestMessage
-  | FriendResponseMessage;
+  | FriendResponseMessage
+  | SearchRequestMessage
+  | SearchResultMessage;
 
 export type WireMessage = HelloMessage | HelloAckMessage | { type: 'encrypted'; payload: string };
 
