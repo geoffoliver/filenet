@@ -1,4 +1,4 @@
-import { basename, extname, join } from 'node:path';
+import { basename, extname, join, sep } from 'node:path';
 import { lstat, readdir, stat } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
@@ -126,9 +126,23 @@ export async function indexFile(
   });
 }
 
-export async function removeStaleEntries(prisma: PrismaClient, scanStart: Date): Promise<number> {
+export async function removeStaleEntries(
+  prisma: PrismaClient,
+  scanStart: Date,
+  protectedRoots: string[] = [],
+): Promise<number> {
   const { count } = await prisma.sharedFile.deleteMany({
-    where: { lastSeenAt: { lt: scanStart } },
+    where:
+      protectedRoots.length === 0
+        ? { lastSeenAt: { lt: scanStart } }
+        : {
+            lastSeenAt: { lt: scanStart },
+            NOT: {
+              OR: protectedRoots.map((root) => ({
+                path: { startsWith: root.endsWith(sep) ? root : root + sep },
+              })),
+            },
+          },
   });
   return count;
 }
@@ -145,8 +159,21 @@ export async function scanAndIndex(
     const scanStart = new Date();
     const seen = new Set<string>();
     let indexed = 0;
+    const inaccessibleRoots: string[] = [];
 
     for (const folder of folders) {
+      try {
+        await stat(folder);
+      } catch (err) {
+        const code = (err as NodeJS.ErrnoException).code;
+        if (code === 'ENOENT' || code === 'EACCES') {
+          // Folder is temporarily unavailable — preserve its indexed entries
+          inaccessibleRoots.push(folder);
+          continue;
+        }
+        throw err;
+      }
+
       for await (const path of scanDirectory(folder)) {
         if (seen.has(path)) continue;
         seen.add(path);
@@ -160,7 +187,7 @@ export async function scanAndIndex(
       }
     }
 
-    const removed = await removeStaleEntries(prisma, scanStart);
+    const removed = await removeStaleEntries(prisma, scanStart, inaccessibleRoots);
     return { indexed, removed };
   } finally {
     scanning = false;

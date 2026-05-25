@@ -265,6 +265,32 @@ describe('removeStaleEntries', () => {
     expect(removed).toBe(1);
     expect(await prisma.sharedFile.count()).toBe(1);
   });
+
+  it('preserves stale records under protected roots', async () => {
+    const protectedDir = join(tmpDir, 'protected-root');
+    await mkdir(protectedDir);
+    const protectedPath = join(protectedDir, 'protected.txt');
+    await writeFile(protectedPath, 'keep me');
+    await indexFile(prisma, protectedPath, new Date(1000));
+    const removed = await removeStaleEntries(prisma, new Date(), [protectedDir]);
+    expect(removed).toBe(0);
+    expect(await prisma.sharedFile.findFirst({ where: { path: protectedPath } })).not.toBeNull();
+  });
+
+  it('removes stale records outside protected roots', async () => {
+    const protectedDir = join(tmpDir, 'protected-root2');
+    await mkdir(protectedDir);
+    const protectedPath = join(protectedDir, 'keep.txt');
+    const stalePath = join(tmpDir, 'not-protected-stale.txt');
+    await writeFile(protectedPath, 'keep');
+    await writeFile(stalePath, 'stale');
+    await indexFile(prisma, protectedPath, new Date(1000));
+    await indexFile(prisma, stalePath, new Date(1000));
+    const removed = await removeStaleEntries(prisma, new Date(), [protectedDir]);
+    expect(removed).toBe(1);
+    expect(await prisma.sharedFile.findFirst({ where: { path: protectedPath } })).not.toBeNull();
+    expect(await prisma.sharedFile.findFirst({ where: { path: stalePath } })).toBeNull();
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -333,6 +359,44 @@ describe('scanAndIndex', () => {
     // One scan ran, the other was skipped
     expect(first.indexed + second.indexed).toBeGreaterThanOrEqual(1);
     expect(first.indexed === 0 || second.indexed === 0).toBe(true);
+  });
+
+  it('preserves indexed files when their shared folder is temporarily inaccessible', async () => {
+    const dir = join(tmpDir, 'inaccessible-folder');
+    await mkdir(dir);
+    const filePath = join(dir, 'important.txt');
+    await writeFile(filePath, 'important');
+    // Initial scan indexes the file
+    await scanAndIndex(prisma, [dir]);
+    expect(await prisma.sharedFile.count()).toBe(1);
+    // Simulate folder disappearing (e.g. external drive unplugged)
+    await rm(dir, { recursive: true });
+    // Re-scan with the same folder list — folder is now inaccessible
+    const result = await scanAndIndex(prisma, [dir]);
+    expect(result.removed).toBe(0);
+    expect(await prisma.sharedFile.count()).toBe(1);
+  });
+
+  it('removes stale files from accessible folders even when another folder is inaccessible', async () => {
+    const goodDir = join(tmpDir, 'good-folder');
+    const badDir = join(tmpDir, 'bad-folder');
+    await mkdir(goodDir);
+    await mkdir(badDir);
+    const goodFile = join(goodDir, 'good.txt');
+    const badFile = join(badDir, 'bad.txt');
+    await writeFile(goodFile, 'good');
+    await writeFile(badFile, 'bad');
+    await scanAndIndex(prisma, [goodDir, badDir]);
+    expect(await prisma.sharedFile.count()).toBe(2);
+    // Remove the file from goodDir and the entire badDir
+    await rm(goodFile);
+    await rm(badDir, { recursive: true });
+    const result = await scanAndIndex(prisma, [goodDir, badDir]);
+    // goodFile is stale (folder is accessible but file is gone) → removed
+    // badFile is under inaccessible badDir → preserved
+    expect(result.removed).toBe(1);
+    expect(await prisma.sharedFile.count()).toBe(1);
+    expect(await prisma.sharedFile.findFirst({ where: { path: badFile } })).not.toBeNull();
   });
 });
 
