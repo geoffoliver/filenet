@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'bun:test';
-import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
 import { execSync } from 'child_process';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -416,6 +416,25 @@ describe('scanAndIndex', () => {
     const result = await scanAndIndex(prisma, [dir]);
     expect(result.removed).toBe(0);
     expect(await prisma.sharedFile.count()).toBe(1);
+  });
+
+  it('preserves indexed files when root folder loses readability after lstat passes', async () => {
+    const dir = join(tmpDir, 'perms-gone-readdir');
+    await mkdir(dir);
+    const filePath = join(dir, 'locked.txt');
+    await writeFile(filePath, 'keep me');
+    await scanAndIndex(prisma, [dir]);
+    expect(await prisma.sharedFile.count()).toBe(1);
+
+    // lstat still sees a directory, but readdir fails with EACCES
+    await chmod(dir, 0o000);
+    try {
+      const result = await scanAndIndex(prisma, [dir]);
+      expect(result.removed).toBe(0);
+      expect(await prisma.sharedFile.count()).toBe(1);
+    } finally {
+      await chmod(dir, 0o755);
+    }
   });
 
   it('removes stale files from accessible folders even when another folder is inaccessible', async () => {

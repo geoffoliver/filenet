@@ -57,13 +57,17 @@ export async function extractMetadata(path: string): Promise<Record<string, unkn
   }
 }
 
-export async function* scanDirectory(dir: string): AsyncGenerator<string> {
+export async function* scanDirectory(
+  dir: string,
+  throwOnRootReaddir = false,
+): AsyncGenerator<string> {
   let entries: string[];
   try {
     entries = await readdir(dir);
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code;
-    if (code === 'ENOENT' || code === 'EACCES' || code === 'ENOTDIR') return;
+    if (!throwOnRootReaddir && (code === 'ENOENT' || code === 'EACCES' || code === 'ENOTDIR'))
+      return;
     throw err;
   }
   for (const entry of entries) {
@@ -180,15 +184,25 @@ export async function scanAndIndex(
         throw err;
       }
 
-      for await (const path of scanDirectory(folder)) {
-        if (seen.has(path)) continue;
-        seen.add(path);
-        try {
-          await indexFile(prisma, path, scanStart);
-          indexed++;
-        } catch (err) {
-          const code = (err as NodeJS.ErrnoException).code;
-          if (code !== 'ENOENT' && code !== 'EACCES' && code !== 'ENOTDIR') throw err;
+      try {
+        for await (const path of scanDirectory(folder, true)) {
+          if (seen.has(path)) continue;
+          seen.add(path);
+          try {
+            await indexFile(prisma, path, scanStart);
+            indexed++;
+          } catch (err) {
+            const code = (err as NodeJS.ErrnoException).code;
+            if (code !== 'ENOENT' && code !== 'EACCES' && code !== 'ENOTDIR') throw err;
+          }
+        }
+      } catch (err) {
+        const code = (err as NodeJS.ErrnoException).code;
+        if (code === 'ENOENT' || code === 'EACCES' || code === 'ENOTDIR') {
+          // Root became unreadable after lstat passed — preserve its indexed entries
+          inaccessibleRoots.push(folder);
+        } else {
+          throw err;
         }
       }
     }
