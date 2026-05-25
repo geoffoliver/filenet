@@ -159,6 +159,23 @@ describe('scanDirectory', () => {
     await writeFile(filePath, 'I am a file');
     expect(await collect(scanDirectory(filePath))).toEqual([]);
   });
+
+  it('reports inaccessible subdirectories via inaccessibleDirs set', async () => {
+    const dir = join(tmpDir, 'scan-report-inaccessible');
+    const subDir = join(dir, 'locked-sub');
+    await mkdir(dir);
+    await mkdir(subDir);
+    await writeFile(join(subDir, 'hidden.txt'), 'content');
+    const inaccessibleDirs = new Set<string>();
+    await chmod(subDir, 0o000);
+    try {
+      const files = await collect(scanDirectory(dir, false, inaccessibleDirs));
+      expect(files).toEqual([]);
+      expect(inaccessibleDirs.has(subDir)).toBe(true);
+    } finally {
+      await chmod(subDir, 0o755);
+    }
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -434,6 +451,47 @@ describe('scanAndIndex', () => {
       expect(await prisma.sharedFile.count()).toBe(1);
     } finally {
       await chmod(dir, 0o755);
+    }
+  });
+
+  it('preserves indexed files when a subdirectory becomes unreadable mid-scan', async () => {
+    const dir = join(tmpDir, 'inaccessible-subdir');
+    const subDir = join(dir, 'sub');
+    await mkdir(dir);
+    await mkdir(subDir);
+    const filePath = join(subDir, 'nested.txt');
+    await writeFile(filePath, 'keep me');
+    await scanAndIndex(prisma, [dir]);
+    expect(await prisma.sharedFile.count()).toBe(1);
+
+    // Subdir becomes unreadable — lstat on parent succeeds, readdir on subdir fails
+    await chmod(subDir, 0o000);
+    try {
+      const result = await scanAndIndex(prisma, [dir]);
+      expect(result.removed).toBe(0);
+      expect(await prisma.sharedFile.count()).toBe(1);
+    } finally {
+      await chmod(subDir, 0o755);
+    }
+  });
+
+  it('preserves indexed record when a file becomes unreadable during re-indexing', async () => {
+    const dir = join(tmpDir, 'file-unreadable-reindex');
+    await mkdir(dir);
+    const filePath = join(dir, 'secret.txt');
+    await writeFile(filePath, 'initial content');
+    await scanAndIndex(prisma, [dir]);
+    expect(await prisma.sharedFile.count()).toBe(1);
+
+    // Update content (changes mtime/size), then lock the file so hashing fails with EACCES
+    await writeFile(filePath, 'changed content that cannot be read back');
+    await chmod(filePath, 0o000);
+    try {
+      const result = await scanAndIndex(prisma, [dir]);
+      expect(result.removed).toBe(0);
+      expect(await prisma.sharedFile.count()).toBe(1);
+    } finally {
+      await chmod(filePath, 0o644);
     }
   });
 

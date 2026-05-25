@@ -60,14 +60,17 @@ export async function extractMetadata(path: string): Promise<Record<string, unkn
 export async function* scanDirectory(
   dir: string,
   throwOnRootReaddir = false,
+  inaccessibleDirs?: Set<string>,
 ): AsyncGenerator<string> {
   let entries: string[];
   try {
     entries = await readdir(dir);
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code;
-    if (!throwOnRootReaddir && (code === 'ENOENT' || code === 'EACCES' || code === 'ENOTDIR'))
+    if (!throwOnRootReaddir && (code === 'ENOENT' || code === 'EACCES' || code === 'ENOTDIR')) {
+      inaccessibleDirs?.add(dir);
       return;
+    }
     throw err;
   }
   for (const entry of entries) {
@@ -83,7 +86,7 @@ export async function* scanDirectory(
     }
     if (s.isSymbolicLink()) continue;
     if (s.isDirectory()) {
-      yield* scanDirectory(fullPath);
+      yield* scanDirectory(fullPath, false, inaccessibleDirs);
     } else if (s.isFile()) {
       yield fullPath;
     }
@@ -184,8 +187,10 @@ export async function scanAndIndex(
         throw err;
       }
 
+      const inaccessibleSubDirs = new Set<string>();
+
       try {
-        for await (const path of scanDirectory(folder, true)) {
+        for await (const path of scanDirectory(folder, true, inaccessibleSubDirs)) {
           if (seen.has(path)) continue;
           seen.add(path);
           try {
@@ -193,8 +198,19 @@ export async function scanAndIndex(
             indexed++;
           } catch (err) {
             const code = (err as NodeJS.ErrnoException).code;
-            if (code !== 'ENOENT' && code !== 'EACCES' && code !== 'ENOTDIR') throw err;
+            if (code === 'ENOENT') {
+              // File vanished between discovery and indexing — treat as stale
+            } else if (code === 'EACCES' || code === 'ENOTDIR') {
+              // Temporarily unreadable — preserve the existing record
+              inaccessibleRoots.push(path);
+            } else {
+              throw err;
+            }
           }
+        }
+        // Protect files in subdirectories that became unreadable during the scan
+        for (const dir of inaccessibleSubDirs) {
+          inaccessibleRoots.push(dir);
         }
       } catch (err) {
         const code = (err as NodeJS.ErrnoException).code;
