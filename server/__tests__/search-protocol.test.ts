@@ -16,6 +16,7 @@ import {
   handleSearchRequest,
   handleSearchResult,
   initiateNetworkSearch,
+  resetInternalMapsForTesting,
 } from '../search-protocol';
 import type { InnerMessage, SearchRequestMessage, SearchResultMessage } from '../types';
 import type { ConnectedPeer } from '../connections';
@@ -66,6 +67,7 @@ afterAll(async () => {
 
 beforeEach(async () => {
   await prisma.sharedFile.deleteMany();
+  resetInternalMapsForTesting();
 });
 
 // ---------------------------------------------------------------------------

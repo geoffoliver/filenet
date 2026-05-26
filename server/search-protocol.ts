@@ -45,6 +45,14 @@ export function getInternalMapSizes(): { seenSearchIds: number; searchRoutes: nu
   return { seenSearchIds: seenSearchIds.size, searchRoutes: searchRoutes.size };
 }
 
+/** Reset all module-level state. Only for use in tests. */
+export function resetInternalMapsForTesting(): void {
+  seenSearchIds.clear();
+  searchRoutes.clear();
+  pendingSearches.clear();
+  lastPruneAt = 0;
+}
+
 function pruneExpired(): void {
   const now = Date.now();
   lastPruneAt = now;
@@ -60,12 +68,16 @@ function pruneExpired(): void {
   // immediately overshooting the cap again.
   if (seenSearchIds.size >= MAX_MAP_SIZE) {
     const overflow = seenSearchIds.size - (MAX_MAP_SIZE - 1);
-    const oldest = [...seenSearchIds.entries()].sort((a, b) => a[1] - b[1]).slice(0, overflow);
+    const oldest = [...seenSearchIds.entries()]
+      .filter(([id]) => !pendingSearches.has(id)) // never evict an in-flight origin search
+      .sort((a, b) => a[1] - b[1])
+      .slice(0, overflow);
     for (const [id] of oldest) seenSearchIds.delete(id);
   }
   if (searchRoutes.size >= MAX_MAP_SIZE) {
     const overflow = searchRoutes.size - (MAX_MAP_SIZE - 1);
     const oldest = [...searchRoutes.entries()]
+      .filter(([id]) => !pendingSearches.has(id)) // never evict an in-flight origin search
       .sort((a, b) => a[1].expiresAt - b[1].expiresAt)
       .slice(0, overflow);
     for (const [id] of oldest) searchRoutes.delete(id);
