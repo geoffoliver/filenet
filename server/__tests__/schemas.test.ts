@@ -7,6 +7,9 @@ import {
   FriendResponseMessageSchema,
   PatchSettingsBodySchema,
   SearchQuerySchema,
+  SearchRequestMessageSchema,
+  SearchResultItemSchema,
+  SearchResultMessageSchema,
 } from '../schemas';
 
 describe('AddFriendBodySchema', () => {
@@ -457,5 +460,148 @@ describe('FriendResponseMessageSchema', () => {
       name: 'a'.repeat(200),
     });
     expect(r.success).toBe(true);
+  });
+});
+
+describe('SearchResultItemSchema', () => {
+  const valid = {
+    filename: 'song.mp3',
+    size: '1234567',
+    sha256: 'a'.repeat(64),
+    mimeType: 'audio/mpeg',
+    metadata: null,
+  };
+
+  it('accepts a valid result item', () => {
+    expect(SearchResultItemSchema.safeParse(valid).success).toBe(true);
+  });
+
+  it('accepts null mimeType and metadata', () => {
+    expect(
+      SearchResultItemSchema.safeParse({ ...valid, mimeType: null, metadata: null }).success,
+    ).toBe(true);
+  });
+
+  it('rejects size with non-digit characters', () => {
+    expect(SearchResultItemSchema.safeParse({ ...valid, size: '123abc' }).success).toBe(false);
+    expect(SearchResultItemSchema.safeParse({ ...valid, size: '-1' }).success).toBe(false);
+  });
+
+  it('rejects size longer than 20 characters', () => {
+    expect(SearchResultItemSchema.safeParse({ ...valid, size: '1'.repeat(21) }).success).toBe(
+      false,
+    );
+  });
+
+  it('accepts size at exactly 20 characters', () => {
+    expect(SearchResultItemSchema.safeParse({ ...valid, size: '1'.repeat(20) }).success).toBe(true);
+  });
+
+  it('rejects sha256 of wrong length', () => {
+    expect(SearchResultItemSchema.safeParse({ ...valid, sha256: 'a'.repeat(63) }).success).toBe(
+      false,
+    );
+    expect(SearchResultItemSchema.safeParse({ ...valid, sha256: 'a'.repeat(65) }).success).toBe(
+      false,
+    );
+  });
+
+  it('rejects sha256 with non-hex characters', () => {
+    expect(SearchResultItemSchema.safeParse({ ...valid, sha256: 'g'.repeat(64) }).success).toBe(
+      false,
+    );
+  });
+
+  it('rejects filename longer than 1000 characters', () => {
+    expect(SearchResultItemSchema.safeParse({ ...valid, filename: 'a'.repeat(1001) }).success).toBe(
+      false,
+    );
+  });
+
+  it('rejects metadata longer than 4096 characters', () => {
+    expect(SearchResultItemSchema.safeParse({ ...valid, metadata: 'x'.repeat(4097) }).success).toBe(
+      false,
+    );
+  });
+});
+
+describe('SearchRequestMessageSchema', () => {
+  const valid = {
+    type: 'search-request',
+    searchId: '00000000-0000-0000-0000-000000000000',
+    originNodeId: 'node-abc',
+    query: 'hello',
+    fileType: 'audio',
+    ttl: 3,
+  };
+
+  it('accepts a valid search-request', () => {
+    expect(SearchRequestMessageSchema.safeParse(valid).success).toBe(true);
+  });
+
+  it('rejects ttl below 1', () => {
+    expect(SearchRequestMessageSchema.safeParse({ ...valid, ttl: 0 }).success).toBe(false);
+    expect(SearchRequestMessageSchema.safeParse({ ...valid, ttl: -1 }).success).toBe(false);
+  });
+
+  it('rejects ttl above 10', () => {
+    expect(SearchRequestMessageSchema.safeParse({ ...valid, ttl: 11 }).success).toBe(false);
+  });
+
+  it('rejects non-integer ttl', () => {
+    expect(SearchRequestMessageSchema.safeParse({ ...valid, ttl: 2.5 }).success).toBe(false);
+  });
+
+  it('rejects invalid searchId (not a UUID)', () => {
+    expect(SearchRequestMessageSchema.safeParse({ ...valid, searchId: 'not-a-uuid' }).success).toBe(
+      false,
+    );
+  });
+
+  it('rejects query longer than 500 characters', () => {
+    expect(SearchRequestMessageSchema.safeParse({ ...valid, query: 'a'.repeat(501) }).success).toBe(
+      false,
+    );
+  });
+});
+
+describe('SearchResultMessageSchema', () => {
+  const validItem = {
+    filename: 'file.txt',
+    size: '100',
+    sha256: 'b'.repeat(64),
+    mimeType: null,
+    metadata: null,
+  };
+  const valid = {
+    type: 'search-result',
+    searchId: '00000000-0000-0000-0000-000000000000',
+    fromNodeId: 'node-xyz',
+    results: [validItem],
+  };
+
+  it('accepts a valid search-result', () => {
+    expect(SearchResultMessageSchema.safeParse(valid).success).toBe(true);
+  });
+
+  it('accepts an empty results array', () => {
+    expect(SearchResultMessageSchema.safeParse({ ...valid, results: [] }).success).toBe(true);
+  });
+
+  it('rejects more than 200 result items', () => {
+    expect(
+      SearchResultMessageSchema.safeParse({ ...valid, results: Array(201).fill(validItem) })
+        .success,
+    ).toBe(false);
+  });
+
+  it('accepts optional viaNodeId', () => {
+    expect(SearchResultMessageSchema.safeParse({ ...valid, viaNodeId: 'relay-node' }).success).toBe(
+      true,
+    );
+  });
+
+  it('rejects invalid searchId', () => {
+    expect(SearchResultMessageSchema.safeParse({ ...valid, searchId: 'bad' }).success).toBe(false);
   });
 });

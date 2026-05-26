@@ -47,6 +47,7 @@ export function getInternalMapSizes(): { seenSearchIds: number; searchRoutes: nu
 
 /** Reset all module-level state. Only for use in tests. */
 export function resetInternalMapsForTesting(): void {
+  for (const [, pending] of pendingSearches) clearTimeout(pending.timer);
   seenSearchIds.clear();
   searchRoutes.clear();
   pendingSearches.clear();

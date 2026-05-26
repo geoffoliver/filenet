@@ -8,8 +8,8 @@ const portSchema = z
 // HTTP request body schemas
 
 export const AddFriendBodySchema = z.object({
-  name: z.string().trim().min(1, 'name must be a non-empty string'),
-  address: z.string().trim().min(1, 'address must be a non-empty string'),
+  name: z.string().trim().min(1, 'name must be a non-empty string').max(200),
+  address: z.string().trim().min(1, 'address must be a non-empty string').max(253),
   port: portSchema.optional().default(7734),
   password: z.string().optional(),
 });
@@ -51,7 +51,7 @@ export const SearchQuerySchema = z.object({
 
 export const SearchResultItemSchema = z.object({
   filename: z.string().max(1000),
-  size: z.string().regex(/^\d+$/, 'size must be a non-negative integer string'),
+  size: z.string().max(20).regex(/^\d+$/, 'size must be a non-negative integer string'),
   sha256: z
     .string()
     .length(64)

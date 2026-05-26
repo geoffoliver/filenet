@@ -161,7 +161,15 @@ export async function connectToPeer(
             address,
             port,
           });
-          if (onMessage && peerNodeId) await onMessage(peerNodeId, msg);
+          if (onMessage && peerNodeId) {
+            try {
+              await onMessage(peerNodeId, msg);
+            } catch (err) {
+              // A transient error in the optional message hook (e.g. DB blip) must not
+              // tear down an otherwise healthy connection.
+              console.error(`onMessage error from peer ${address}:${port}:`, err);
+            }
+          }
         }
       } catch (err) {
         if (peerNodeId) closeAndUnregisterPeer(peerNodeId);
