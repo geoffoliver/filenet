@@ -147,9 +147,7 @@ describe('handleSearchRequest', () => {
     expect((forwarded[0].msg as SearchRequestMessage).searchId).toBe(msg.searchId);
   });
 
-  it('forwards with ttl=0 when TTL is 1 (terminal-hop forwarding)', async () => {
-    // ttl=1 processes locally and forwards with ttl=0 ("stopping at 0" semantics).
-    // The next hop drops the ttl=0 message via the guard in handleSearchRequest.
+  it('does not forward when TTL is 1 (terminal hop)', async () => {
     const fromPeer = makePeer('peer-E');
     const otherPeer = makePeer('peer-F');
     const sent: { peer: ConnectedPeer; msg: InnerMessage }[] = [];
@@ -172,8 +170,7 @@ describe('handleSearchRequest', () => {
     );
 
     const forwarded = sent.filter((s) => s.peer.peerNodeId === 'peer-F');
-    expect(forwarded).toHaveLength(1);
-    expect((forwarded[0].msg as SearchRequestMessage).ttl).toBe(0);
+    expect(forwarded).toHaveLength(0);
   });
 
   it('drops a request with TTL=0 without processing', async () => {

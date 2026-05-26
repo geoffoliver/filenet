@@ -172,8 +172,8 @@ export async function handleSearchRequest(
     }
   }
 
-  // Forward with TTL decremented; receiving peers drop ttl=0 via the guard above
-  if (msg.ttl > 0) {
+  // Forward with TTL decremented; ttl=1 means "process locally, do not forward further"
+  if (msg.ttl > 1) {
     const forward: SearchRequestMessage = { ...msg, ttl: msg.ttl - 1 };
     for (const peer of allPeers) {
       if (peer.peerNodeId !== fromPeer.peerNodeId) {
