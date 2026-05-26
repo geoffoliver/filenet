@@ -10,7 +10,9 @@ import type { PrismaClient } from '@prisma/client';
 
 import {
   DEFAULT_TTL,
+  MAX_MAP_SIZE,
   MAX_NETWORK_RESULTS,
+  getInternalMapSizes,
   handleSearchRequest,
   handleSearchResult,
   initiateNetworkSearch,
@@ -270,6 +272,33 @@ describe('handleSearchRequest', () => {
     await expect(
       handleSearchRequest(msg, prisma, identity, fromPeer, [], throwFn),
     ).resolves.toBeUndefined();
+  });
+
+  it('keeps seenSearchIds and searchRoutes at or below MAX_MAP_SIZE under a burst of unique IDs', async () => {
+    const fromPeer = makePeer('flood-peer');
+    const noop = () => {};
+    // Send MAX_MAP_SIZE + 100 unique search IDs in rapid succession so pruneExpired fires
+    // and the hard-cap eviction path runs
+    for (let i = 0; i < MAX_MAP_SIZE + 100; i++) {
+      await handleSearchRequest(
+        {
+          type: 'search-request',
+          searchId: crypto.randomUUID(),
+          originNodeId: 'flood-peer',
+          query: 'flood',
+          fileType: 'all',
+          ttl: 1,
+        },
+        prisma,
+        identity,
+        fromPeer,
+        [],
+        noop,
+      );
+    }
+    const sizes = getInternalMapSizes();
+    expect(sizes.seenSearchIds).toBeLessThanOrEqual(MAX_MAP_SIZE);
+    expect(sizes.searchRoutes).toBeLessThanOrEqual(MAX_MAP_SIZE);
   });
 
   it('swallows sendFn error when forwarding request to peers', async () => {

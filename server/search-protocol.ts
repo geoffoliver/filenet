@@ -17,6 +17,7 @@ export const SEARCH_TIMEOUT_MS = 5_000;
 export const MAX_NETWORK_RESULTS = 200;
 const ROUTE_EXPIRY_MS = 10 * 60 * 1_000;
 const PRUNE_INTERVAL_MS = 60_000;
+export const MAX_MAP_SIZE = 10_000;
 const VALID_FILE_TYPES = new Set<string>(['all', 'audio', 'video', 'image', 'document', 'ebook']);
 
 export type NetworkResult = SearchResultItem & { nodeId: string };
@@ -40,6 +41,10 @@ const pendingSearches = new Map<string, PendingSearch>();
 
 let lastPruneAt = 0;
 
+export function getInternalMapSizes(): { seenSearchIds: number; searchRoutes: number } {
+  return { seenSearchIds: seenSearchIds.size, searchRoutes: searchRoutes.size };
+}
+
 function pruneExpired(): void {
   const now = Date.now();
   lastPruneAt = now;
@@ -49,19 +54,37 @@ function pruneExpired(): void {
   for (const [id, route] of searchRoutes) {
     if (now > route.expiresAt) searchRoutes.delete(id);
   }
+  // Hard cap: evict oldest entries down to MAX_MAP_SIZE - 1 when still at or above the
+  // limit after expiry pruning. We evict to -1 rather than exactly MAX_MAP_SIZE so the
+  // caller can safely insert one more entry (the one that triggered the prune) without
+  // immediately overshooting the cap again.
+  if (seenSearchIds.size >= MAX_MAP_SIZE) {
+    const overflow = seenSearchIds.size - (MAX_MAP_SIZE - 1);
+    const oldest = [...seenSearchIds.entries()].sort((a, b) => a[1] - b[1]).slice(0, overflow);
+    for (const [id] of oldest) seenSearchIds.delete(id);
+  }
+  if (searchRoutes.size >= MAX_MAP_SIZE) {
+    const overflow = searchRoutes.size - (MAX_MAP_SIZE - 1);
+    const oldest = [...searchRoutes.entries()]
+      .sort((a, b) => a[1].expiresAt - b[1].expiresAt)
+      .slice(0, overflow);
+    for (const [id] of oldest) searchRoutes.delete(id);
+  }
 }
 
 function markSeen(searchId: string): boolean {
   if (seenSearchIds.has(searchId)) return false;
   const now = Date.now();
-  seenSearchIds.set(searchId, now);
+  // Check BEFORE inserting so pruneExpired runs while both maps are at the cap,
+  // leaving room for the new entry and the searchRoutes.set that follows in the caller.
   if (
-    seenSearchIds.size > 10_000 ||
-    searchRoutes.size > 10_000 ||
+    seenSearchIds.size >= MAX_MAP_SIZE ||
+    searchRoutes.size >= MAX_MAP_SIZE ||
     now - lastPruneAt > PRUNE_INTERVAL_MS
   ) {
     pruneExpired();
   }
+  seenSearchIds.set(searchId, now);
   return true;
 }
 
