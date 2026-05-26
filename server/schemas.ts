@@ -66,7 +66,7 @@ export const SearchRequestMessageSchema = z.object({
   originNodeId: z.string().max(200),
   query: z.string().max(500),
   fileType: z.string().max(50),
-  ttl: z.number().int().min(0).max(10),
+  ttl: z.number().int().min(1).max(10),
 });
 
 export const SearchResultMessageSchema = z.object({

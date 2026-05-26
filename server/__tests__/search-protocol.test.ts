@@ -147,7 +147,9 @@ describe('handleSearchRequest', () => {
     expect((forwarded[0].msg as SearchRequestMessage).searchId).toBe(msg.searchId);
   });
 
-  it('does not forward when TTL is 1', async () => {
+  it('forwards with ttl=0 when TTL is 1 (terminal-hop forwarding)', async () => {
+    // ttl=1 processes locally and forwards with ttl=0 ("stopping at 0" semantics).
+    // The next hop drops the ttl=0 message via the guard in handleSearchRequest.
     const fromPeer = makePeer('peer-E');
     const otherPeer = makePeer('peer-F');
     const sent: { peer: ConnectedPeer; msg: InnerMessage }[] = [];
@@ -170,7 +172,25 @@ describe('handleSearchRequest', () => {
     );
 
     const forwarded = sent.filter((s) => s.peer.peerNodeId === 'peer-F');
-    expect(forwarded).toHaveLength(0);
+    expect(forwarded).toHaveLength(1);
+    expect((forwarded[0].msg as SearchRequestMessage).ttl).toBe(0);
+  });
+
+  it('drops a request with TTL=0 without processing', async () => {
+    const fromPeer = makePeer('peer-E0');
+    const sent: { peer: ConnectedPeer; msg: InnerMessage }[] = [];
+    const msg: SearchRequestMessage = {
+      type: 'search-request',
+      searchId: crypto.randomUUID(),
+      originNodeId: 'peer-E0',
+      query: 'test',
+      fileType: 'all',
+      ttl: 0,
+    };
+
+    await handleSearchRequest(msg, prisma, identity, fromPeer, [fromPeer], captureAll(sent));
+
+    expect(sent).toHaveLength(0);
   });
 
   it('drops a duplicate search ID (cycle prevention)', async () => {

@@ -111,6 +111,13 @@ export function handleSearchResult(
         pending.results.push({ ...item, nodeId: msg.fromNodeId });
       }
     }
+    // Resolve early once we've hit the result cap instead of waiting for timeout
+    if (pending.results.length >= MAX_NETWORK_RESULTS) {
+      clearTimeout(pending.timer);
+      pendingSearches.delete(msg.searchId);
+      searchRoutes.delete(msg.searchId);
+      pending.resolve(pending.results);
+    }
   } else {
     // We're a relay — forward the result back up the chain
     try {
@@ -129,6 +136,7 @@ export async function handleSearchRequest(
   allPeers: ConnectedPeer[],
   sendFn: (peer: ConnectedPeer, msg: InnerMessage) => void = sendToPeer,
 ): Promise<void> {
+  if (msg.ttl <= 0) return; // TTL exhausted — drop without processing
   if (!markSeen(msg.searchId)) return; // already seen — drop (cycle prevention)
 
   searchRoutes.set(msg.searchId, {
@@ -164,8 +172,8 @@ export async function handleSearchRequest(
     }
   }
 
-  // Forward with TTL decremented; ttl=1 means "process locally only, do not forward"
-  if (msg.ttl > 1) {
+  // Forward with TTL decremented; receiving peers drop ttl=0 via the guard above
+  if (msg.ttl > 0) {
     const forward: SearchRequestMessage = { ...msg, ttl: msg.ttl - 1 };
     for (const peer of allPeers) {
       if (peer.peerNodeId !== fromPeer.peerNodeId) {

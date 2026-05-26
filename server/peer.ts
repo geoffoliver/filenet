@@ -185,12 +185,16 @@ export async function dispatchMessage(
     if (!senderFriend) return; // not an accepted friend — drop
     const fromPeer = getConnectedPeer(state.peerNodeId);
     if (!fromPeer) return;
-    const acceptedFriends = await ws.data.prisma.friend.findMany({
-      where: { status: 'ACCEPTED', nodeId: { not: null } },
-      select: { nodeId: true },
-    });
-    const acceptedNodeIds = new Set(acceptedFriends.map((f) => f.nodeId as string));
-    const acceptedPeers = getAllConnectedPeers().filter((p) => acceptedNodeIds.has(p.peerNodeId));
+    // Only resolve accepted peers for forwarding when the request will actually be forwarded
+    let acceptedPeers: ReturnType<typeof getAllConnectedPeers> = [];
+    if (result.data.ttl > 1) {
+      const acceptedFriends = await ws.data.prisma.friend.findMany({
+        where: { status: 'ACCEPTED', nodeId: { not: null } },
+        select: { nodeId: true },
+      });
+      const acceptedNodeIds = new Set(acceptedFriends.map((f) => f.nodeId as string));
+      acceptedPeers = getAllConnectedPeers().filter((p) => acceptedNodeIds.has(p.peerNodeId));
+    }
     await handleSearchRequest(
       result.data,
       ws.data.prisma,
@@ -208,8 +212,9 @@ export async function dispatchMessage(
       where: { nodeId: state.peerNodeId, status: 'ACCEPTED' },
     });
     if (!isFriend) return; // not an accepted friend — drop
-    // Override fromNodeId with the actual sender to prevent spoofing
-    handleSearchResult({ ...result.data, fromNodeId: state.peerNodeId });
+    // fromNodeId is the result producer (may be a relay hop); the isFriend check above
+    // ensures only accepted peers can inject results into the routing table.
+    handleSearchResult(result.data);
     return;
   }
 }
