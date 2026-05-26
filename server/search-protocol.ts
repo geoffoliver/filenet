@@ -81,11 +81,15 @@ function pruneExpired(): void {
   }
   if (searchRoutes.size >= MAX_MAP_SIZE) {
     const toEvict = searchRoutes.size - (MAX_MAP_SIZE - 1);
+    // Protect origin searches (in pendingSearches) AND recently-created relay routes
+    // (seen within SEARCH_TIMEOUT_MS). Relay nodes never add to pendingSearches, so
+    // without the time guard, active relay routes could be evicted mid-search.
+    const relayCutoff = now - SEARCH_TIMEOUT_MS;
     let evicted = 0;
     for (const [id] of searchRoutes) {
       if (evicted >= toEvict) break;
-      if (!pendingSearches.has(id)) {
-        // never evict an in-flight origin search
+      const seenAt = seenSearchIds.get(id) ?? 0;
+      if (!pendingSearches.has(id) && seenAt < relayCutoff) {
         searchRoutes.delete(id);
         evicted++;
       }
@@ -124,9 +128,12 @@ export function handleSearchResult(
     // We originated this search — collect results up to the cap
     const pending = pendingSearches.get(msg.searchId);
     if (!pending) return;
+    // Use the authenticated sender (viaNodeId) as the dedup key so a malicious peer
+    // cannot spoof fromNodeId values to bypass deduplication or exhaust the result cap.
+    const dedupSource = msg.viaNodeId ?? msg.fromNodeId;
     for (const item of msg.results) {
       if (pending.results.length >= MAX_NETWORK_RESULTS) break;
-      const key = `${msg.fromNodeId}:${item.sha256}`;
+      const key = `${dedupSource}:${item.sha256}`;
       if (!pending.seenKeys.has(key)) {
         pending.seenKeys.add(key);
         pending.results.push({ ...item, nodeId: msg.fromNodeId, viaNodeId: msg.viaNodeId });

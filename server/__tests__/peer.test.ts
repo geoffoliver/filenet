@@ -10,7 +10,11 @@ import type { PrismaClient } from '@prisma/client';
 import type { ServerWebSocket } from 'bun';
 
 import { type ConnectedPeer, registerPeer, unregisterPeer } from '../connections';
-import { DEFAULT_TTL, initiateNetworkSearch } from '../search-protocol';
+import {
+  DEFAULT_TTL,
+  initiateNetworkSearch,
+  resetInternalMapsForTesting,
+} from '../search-protocol';
 import type { InnerMessage, SearchRequestMessage, SearchResultMessage } from '../types';
 import { type PeerData, dispatchMessage } from '../peer';
 import { createPrismaClient } from '../db';
@@ -77,6 +81,7 @@ afterAll(async () => {
 beforeEach(async () => {
   await prisma.friend.deleteMany();
   await prisma.sharedFile.deleteMany();
+  resetInternalMapsForTesting();
 });
 
 // ---------------------------------------------------------------------------

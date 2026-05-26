@@ -10,7 +10,7 @@ import {
 import type { HelloAckMessage, HelloMessage, InnerMessage } from './types';
 import {
   closeAndUnregisterPeer,
-  getAllConnectedPeers,
+  getAcceptedConnectedPeers,
   getConnectedPeer,
   handleInboundFriendRequest,
   registerPeer,
@@ -203,18 +203,7 @@ export async function dispatchSearchMessage(
     const fromPeer = getConnectedPeer(senderNodeId);
     if (!fromPeer) return;
     // Only resolve accepted peers for forwarding when the request will actually be forwarded.
-    // Query by connected peer IDs first (small set) rather than scanning all accepted friends.
-    let acceptedPeers: ReturnType<typeof getAllConnectedPeers> = [];
-    if (result.data.ttl > 1) {
-      const connectedPeers = getAllConnectedPeers();
-      const connectedNodeIds = connectedPeers.map((p) => p.peerNodeId);
-      const acceptedFriends = await prisma.friend.findMany({
-        where: { status: 'ACCEPTED', nodeId: { in: connectedNodeIds } },
-        select: { nodeId: true },
-      });
-      const acceptedNodeIds = new Set(acceptedFriends.map((f) => f.nodeId as string));
-      acceptedPeers = connectedPeers.filter((p) => acceptedNodeIds.has(p.peerNodeId));
-    }
+    const acceptedPeers = result.data.ttl > 1 ? await getAcceptedConnectedPeers(prisma) : [];
     await handleSearchRequest(result.data, prisma, identity, fromPeer, acceptedPeers);
   } else if (msg.type === 'search-result') {
     const result = SearchResultMessageSchema.safeParse(msg);

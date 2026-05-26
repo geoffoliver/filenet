@@ -10,7 +10,7 @@ import { ConflictError, NotFoundError } from './errors';
 import {
   type ConnectedPeer,
   closeAndUnregisterPeer,
-  getAllConnectedPeers,
+  getAcceptedConnectedPeers,
   getConnectedPeer,
   notifyFriendAccepted,
   notifyFriendRejected,
@@ -192,17 +192,7 @@ export function createManagementFetch(deps: ManagementDeps): (req: Request) => P
           return new Response(result.error.issues[0].message, { status: 400 });
         }
         const { q, type, limit, offset, network } = result.data;
-        let acceptedPeers: ReturnType<typeof getAllConnectedPeers> = [];
-        if (network) {
-          const connectedPeers = getAllConnectedPeers();
-          const connectedNodeIds = connectedPeers.map((p) => p.peerNodeId);
-          const acceptedFriends = await prisma.friend.findMany({
-            where: { status: 'ACCEPTED', nodeId: { in: connectedNodeIds } },
-            select: { nodeId: true },
-          });
-          const acceptedNodeIds = new Set(acceptedFriends.map((f) => f.nodeId as string));
-          acceptedPeers = connectedPeers.filter((p) => acceptedNodeIds.has(p.peerNodeId));
-        }
+        const acceptedPeers = network ? await getAcceptedConnectedPeers(prisma) : [];
         const [localResult, networkResults] = await Promise.all([
           searchFiles(prisma, { query: q, type, limit, offset }),
           network

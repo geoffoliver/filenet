@@ -79,6 +79,18 @@ export function getAllConnectedPeers(): ConnectedPeer[] {
   return Array.from(peers.values());
 }
 
+export async function getAcceptedConnectedPeers(prisma: PrismaClient): Promise<ConnectedPeer[]> {
+  const connected = getAllConnectedPeers();
+  if (connected.length === 0) return [];
+  const nodeIds = connected.map((p) => p.peerNodeId);
+  const accepted = await prisma.friend.findMany({
+    where: { status: 'ACCEPTED', nodeId: { in: nodeIds } },
+    select: { nodeId: true },
+  });
+  const acceptedSet = new Set(accepted.map((f) => f.nodeId as string));
+  return connected.filter((p) => acceptedSet.has(p.peerNodeId));
+}
+
 export function sendToPeer(peer: ConnectedPeer, msg: InnerMessage): void {
   peer.ws.send(encodeMessage(encryptMessage(msg, peer.sessionKey)));
 }
