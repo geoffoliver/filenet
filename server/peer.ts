@@ -212,9 +212,11 @@ export async function dispatchMessage(
       where: { nodeId: state.peerNodeId, status: 'ACCEPTED' },
     });
     if (!isFriend) return; // not an accepted friend — drop
-    // fromNodeId is the result producer (may be a relay hop); the isFriend check above
-    // ensures only accepted peers can inject results into the routing table.
-    handleSearchResult(result.data);
+    // Override fromNodeId with the authenticated sender so accepted friends can't
+    // impersonate other nodes.  This correctly attributes direct results, but means
+    // relayed results are attributed to the relay peer rather than the original producer.
+    // A future viaNodeId field would preserve the producer identity across hops.
+    handleSearchResult({ ...result.data, fromNodeId: state.peerNodeId });
     return;
   }
 }
