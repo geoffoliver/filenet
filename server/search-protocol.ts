@@ -2,7 +2,7 @@ import crypto from 'node:crypto';
 
 import type { PrismaClient } from '@prisma/client';
 
-import { type ConnectedPeer, sendToPeer } from './connections';
+import { type ConnectedPeer, getConnectedPeer, sendToPeer } from './connections';
 import { type FileType, searchFiles } from './search';
 import type {
   InnerMessage,
@@ -33,8 +33,8 @@ type PendingSearch = {
 const seenSearchIds = new Map<string, number>(); // searchId → timestamp
 
 // Return paths — who to relay results back to for each in-flight search
-// returnPeer === null means this node originated the search
-const searchRoutes = new Map<string, { returnPeer: ConnectedPeer | null; expiresAt: number }>();
+// returnPeerNodeId === null means this node originated the search
+const searchRoutes = new Map<string, { returnPeerNodeId: string | null; expiresAt: number }>();
 
 // Pending outbound searches waiting to collect results
 const pendingSearches = new Map<string, PendingSearch>();
@@ -112,7 +112,7 @@ export function handleSearchResult(
   const route = searchRoutes.get(msg.searchId);
   if (!route) return;
 
-  if (route.returnPeer === null) {
+  if (route.returnPeerNodeId === null) {
     // We originated this search — collect results up to the cap
     const pending = pendingSearches.get(msg.searchId);
     if (!pending) return;
@@ -132,11 +132,14 @@ export function handleSearchResult(
       pending.resolve(pending.results);
     }
   } else {
-    // We're a relay — forward the result back up the chain
-    try {
-      sendFn(route.returnPeer, msg);
-    } catch {
-      // relay peer disconnected — nothing to do
+    // We're a relay — resolve the live connection at send time to avoid using a stale peer object
+    const returnPeer = getConnectedPeer(route.returnPeerNodeId);
+    if (returnPeer) {
+      try {
+        sendFn(returnPeer, msg);
+      } catch {
+        // relay peer disconnected — nothing to do
+      }
     }
   }
 }
@@ -153,7 +156,7 @@ export async function handleSearchRequest(
   if (!markSeen(msg.searchId)) return; // already seen — drop (cycle prevention)
 
   searchRoutes.set(msg.searchId, {
-    returnPeer: fromPeer,
+    returnPeerNodeId: fromPeer.peerNodeId,
     expiresAt: Date.now() + ROUTE_EXPIRY_MS,
   });
 
@@ -211,7 +214,7 @@ export async function initiateNetworkSearch(
 
   const searchId = crypto.randomUUID();
   markSeen(searchId);
-  searchRoutes.set(searchId, { returnPeer: null, expiresAt: Date.now() + ROUTE_EXPIRY_MS });
+  searchRoutes.set(searchId, { returnPeerNodeId: null, expiresAt: Date.now() + ROUTE_EXPIRY_MS });
 
   return new Promise((resolve) => {
     const pending: PendingSearch = {

@@ -19,6 +19,7 @@ import {
   resetInternalMapsForTesting,
 } from '../search-protocol';
 import type { InnerMessage, SearchRequestMessage, SearchResultMessage } from '../types';
+import { registerPeer, unregisterPeer } from '../connections';
 import type { ConnectedPeer } from '../connections';
 import type { Identity } from '../identity';
 import { createPrismaClient } from '../db';
@@ -399,40 +400,51 @@ describe('handleSearchResult', () => {
 
   it('relays results back up the chain to the return peer', async () => {
     const returnPeer = makePeer('upstream');
-    const relay: { peer: ConnectedPeer; msg: InnerMessage }[] = [];
-    const relayMsg: SearchRequestMessage = {
-      type: 'search-request',
-      searchId: crypto.randomUUID(),
-      originNodeId: 'origin-node',
-      query: 'relay-test',
-      fileType: 'all',
-      ttl: 2,
-    };
+    registerPeer(
+      returnPeer.ws,
+      returnPeer.sessionKey,
+      'upstream',
+      returnPeer.peerPublicKey,
+      '127.0.0.1',
+      7734,
+    );
+    try {
+      const relayMsg: SearchRequestMessage = {
+        type: 'search-request',
+        searchId: crypto.randomUUID(),
+        originNodeId: 'origin-node',
+        query: 'relay-test',
+        fileType: 'all',
+        ttl: 2,
+      };
 
-    // Process as relay (returnPeer is upstream)
-    await handleSearchRequest(relayMsg, prisma, identity, returnPeer, [], captureAll(relay));
+      // Process as relay (returnPeer is upstream)
+      await handleSearchRequest(relayMsg, prisma, identity, returnPeer, [], captureAll([]));
 
-    // Now a downstream peer sends us a result for this search
-    const resultMsg: SearchResultMessage = {
-      type: 'search-result',
-      searchId: relayMsg.searchId,
-      fromNodeId: 'downstream',
-      results: [
-        {
-          filename: 'relay.txt',
-          size: '99',
-          sha256: 'b'.repeat(64),
-          mimeType: 'text/plain',
-          metadata: null,
-        },
-      ],
-    };
-    const relayed: { peer: ConnectedPeer; msg: InnerMessage }[] = [];
-    handleSearchResult(resultMsg, captureAll(relayed));
+      // Now a downstream peer sends us a result for this search
+      const resultMsg: SearchResultMessage = {
+        type: 'search-result',
+        searchId: relayMsg.searchId,
+        fromNodeId: 'downstream',
+        results: [
+          {
+            filename: 'relay.txt',
+            size: '99',
+            sha256: 'b'.repeat(64),
+            mimeType: 'text/plain',
+            metadata: null,
+          },
+        ],
+      };
+      const relayed: { peer: ConnectedPeer; msg: InnerMessage }[] = [];
+      handleSearchResult(resultMsg, captureAll(relayed));
 
-    expect(relayed).toHaveLength(1);
-    expect(relayed[0].peer.peerNodeId).toBe('upstream');
-    expect((relayed[0].msg as SearchResultMessage).results[0].filename).toBe('relay.txt');
+      expect(relayed).toHaveLength(1);
+      expect(relayed[0].peer.peerNodeId).toBe('upstream');
+      expect((relayed[0].msg as SearchResultMessage).results[0].filename).toBe('relay.txt');
+    } finally {
+      unregisterPeer('upstream');
+    }
   });
 
   it('ignores results for unknown search IDs', () => {
@@ -451,36 +463,48 @@ describe('handleSearchResult', () => {
 
   it('swallows sendFn error when relaying result to upstream peer', async () => {
     const returnPeer = makePeer('upstream-err');
-    const relayMsg: SearchRequestMessage = {
-      type: 'search-request',
-      searchId: crypto.randomUUID(),
-      originNodeId: 'origin',
-      query: 'relay-err',
-      fileType: 'all',
-      ttl: 2,
-    };
+    registerPeer(
+      returnPeer.ws,
+      returnPeer.sessionKey,
+      'upstream-err',
+      returnPeer.peerPublicKey,
+      '127.0.0.1',
+      7734,
+    );
+    try {
+      const relayMsg: SearchRequestMessage = {
+        type: 'search-request',
+        searchId: crypto.randomUUID(),
+        originNodeId: 'origin',
+        query: 'relay-err',
+        fileType: 'all',
+        ttl: 2,
+      };
 
-    await handleSearchRequest(relayMsg, prisma, identity, returnPeer, [], captureAll([]));
+      await handleSearchRequest(relayMsg, prisma, identity, returnPeer, [], captureAll([]));
 
-    const resultMsg: SearchResultMessage = {
-      type: 'search-result',
-      searchId: relayMsg.searchId,
-      fromNodeId: 'downstream',
-      results: [
-        {
-          filename: 'a.mp3',
-          size: '100',
-          sha256: 'e'.repeat(64),
-          mimeType: null,
-          metadata: null,
-        },
-      ],
-    };
+      const resultMsg: SearchResultMessage = {
+        type: 'search-result',
+        searchId: relayMsg.searchId,
+        fromNodeId: 'downstream',
+        results: [
+          {
+            filename: 'a.mp3',
+            size: '100',
+            sha256: 'e'.repeat(64),
+            mimeType: null,
+            metadata: null,
+          },
+        ],
+      };
 
-    const throwFn = () => {
-      throw new Error('relay send failed');
-    };
-    expect(() => handleSearchResult(resultMsg, throwFn)).not.toThrow();
+      const throwFn = () => {
+        throw new Error('relay send failed');
+      };
+      expect(() => handleSearchResult(resultMsg, throwFn)).not.toThrow();
+    } finally {
+      unregisterPeer('upstream-err');
+    }
   });
 });
 
