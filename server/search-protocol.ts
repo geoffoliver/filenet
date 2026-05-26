@@ -36,7 +36,10 @@ const seenSearchIds = new Map<string, number>(); // searchId → timestamp
 
 // Return paths — who to relay results back to for each in-flight search
 // returnPeerNodeId === null means this node originated the search
-const searchRoutes = new Map<string, { returnPeerNodeId: string | null; expiresAt: number }>();
+const searchRoutes = new Map<
+  string,
+  { returnPeerNodeId: string | null; expiresAt: number; createdAt: number }
+>();
 
 // Pending outbound searches waiting to collect results
 const pendingSearches = new Map<string, PendingSearch>();
@@ -84,14 +87,13 @@ function pruneExpired(): void {
   if (searchRoutes.size >= MAX_MAP_SIZE) {
     const toEvict = searchRoutes.size - (MAX_MAP_SIZE - 1);
     // Protect origin searches (in pendingSearches) AND recently-created relay routes
-    // (seen within SEARCH_TIMEOUT_MS). Relay nodes never add to pendingSearches, so
-    // without the time guard, active relay routes could be evicted mid-search.
+    // (within SEARCH_TIMEOUT_MS). Use route.createdAt rather than seenSearchIds.get(id)
+    // so protection holds even if the seenSearchIds entry was evicted first.
     const relayCutoff = now - SEARCH_TIMEOUT_MS;
     let evicted = 0;
-    for (const [id] of searchRoutes) {
+    for (const [id, route] of searchRoutes) {
       if (evicted >= toEvict) break;
-      const seenAt = seenSearchIds.get(id) ?? 0;
-      if (!pendingSearches.has(id) && seenAt < relayCutoff) {
+      if (!pendingSearches.has(id) && route.createdAt < relayCutoff) {
         searchRoutes.delete(id);
         evicted++;
       }
@@ -184,9 +186,11 @@ export async function handleSearchRequest(
     return;
   }
 
+  const routeCreatedAt = Date.now();
   searchRoutes.set(msg.searchId, {
     returnPeerNodeId: fromPeer.peerNodeId,
-    expiresAt: Date.now() + ROUTE_EXPIRY_MS,
+    expiresAt: routeCreatedAt + ROUTE_EXPIRY_MS,
+    createdAt: routeCreatedAt,
   });
 
   // Execute local search — skip the count query since the protocol only uses files
@@ -249,7 +253,12 @@ export async function initiateNetworkSearch(
     seenSearchIds.delete(searchId);
     return [];
   }
-  searchRoutes.set(searchId, { returnPeerNodeId: null, expiresAt: Date.now() + ROUTE_EXPIRY_MS });
+  const routeCreatedAt = Date.now();
+  searchRoutes.set(searchId, {
+    returnPeerNodeId: null,
+    expiresAt: routeCreatedAt + ROUTE_EXPIRY_MS,
+    createdAt: routeCreatedAt,
+  });
 
   return new Promise((resolve) => {
     const pending: PendingSearch = {
