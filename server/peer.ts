@@ -175,49 +175,54 @@ export async function dispatchMessage(
     return;
   }
 
+  if (msg.type === 'search-request' || msg.type === 'search-result') {
+    await dispatchSearchMessage(msg, state.peerNodeId, ws.data.prisma, ws.data.identity);
+    return;
+  }
+}
+
+/**
+ * Handle search-request and search-result messages for any authenticated connection
+ * (both inbound ServerWebSocket and outbound native WebSocket).  Exported so index.ts
+ * can wire it up as the onMessage callback for outbound connections.
+ */
+export async function dispatchSearchMessage(
+  msg: InnerMessage,
+  senderNodeId: string,
+  prisma: PrismaClient,
+  identity: Identity,
+): Promise<void> {
   if (msg.type === 'search-request') {
     const result = SearchRequestMessageSchema.safeParse(msg);
     if (!result.success) return; // malformed — drop
     // Targeted check first so non-friends can't trigger a full-table scan
-    const senderFriend = await ws.data.prisma.friend.findFirst({
-      where: { nodeId: state.peerNodeId, status: 'ACCEPTED' },
+    const senderFriend = await prisma.friend.findFirst({
+      where: { nodeId: senderNodeId, status: 'ACCEPTED' },
     });
     if (!senderFriend) return; // not an accepted friend — drop
-    const fromPeer = getConnectedPeer(state.peerNodeId);
+    const fromPeer = getConnectedPeer(senderNodeId);
     if (!fromPeer) return;
     // Only resolve accepted peers for forwarding when the request will actually be forwarded
     let acceptedPeers: ReturnType<typeof getAllConnectedPeers> = [];
     if (result.data.ttl > 1) {
-      const acceptedFriends = await ws.data.prisma.friend.findMany({
+      const acceptedFriends = await prisma.friend.findMany({
         where: { status: 'ACCEPTED', nodeId: { not: null } },
         select: { nodeId: true },
       });
       const acceptedNodeIds = new Set(acceptedFriends.map((f) => f.nodeId as string));
       acceptedPeers = getAllConnectedPeers().filter((p) => acceptedNodeIds.has(p.peerNodeId));
     }
-    await handleSearchRequest(
-      result.data,
-      ws.data.prisma,
-      ws.data.identity,
-      fromPeer,
-      acceptedPeers,
-    );
-    return;
-  }
-
-  if (msg.type === 'search-result') {
+    await handleSearchRequest(result.data, prisma, identity, fromPeer, acceptedPeers);
+  } else if (msg.type === 'search-result') {
     const result = SearchResultMessageSchema.safeParse(msg);
     if (!result.success) return; // malformed — drop
-    const isFriend = await ws.data.prisma.friend.findFirst({
-      where: { nodeId: state.peerNodeId, status: 'ACCEPTED' },
+    const isFriend = await prisma.friend.findFirst({
+      where: { nodeId: senderNodeId, status: 'ACCEPTED' },
     });
     if (!isFriend) return; // not an accepted friend — drop
-    // Override fromNodeId with the authenticated sender so accepted friends can't
-    // impersonate other nodes.  This correctly attributes direct results, but means
-    // relayed results are attributed to the relay peer rather than the original producer.
-    // A future viaNodeId field would preserve the producer identity across hops.
-    handleSearchResult({ ...result.data, fromNodeId: state.peerNodeId });
-    return;
+    // Tag viaNodeId with the authenticated sender while preserving the original producer's
+    // fromNodeId so multi-hop results retain correct producer attribution.
+    handleSearchResult({ ...result.data, viaNodeId: senderNodeId });
   }
 }
 

@@ -1,4 +1,4 @@
-import { type PeerData, handleMessage, handleOpen } from './peer';
+import { type PeerData, dispatchSearchMessage, handleMessage, handleOpen } from './peer';
 import { connectToPeer, getConnectedPeer, unregisterPeer } from './connections';
 import { getOrCreateSettings, parseSharedFolders } from './config';
 import { createManagementFetch } from './management';
@@ -43,7 +43,9 @@ Bun.serve({
     identity,
     prisma,
     connectPeer: (address, port, friendRequest) =>
-      connectToPeer(identity, prisma, address, port, PORT, friendRequest),
+      connectToPeer(identity, prisma, address, port, PORT, friendRequest, (nodeId, msg) =>
+        dispatchSearchMessage(msg, nodeId, prisma, identity),
+      ),
   }),
 });
 

@@ -66,13 +66,16 @@ export const SearchRequestMessageSchema = z.object({
   originNodeId: z.string().max(200),
   query: z.string().max(500),
   fileType: z.string().max(50),
-  ttl: z.number().int().min(1).max(10),
+  // min(0): ttl=0 is valid on the wire so terminal-hop forwards (decremented from 1)
+  // are not rejected as malformed; the ttl<=0 guard in handleSearchRequest drops them.
+  ttl: z.number().int().min(0).max(10),
 });
 
 export const SearchResultMessageSchema = z.object({
   type: z.literal('search-result'),
   searchId: z.string().uuid(),
   fromNodeId: z.string().max(200),
+  viaNodeId: z.string().max(200).optional(),
   results: z.array(SearchResultItemSchema).max(200),
 });
 

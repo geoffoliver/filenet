@@ -315,11 +315,11 @@ describe('dispatchMessage — search-result auth gate', () => {
 });
 
 // ---------------------------------------------------------------------------
-// fromNodeId spoof prevention
+// viaNodeId attribution
 // ---------------------------------------------------------------------------
 
-describe('dispatchMessage — fromNodeId override', () => {
-  it('overrides spoofed fromNodeId with the actual sender peerNodeId', async () => {
+describe('dispatchMessage — viaNodeId attribution', () => {
+  it('preserves producer fromNodeId and tags viaNodeId with the authenticated sender', async () => {
     const friendNodeId = 'spoof-friend-' + crypto.randomUUID();
     await prisma.friend.create({
       data: {
@@ -376,7 +376,9 @@ describe('dispatchMessage — fromNodeId override', () => {
     const results = await searchPromise;
     const found = results.find((r) => r.sha256 === '2'.repeat(64));
     expect(found).toBeDefined();
-    expect(found?.nodeId).toBe(friendNodeId); // attributed to actual sender
-    expect(found?.nodeId).not.toBe('impersonated-node'); // not the spoofed ID
+    // fromNodeId is preserved so multi-hop results retain correct producer attribution
+    expect(found?.nodeId).toBe('impersonated-node');
+    // viaNodeId is the authenticated sender — lets callers verify the relay chain
+    expect(found?.viaNodeId).toBe(friendNodeId);
   });
 });

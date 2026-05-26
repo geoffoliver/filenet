@@ -69,7 +69,8 @@ export type SearchRequestMessage = {
 export type SearchResultMessage = {
   type: 'search-result';
   searchId: string;
-  fromNodeId: string;
+  fromNodeId: string; // node that produced the result (preserved across relay hops)
+  viaNodeId?: string; // immediate authenticated sender (set by the receiving peer)
   results: SearchResultItem[];
 };
 

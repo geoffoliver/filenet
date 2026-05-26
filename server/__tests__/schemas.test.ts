@@ -306,6 +306,39 @@ describe('SearchQuerySchema', () => {
     if (!r.success) return;
     expect(r.data.type).toBe('all');
   });
+
+  it('defaults network to false when omitted', () => {
+    const r = SearchQuerySchema.safeParse({});
+    expect(r.success).toBe(true);
+    if (!r.success) return;
+    expect(r.data.network).toBe(false);
+  });
+
+  it('parses network=true from the string "true"', () => {
+    const r = SearchQuerySchema.safeParse({ network: 'true' });
+    expect(r.success).toBe(true);
+    if (!r.success) return;
+    expect(r.data.network).toBe(true);
+  });
+
+  it('parses network=false from the string "false"', () => {
+    const r = SearchQuerySchema.safeParse({ network: 'false' });
+    expect(r.success).toBe(true);
+    if (!r.success) return;
+    expect(r.data.network).toBe(false);
+  });
+
+  it('treats any non-"true" string value as false', () => {
+    expect(SearchQuerySchema.safeParse({ network: 'yes' }).data?.network).toBe(false);
+    expect(SearchQuerySchema.safeParse({ network: '1' }).data?.network).toBe(false);
+  });
+
+  it('accepts boolean true directly', () => {
+    const r = SearchQuerySchema.safeParse({ network: true });
+    expect(r.success).toBe(true);
+    if (!r.success) return;
+    expect(r.data.network).toBe(true);
+  });
 });
 
 describe('FriendRequestMessageSchema', () => {

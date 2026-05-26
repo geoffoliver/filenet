@@ -20,7 +20,7 @@ const PRUNE_INTERVAL_MS = 60_000;
 export const MAX_MAP_SIZE = 10_000;
 const VALID_FILE_TYPES = new Set<string>(['all', 'audio', 'video', 'image', 'document', 'ebook']);
 
-export type NetworkResult = SearchResultItem & { nodeId: string };
+export type NetworkResult = SearchResultItem & { nodeId: string; viaNodeId?: string };
 
 type PendingSearch = {
   results: NetworkResult[];
@@ -108,7 +108,7 @@ export function handleSearchResult(
       const key = `${msg.fromNodeId}:${item.sha256}`;
       if (!pending.seenKeys.has(key)) {
         pending.seenKeys.add(key);
-        pending.results.push({ ...item, nodeId: msg.fromNodeId });
+        pending.results.push({ ...item, nodeId: msg.fromNodeId, viaNodeId: msg.viaNodeId });
       }
     }
     // Resolve early once we've hit the result cap instead of waiting for timeout

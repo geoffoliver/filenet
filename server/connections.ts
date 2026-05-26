@@ -90,6 +90,7 @@ export async function connectToPeer(
   port: number,
   localPort: number,
   friendRequest?: { name: string; password?: string },
+  onMessage?: (nodeId: string, msg: InnerMessage) => Promise<void>,
 ): Promise<ConnectedPeer> {
   const url = `ws://${address}:${port}`;
   const ws = new WebSocket(url);
@@ -160,6 +161,7 @@ export async function connectToPeer(
             address,
             port,
           });
+          if (onMessage && peerNodeId) await onMessage(peerNodeId, msg);
         }
       } catch (err) {
         if (peerNodeId) closeAndUnregisterPeer(peerNodeId);
