@@ -177,7 +177,12 @@ export async function handleSearchRequest(
 ): Promise<void> {
   if (msg.ttl <= 0) return; // TTL exhausted — drop without processing
   if (!markSeen(msg.searchId)) return; // already seen — drop (cycle prevention)
-  if (searchRoutes.size >= MAX_MAP_SIZE) return; // at capacity even after pruning — drop
+  if (searchRoutes.size >= MAX_MAP_SIZE) {
+    // Pruning couldn't free a searchRoutes slot — roll back the seenSearchIds entry so the
+    // same searchId isn't permanently orphaned (no route = no point marking it seen).
+    seenSearchIds.delete(msg.searchId);
+    return;
+  }
 
   searchRoutes.set(msg.searchId, {
     returnPeerNodeId: fromPeer.peerNodeId,
@@ -239,6 +244,11 @@ export async function initiateNetworkSearch(
 
   const searchId = crypto.randomUUID();
   markSeen(searchId);
+  if (searchRoutes.size >= MAX_MAP_SIZE) {
+    // At capacity even after pruning — clean up and bail rather than overflowing the map.
+    seenSearchIds.delete(searchId);
+    return [];
+  }
   searchRoutes.set(searchId, { returnPeerNodeId: null, expiresAt: Date.now() + ROUTE_EXPIRY_MS });
 
   return new Promise((resolve) => {
