@@ -342,6 +342,14 @@ describe('SearchQuerySchema', () => {
     if (!r.success) return;
     expect(r.data.network).toBe(true);
   });
+
+  it('rejects q longer than 500 characters', () => {
+    expect(SearchQuerySchema.safeParse({ q: 'a'.repeat(501) }).success).toBe(false);
+  });
+
+  it('accepts q of exactly 500 characters', () => {
+    expect(SearchQuerySchema.safeParse({ q: 'a'.repeat(500) }).success).toBe(true);
+  });
 });
 
 describe('FriendRequestMessageSchema', () => {

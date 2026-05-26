@@ -15,6 +15,7 @@ import type { Identity } from './identity';
 export const DEFAULT_TTL = 3;
 export const SEARCH_TIMEOUT_MS = 5_000;
 export const MAX_NETWORK_RESULTS = 200;
+export const MAX_RESULTS_PER_SENDER = 50; // per authenticated sender, matches local search limit
 const ROUTE_EXPIRY_MS = 10 * 60 * 1_000;
 const PRUNE_INTERVAL_MS = 60_000;
 export const MAX_MAP_SIZE = 10_000;
@@ -25,6 +26,7 @@ export type NetworkResult = SearchResultItem & { nodeId: string; viaNodeId?: str
 type PendingSearch = {
   results: NetworkResult[];
   seenKeys: Set<string>;
+  resultsPerSender: Map<string, number>; // authenticated sender → result count
   timer: ReturnType<typeof setTimeout>;
   resolve: (results: NetworkResult[]) => void;
 };
@@ -128,17 +130,23 @@ export function handleSearchResult(
     // We originated this search — collect results up to the cap
     const pending = pendingSearches.get(msg.searchId);
     if (!pending) return;
-    // Use the authenticated sender (viaNodeId) as the dedup key so a malicious peer
-    // cannot spoof fromNodeId values to bypass deduplication or exhaust the result cap.
-    const dedupSource = msg.viaNodeId ?? msg.fromNodeId;
+    // Dedup by (fromNodeId, sha256) so distinct producers with the same file are all counted.
+    // Cap per authenticated sender (viaNodeId) to prevent a malicious peer from flooding the
+    // result list by spoofing many fromNodeId values.
+    const sender = msg.viaNodeId ?? msg.fromNodeId;
+    const senderCount = pending.resultsPerSender.get(sender) ?? 0;
+    let added = 0;
     for (const item of msg.results) {
       if (pending.results.length >= MAX_NETWORK_RESULTS) break;
-      const key = `${dedupSource}:${item.sha256}`;
+      if (senderCount + added >= MAX_RESULTS_PER_SENDER) break;
+      const key = `${msg.fromNodeId}:${item.sha256}`;
       if (!pending.seenKeys.has(key)) {
         pending.seenKeys.add(key);
         pending.results.push({ ...item, nodeId: msg.fromNodeId, viaNodeId: msg.viaNodeId });
+        added++;
       }
     }
+    if (added > 0) pending.resultsPerSender.set(sender, senderCount + added);
     // Resolve early once we've hit the result cap instead of waiting for timeout
     if (pending.results.length >= MAX_NETWORK_RESULTS) {
       clearTimeout(pending.timer);
@@ -169,18 +177,20 @@ export async function handleSearchRequest(
 ): Promise<void> {
   if (msg.ttl <= 0) return; // TTL exhausted — drop without processing
   if (!markSeen(msg.searchId)) return; // already seen — drop (cycle prevention)
+  if (searchRoutes.size >= MAX_MAP_SIZE) return; // at capacity even after pruning — drop
 
   searchRoutes.set(msg.searchId, {
     returnPeerNodeId: fromPeer.peerNodeId,
     expiresAt: Date.now() + ROUTE_EXPIRY_MS,
   });
 
-  // Execute local search and return any matching results to the sender
+  // Execute local search — skip the count query since the protocol only uses files
   const { files } = await searchFiles(prisma, {
     query: msg.query,
     type: coerceFileType(msg.fileType),
     limit: 50,
     offset: 0,
+    skipTotal: true,
   });
 
   if (files.length > 0) {
@@ -235,6 +245,7 @@ export async function initiateNetworkSearch(
     const pending: PendingSearch = {
       results: [],
       seenKeys: new Set(),
+      resultsPerSender: new Map(),
       timer: setTimeout(() => {
         pendingSearches.delete(searchId);
         searchRoutes.delete(searchId);

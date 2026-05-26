@@ -37,7 +37,7 @@ const coerceInt = (v: unknown) => {
 };
 
 export const SearchQuerySchema = z.object({
-  q: z.string().optional().default(''),
+  q: z.string().max(500).optional().default(''),
   type: z.preprocess(
     (v) => (typeof v === 'string' && v.trim() === '' ? undefined : v),
     z.enum(['all', 'audio', 'video', 'image', 'document', 'ebook']).optional().default('all'),

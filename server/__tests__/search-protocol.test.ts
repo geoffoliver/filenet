@@ -12,6 +12,7 @@ import {
   DEFAULT_TTL,
   MAX_MAP_SIZE,
   MAX_NETWORK_RESULTS,
+  MAX_RESULTS_PER_SENDER,
   getInternalMapSizes,
   handleSearchRequest,
   handleSearchResult,
@@ -606,6 +607,75 @@ describe('initiateNetworkSearch', () => {
 
     const results = await networkResultsPromise;
     expect(results.length).toBeLessThanOrEqual(MAX_NETWORK_RESULTS);
+  });
+
+  it('caps results per authenticated sender at MAX_RESULTS_PER_SENDER', async () => {
+    const peer = makePeer('flood-sender');
+    const sent: { peer: ConnectedPeer; msg: InnerMessage }[] = [];
+
+    const networkResultsPromise = initiateNetworkSearch(
+      identity,
+      [peer],
+      { query: 'sender-cap', fileType: 'all' },
+      200,
+      captureAll(sent),
+    );
+
+    await Bun.sleep(10);
+    const reqMsg = sent[0].msg as SearchRequestMessage;
+
+    // Flood from one authenticated sender with many spoofed fromNodeId values
+    for (let i = 0; i < MAX_RESULTS_PER_SENDER + 10; i++) {
+      const sha256 = i.toString(16).padStart(64, '0');
+      handleSearchResult({
+        type: 'search-result',
+        searchId: reqMsg.searchId,
+        fromNodeId: `spoofed-node-${i}`,
+        viaNodeId: 'flood-sender',
+        results: [
+          { filename: `file${i}.mp3`, size: '100', sha256, mimeType: null, metadata: null },
+        ],
+      });
+    }
+
+    const results = await networkResultsPromise;
+    expect(results.length).toBeLessThanOrEqual(MAX_RESULTS_PER_SENDER);
+  });
+
+  it('allows distinct producers behind different relays to each contribute up to the per-sender cap', async () => {
+    const peer = makePeer('multi-relay-peer');
+    const sent: { peer: ConnectedPeer; msg: InnerMessage }[] = [];
+
+    const networkResultsPromise = initiateNetworkSearch(
+      identity,
+      [peer],
+      { query: 'multi-relay', fileType: 'all' },
+      200,
+      captureAll(sent),
+    );
+
+    await Bun.sleep(10);
+    const reqMsg = sent[0].msg as SearchRequestMessage;
+
+    // Two producers with the same sha256 coming through different relays — both should be kept
+    const sha256 = 'f'.repeat(64);
+    handleSearchResult({
+      type: 'search-result',
+      searchId: reqMsg.searchId,
+      fromNodeId: 'producer-A',
+      viaNodeId: 'relay-1',
+      results: [{ filename: 'song.mp3', size: '1000', sha256, mimeType: null, metadata: null }],
+    });
+    handleSearchResult({
+      type: 'search-result',
+      searchId: reqMsg.searchId,
+      fromNodeId: 'producer-B',
+      viaNodeId: 'relay-2',
+      results: [{ filename: 'song.mp3', size: '1000', sha256, mimeType: null, metadata: null }],
+    });
+
+    const results = await networkResultsPromise;
+    expect(results.filter((r) => r.sha256 === sha256)).toHaveLength(2);
   });
 
   it('does not throw when sendFn throws during fan-out', async () => {
