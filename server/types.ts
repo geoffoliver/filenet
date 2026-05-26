@@ -69,8 +69,12 @@ export type SearchRequestMessage = {
 export type SearchResultMessage = {
   type: 'search-result';
   searchId: string;
-  fromNodeId: string; // node that produced the result (preserved across relay hops)
-  viaNodeId?: string; // immediate authenticated sender (set by the receiving peer)
+  // Producer attribution — self-reported by the originating node and relayed verbatim.
+  // NOT authenticated by intermediate relays; treat as untrusted unless verified by other means.
+  fromNodeId: string;
+  // Authenticated immediate sender: set by the *receiving* node from the transport-layer peer
+  // identity, so this field IS trusted for the direct hop but not for the full chain.
+  viaNodeId?: string;
   results: SearchResultItem[];
 };
 

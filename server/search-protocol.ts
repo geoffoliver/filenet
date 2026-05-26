@@ -63,25 +63,33 @@ function pruneExpired(): void {
   for (const [id, route] of searchRoutes) {
     if (now > route.expiresAt) searchRoutes.delete(id);
   }
-  // Hard cap: evict oldest entries down to MAX_MAP_SIZE - 1 when still at or above the
-  // limit after expiry pruning. We evict to -1 rather than exactly MAX_MAP_SIZE so the
-  // caller can safely insert one more entry (the one that triggered the prune) without
-  // immediately overshooting the cap again.
+  // Hard cap: evict oldest entries down to MAX_MAP_SIZE - 1. Map iteration follows insertion
+  // order, which is chronological (oldest first), so we walk forward and delete until we've
+  // freed enough slots — O(overflow) rather than O(n log n) for the sort-based approach.
+  // We stop at MAX_MAP_SIZE - 1 so the caller can insert one more without overshooting.
   if (seenSearchIds.size >= MAX_MAP_SIZE) {
-    const overflow = seenSearchIds.size - (MAX_MAP_SIZE - 1);
-    const oldest = [...seenSearchIds.entries()]
-      .filter(([id]) => !pendingSearches.has(id)) // never evict an in-flight origin search
-      .sort((a, b) => a[1] - b[1])
-      .slice(0, overflow);
-    for (const [id] of oldest) seenSearchIds.delete(id);
+    const toEvict = seenSearchIds.size - (MAX_MAP_SIZE - 1);
+    let evicted = 0;
+    for (const [id] of seenSearchIds) {
+      if (evicted >= toEvict) break;
+      if (!pendingSearches.has(id)) {
+        // never evict an in-flight origin search
+        seenSearchIds.delete(id);
+        evicted++;
+      }
+    }
   }
   if (searchRoutes.size >= MAX_MAP_SIZE) {
-    const overflow = searchRoutes.size - (MAX_MAP_SIZE - 1);
-    const oldest = [...searchRoutes.entries()]
-      .filter(([id]) => !pendingSearches.has(id)) // never evict an in-flight origin search
-      .sort((a, b) => a[1].expiresAt - b[1].expiresAt)
-      .slice(0, overflow);
-    for (const [id] of oldest) searchRoutes.delete(id);
+    const toEvict = searchRoutes.size - (MAX_MAP_SIZE - 1);
+    let evicted = 0;
+    for (const [id] of searchRoutes) {
+      if (evicted >= toEvict) break;
+      if (!pendingSearches.has(id)) {
+        // never evict an in-flight origin search
+        searchRoutes.delete(id);
+        evicted++;
+      }
+    }
   }
 }
 
