@@ -16,7 +16,7 @@ export const DEFAULT_TTL = 3;
 export const SEARCH_TIMEOUT_MS = 5_000;
 export const MAX_NETWORK_RESULTS = 200;
 export const MAX_RESULTS_PER_SENDER = 50; // per authenticated sender, matches local search limit
-const ROUTE_EXPIRY_MS = 10 * 60 * 1_000;
+export const ROUTE_EXPIRY_MS = 10 * 60 * 1_000;
 const PRUNE_INTERVAL_MS = 60_000;
 export const MAX_MAP_SIZE = 10_000;
 const VALID_FILE_TYPES = new Set<string>(['all', 'audio', 'video', 'image', 'document', 'ebook']);
@@ -116,6 +116,12 @@ function markSeen(searchId: string): boolean {
     pruneExpired();
   }
   seenSearchIds.set(searchId, now);
+  // If pruneExpired couldn't free a slot (all entries protected), roll back and signal failure
+  // so callers can bail out rather than silently exceeding the hard cap.
+  if (seenSearchIds.size > MAX_MAP_SIZE) {
+    seenSearchIds.delete(searchId);
+    return false;
+  }
   return true;
 }
 
@@ -129,6 +135,10 @@ export function handleSearchResult(
 ): void {
   const route = searchRoutes.get(msg.searchId);
   if (!route) return;
+  if (Date.now() > route.expiresAt) {
+    searchRoutes.delete(msg.searchId);
+    return;
+  }
 
   if (route.returnPeerNodeId === null) {
     // We originated this search — collect results up to the cap

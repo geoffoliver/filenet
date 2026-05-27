@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'bun:test';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, jest } from 'bun:test';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import crypto from 'node:crypto';
 import { execSync } from 'child_process';
@@ -13,6 +13,7 @@ import {
   MAX_MAP_SIZE,
   MAX_NETWORK_RESULTS,
   MAX_RESULTS_PER_SENDER,
+  ROUTE_EXPIRY_MS,
   getInternalMapSizes,
   handleSearchRequest,
   handleSearchResult,
@@ -323,6 +324,40 @@ describe('handleSearchRequest', () => {
     expect(sizes.searchRoutes).toBeLessThanOrEqual(MAX_MAP_SIZE);
   });
 
+  it('does not exceed MAX_MAP_SIZE in seenSearchIds when all entries are protected from eviction', async () => {
+    // Fill seenSearchIds to the cap by initiating MAX_MAP_SIZE origin searches (which protect
+    // their own entries). Then send a new handleSearchRequest and verify the hard cap holds.
+    const peers = Array.from({ length: 1 }, (_, i) => makePeer(`protected-peer-${i}`));
+    const promises: Promise<NetworkResult[]>[] = [];
+    for (let i = 0; i < MAX_MAP_SIZE; i++) {
+      promises.push(
+        initiateNetworkSearch(identity, peers, { query: 'fill', fileType: 'all' }, 200, () => {}),
+      );
+    }
+
+    // All seenSearchIds entries are now protected by pendingSearches — cap should hold
+    const fromPeer = makePeer('overflow-peer');
+    await handleSearchRequest(
+      {
+        type: 'search-request',
+        searchId: crypto.randomUUID(),
+        originNodeId: 'overflow-peer',
+        query: 'overflow',
+        fileType: 'all',
+        ttl: 1,
+      },
+      prisma,
+      identity,
+      fromPeer,
+      [],
+      () => {},
+    );
+    expect(getInternalMapSizes().seenSearchIds).toBeLessThanOrEqual(MAX_MAP_SIZE);
+
+    // Clean up pending searches
+    await Promise.all(promises);
+  });
+
   it('swallows sendFn error when forwarding request to peers', async () => {
     const fromPeer = makePeer('peer-fwd-err-from');
     const toPeer = makePeer('peer-fwd-err-to');
@@ -446,6 +481,59 @@ describe('handleSearchResult', () => {
       expect((relayed[0].msg as SearchResultMessage).results[0].filename).toBe('relay.txt');
     } finally {
       unregisterPeer('upstream');
+    }
+  });
+
+  it('drops results for an expired route and removes the route', async () => {
+    const returnPeer = makePeer('upstream-expired');
+    registerPeer(
+      returnPeer.ws,
+      returnPeer.sessionKey,
+      'upstream-expired',
+      returnPeer.peerPublicKey,
+      '127.0.0.1',
+      7734,
+    );
+    try {
+      const relayMsg: SearchRequestMessage = {
+        type: 'search-request',
+        searchId: crypto.randomUUID(),
+        originNodeId: 'origin-expired',
+        query: 'expired',
+        fileType: 'all',
+        ttl: 2,
+      };
+      await handleSearchRequest(relayMsg, prisma, identity, returnPeer, [], captureAll([]));
+
+      // Advance time past route expiry
+      jest.setSystemTime(Date.now() + ROUTE_EXPIRY_MS + 1);
+      try {
+        const relayed: { peer: ConnectedPeer; msg: InnerMessage }[] = [];
+        handleSearchResult(
+          {
+            type: 'search-result',
+            searchId: relayMsg.searchId,
+            fromNodeId: 'downstream',
+            results: [
+              {
+                filename: 'f.mp3',
+                size: '1',
+                sha256: '1'.repeat(64),
+                mimeType: null,
+                metadata: null,
+              },
+            ],
+          },
+          captureAll(relayed),
+        );
+        expect(relayed).toHaveLength(0); // expired route — result must be dropped
+        // Route should be cleaned up
+        expect(getInternalMapSizes().searchRoutes).toBe(0);
+      } finally {
+        jest.useRealTimers();
+      }
+    } finally {
+      unregisterPeer('upstream-expired');
     }
   });
 
