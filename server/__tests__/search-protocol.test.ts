@@ -299,7 +299,8 @@ describe('handleSearchRequest', () => {
     const fromPeer = makePeer('flood-peer');
     const noop = () => {};
     // Send MAX_MAP_SIZE + 100 unique search IDs in rapid succession so pruneExpired fires
-    // and the hard-cap eviction path runs
+    // and the hard-cap eviction path runs. ttl=2 so a searchRoutes entry is created per request
+    // (ttl=1 would never create routes, making the searchRoutes cap assertion trivially true).
     for (let i = 0; i < MAX_MAP_SIZE + 100; i++) {
       await handleSearchRequest(
         {
@@ -308,7 +309,7 @@ describe('handleSearchRequest', () => {
           originNodeId: 'flood-peer',
           query: 'flood',
           fileType: 'all',
-          ttl: 1,
+          ttl: 2,
         },
         prisma,
         identity,

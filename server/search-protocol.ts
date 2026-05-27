@@ -77,8 +77,10 @@ function pruneExpired(): void {
     let evicted = 0;
     for (const [id] of seenSearchIds) {
       if (evicted >= toEvict) break;
-      if (!pendingSearches.has(id)) {
-        // never evict an in-flight origin search
+      // Never evict an in-flight origin search or any entry with a live route —
+      // losing the seenSearchIds entry while the route exists would let a duplicate
+      // search-request overwrite the route and misroute in-flight results.
+      if (!pendingSearches.has(id) && !searchRoutes.has(id)) {
         seenSearchIds.delete(id);
         evicted++;
       }
@@ -179,19 +181,23 @@ export async function handleSearchRequest(
 ): Promise<void> {
   if (msg.ttl <= 0) return; // TTL exhausted — drop without processing
   if (!markSeen(msg.searchId)) return; // already seen — drop (cycle prevention)
-  if (searchRoutes.size >= MAX_MAP_SIZE) {
-    // Pruning couldn't free a searchRoutes slot — roll back the seenSearchIds entry so the
-    // same searchId isn't permanently orphaned (no route = no point marking it seen).
-    seenSearchIds.delete(msg.searchId);
-    return;
-  }
 
-  const routeCreatedAt = Date.now();
-  searchRoutes.set(msg.searchId, {
-    returnPeerNodeId: fromPeer.peerNodeId,
-    expiresAt: routeCreatedAt + ROUTE_EXPIRY_MS,
-    createdAt: routeCreatedAt,
-  });
+  // Only create a return route when we need to relay results back — if ttl=1 we process locally
+  // and never forward, so no downstream results can ever arrive and a route would be dead weight.
+  if (msg.ttl > 1) {
+    if (searchRoutes.size >= MAX_MAP_SIZE) {
+      // Pruning couldn't free a searchRoutes slot — roll back the seenSearchIds entry so the
+      // same searchId isn't permanently orphaned (no route = no point marking it seen).
+      seenSearchIds.delete(msg.searchId);
+      return;
+    }
+    const routeCreatedAt = Date.now();
+    searchRoutes.set(msg.searchId, {
+      returnPeerNodeId: fromPeer.peerNodeId,
+      expiresAt: routeCreatedAt + ROUTE_EXPIRY_MS,
+      createdAt: routeCreatedAt,
+    });
+  }
 
   // Execute local search — skip the count query since the protocol only uses files
   const { files } = await searchFiles(prisma, {
@@ -247,7 +253,7 @@ export async function initiateNetworkSearch(
   if (peers.length === 0) return [];
 
   const searchId = crypto.randomUUID();
-  markSeen(searchId);
+  if (!markSeen(searchId)) return []; // UUID collision — astronomically unlikely
   if (searchRoutes.size >= MAX_MAP_SIZE) {
     // At capacity even after pruning — clean up and bail rather than overflowing the map.
     seenSearchIds.delete(searchId);
