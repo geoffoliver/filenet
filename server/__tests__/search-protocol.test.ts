@@ -533,8 +533,10 @@ describe('handleSearchResult', () => {
       };
       await handleSearchRequest(relayMsg, prisma, identity, returnPeer, [], captureAll([]));
 
-      // Advance time past route expiry
-      jest.setSystemTime(Date.now() + ROUTE_EXPIRY_MS + 1);
+      // Activate fake timers and advance past route expiry
+      const expiredAt = Date.now() + ROUTE_EXPIRY_MS + 1;
+      jest.useFakeTimers();
+      jest.setSystemTime(expiredAt);
       try {
         const relayed: { peer: ConnectedPeer; msg: InnerMessage }[] = [];
         handleSearchResult(
