@@ -133,9 +133,13 @@ export function handleSearchResult(
   msg: SearchResultMessage,
   sendFn: (peer: ConnectedPeer, msg: InnerMessage) => void = sendToPeer,
 ): void {
+  // Opportunistic prune — keeps maps tidy even when markSeen() isn't called (e.g., idle relay)
+  const now = Date.now();
+  if (now - lastPruneAt > PRUNE_INTERVAL_MS) pruneExpired();
+
   const route = searchRoutes.get(msg.searchId);
   if (!route) return;
-  if (Date.now() > route.expiresAt) {
+  if (now > route.expiresAt) {
     searchRoutes.delete(msg.searchId);
     return;
   }
@@ -153,7 +157,8 @@ export function handleSearchResult(
     for (const item of msg.results) {
       if (pending.results.length >= MAX_NETWORK_RESULTS) break;
       if (senderCount + added >= MAX_RESULTS_PER_SENDER) break;
-      const key = `${msg.fromNodeId}:${item.sha256}`;
+      // JSON.stringify avoids key collisions when fromNodeId contains the separator character
+      const key = JSON.stringify([msg.fromNodeId, item.sha256]);
       if (!pending.seenKeys.has(key)) {
         pending.seenKeys.add(key);
         pending.results.push({ ...item, nodeId: msg.fromNodeId, viaNodeId: msg.viaNodeId });
@@ -171,12 +176,16 @@ export function handleSearchResult(
   } else {
     // We're a relay — resolve the live connection at send time to avoid using a stale peer object
     const returnPeer = getConnectedPeer(route.returnPeerNodeId);
-    if (returnPeer) {
-      try {
-        sendFn(returnPeer, msg);
-      } catch {
-        // relay peer disconnected — nothing to do
-      }
+    if (!returnPeer) {
+      // Return peer disconnected — free the dead route immediately rather than waiting for expiry
+      searchRoutes.delete(msg.searchId);
+      return;
+    }
+    try {
+      sendFn(returnPeer, msg);
+    } catch {
+      // Peer disconnected mid-send — free the dead route
+      searchRoutes.delete(msg.searchId);
     }
   }
 }
@@ -234,7 +243,10 @@ export async function handleSearchRequest(
     try {
       sendFn(fromPeer, resultMsg);
     } catch {
-      // requester disconnected before results arrived
+      // Requester disconnected — drop the return route and skip forwarding: there is no one to
+      // deliver downstream results to, so propagating the search would waste network bandwidth.
+      searchRoutes.delete(msg.searchId);
+      return;
     }
   }
 

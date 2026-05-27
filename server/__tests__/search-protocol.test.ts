@@ -296,6 +296,34 @@ describe('handleSearchRequest', () => {
     ).resolves.toBeUndefined();
   });
 
+  it('drops route and skips forwarding when requester disconnects during result send', async () => {
+    const dir = join(tmpDir, 'send-err-fwd');
+    await mkdir(dir);
+    await writeFile(join(dir, 'fwdfile.mp3'), 'data');
+    await indexFile(prisma, join(dir, 'fwdfile.mp3'));
+
+    const fromPeer = makePeer('disconnected-requester');
+    const fwdPeer = makePeer('forward-target');
+    let forwardCount = 0;
+    const throwOnResultFn = (_peer: ConnectedPeer, msg: InnerMessage) => {
+      if ((msg as SearchResultMessage).type === 'search-result') throw new Error('requester gone');
+      forwardCount++;
+    };
+    const msg: SearchRequestMessage = {
+      type: 'search-request',
+      searchId: crypto.randomUUID(),
+      originNodeId: 'disconnected-requester',
+      query: 'fwdfile',
+      fileType: 'all',
+      ttl: 2,
+    };
+
+    await handleSearchRequest(msg, prisma, identity, fromPeer, [fwdPeer], throwOnResultFn);
+
+    expect(forwardCount).toBe(0); // skip forwarding when requester is gone
+    expect(getInternalMapSizes().searchRoutes).toBe(0); // dead route freed immediately
+  });
+
   it('keeps seenSearchIds and searchRoutes at or below MAX_MAP_SIZE under a burst of unique IDs', async () => {
     const fromPeer = makePeer('flood-peer');
     const noop = () => {};
@@ -551,7 +579,38 @@ describe('handleSearchResult', () => {
     expect(relayed).toHaveLength(0);
   });
 
-  it('swallows sendFn error when relaying result to upstream peer', async () => {
+  it('frees dead relay route when return peer has disconnected', async () => {
+    // Create a relay route for a peer that is NOT in the connections registry
+    const gonePeer = makePeer('gone-upstream');
+    const relayMsg: SearchRequestMessage = {
+      type: 'search-request',
+      searchId: crypto.randomUUID(),
+      originNodeId: 'origin',
+      query: 'gone',
+      fileType: 'all',
+      ttl: 2,
+    };
+    await handleSearchRequest(relayMsg, prisma, identity, gonePeer, [], captureAll([]));
+    expect(getInternalMapSizes().searchRoutes).toBe(1);
+
+    const relayed: { peer: ConnectedPeer; msg: InnerMessage }[] = [];
+    handleSearchResult(
+      {
+        type: 'search-result',
+        searchId: relayMsg.searchId,
+        fromNodeId: 'downstream',
+        results: [
+          { filename: 'f.mp3', size: '1', sha256: '2'.repeat(64), mimeType: null, metadata: null },
+        ],
+      },
+      captureAll(relayed),
+    );
+
+    expect(relayed).toHaveLength(0); // peer not connected — nothing relayed
+    expect(getInternalMapSizes().searchRoutes).toBe(0); // dead route freed
+  });
+
+  it('frees relay route on sendFn failure and does not throw', async () => {
     const returnPeer = makePeer('upstream-err');
     registerPeer(
       returnPeer.ws,
@@ -572,6 +631,7 @@ describe('handleSearchResult', () => {
       };
 
       await handleSearchRequest(relayMsg, prisma, identity, returnPeer, [], captureAll([]));
+      expect(getInternalMapSizes().searchRoutes).toBe(1);
 
       const resultMsg: SearchResultMessage = {
         type: 'search-result',
@@ -592,9 +652,45 @@ describe('handleSearchResult', () => {
         throw new Error('relay send failed');
       };
       expect(() => handleSearchResult(resultMsg, throwFn)).not.toThrow();
+      expect(getInternalMapSizes().searchRoutes).toBe(0); // dead route freed on send failure
     } finally {
       unregisterPeer('upstream-err');
     }
+  });
+
+  it('does not conflate distinct (fromNodeId, sha256) pairs when fromNodeId contains a colon', async () => {
+    const peer = makePeer('colon-peer');
+    const sent: { peer: ConnectedPeer; msg: InnerMessage }[] = [];
+
+    const networkResultsPromise = initiateNetworkSearch(
+      identity,
+      [peer],
+      { query: 'colon-dedup', fileType: 'all' },
+      200,
+      captureAll(sent),
+    );
+
+    await Bun.sleep(10);
+    const reqMsg = sent[0].msg as SearchRequestMessage;
+
+    const sha256 = 'f'.repeat(64);
+    // "node:with:colons" and "node" are two distinct fromNodeId values sharing the same sha256 —
+    // both should be kept as separate results (distinct producers of the same file)
+    handleSearchResult({
+      type: 'search-result',
+      searchId: reqMsg.searchId,
+      fromNodeId: 'node:with:colons',
+      results: [{ filename: 'f1.mp3', size: '1', sha256, mimeType: null, metadata: null }],
+    });
+    handleSearchResult({
+      type: 'search-result',
+      searchId: reqMsg.searchId,
+      fromNodeId: 'node',
+      results: [{ filename: 'f2.mp3', size: '1', sha256, mimeType: null, metadata: null }],
+    });
+
+    const results = await networkResultsPromise;
+    expect(results.filter((r) => r.sha256 === sha256)).toHaveLength(2);
   });
 });
 
