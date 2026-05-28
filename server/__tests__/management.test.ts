@@ -422,6 +422,12 @@ describe('GET /api/search', () => {
     expect(body.files).toHaveLength(2);
   });
 
+  it('omits network field when network param is not set', async () => {
+    const res = await makeHandler()(req('/api/search'));
+    const body = await res.json();
+    expect('network' in body).toBe(false);
+  });
+
   it('serializes size as a string', async () => {
     const res = await makeHandler()(req('/api/search'));
     const body = await res.json();

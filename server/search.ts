@@ -17,8 +17,16 @@ export type SearchResult = {
 
 export async function searchFiles(
   prisma: PrismaClient,
+  params: SearchParams & { skipTotal: true },
+): Promise<{ files: SharedFile[] }>;
+export async function searchFiles(
+  prisma: PrismaClient,
   params: SearchParams,
-): Promise<SearchResult> {
+): Promise<SearchResult>;
+export async function searchFiles(
+  prisma: PrismaClient,
+  params: SearchParams,
+): Promise<SearchResult | { files: SharedFile[] }> {
   const { type = 'all', limit = 50, offset = 0 } = params;
   const query = params.query.trim();
 
@@ -49,7 +57,7 @@ export async function searchFiles(
   });
 
   if (params.skipTotal) {
-    return { files: await findMany, total: 0 };
+    return { files: await findMany };
   }
 
   const [files, total] = await Promise.all([findMany, prisma.sharedFile.count({ where })]);

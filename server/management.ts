@@ -205,7 +205,7 @@ export function createManagementFetch(deps: ManagementDeps): (req: Request) => P
         return Response.json({
           files: localResult.files.map(toSharedFileDto),
           total: localResult.total,
-          network: networkResults,
+          ...(network ? { network: networkResults } : {}),
         });
       }
 
