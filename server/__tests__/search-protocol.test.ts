@@ -13,6 +13,7 @@ import {
   MAX_MAP_SIZE,
   MAX_NETWORK_RESULTS,
   MAX_RESULTS_PER_SENDER,
+  type NetworkResult,
   ROUTE_EXPIRY_MS,
   getInternalMapSizes,
   handleSearchRequest,
