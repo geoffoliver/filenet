@@ -65,10 +65,11 @@ export type ManagementDeps = {
   identity: Identity;
   prisma: PrismaClient;
   connectPeer: ConnectPeerFn;
+  networkSearch?: typeof initiateNetworkSearch;
 };
 
 export function createManagementFetch(deps: ManagementDeps): (req: Request) => Promise<Response> {
-  const { identity, prisma, connectPeer } = deps;
+  const { identity, prisma, connectPeer, networkSearch = initiateNetworkSearch } = deps;
 
   return async function fetch(req: Request): Promise<Response> {
     const url = new URL(req.url);
@@ -195,7 +196,7 @@ export function createManagementFetch(deps: ManagementDeps): (req: Request) => P
         const localSearchPromise = searchFiles(prisma, { query: q, type, limit, offset });
         const networkResultsPromise = network
           ? getAcceptedConnectedPeers(prisma).then((peers) =>
-              initiateNetworkSearch(identity, peers, { query: q, fileType: type }),
+              networkSearch(identity, peers, { query: q, fileType: type }),
             )
           : Promise.resolve([]);
         const [localResult, networkResults] = await Promise.all([

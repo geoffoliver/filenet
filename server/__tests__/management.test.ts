@@ -508,6 +508,43 @@ describe('GET /api/search', () => {
     const body = await res.json();
     expect(body.network).toHaveLength(0);
   });
+
+  it('network=true includes results from connected peers alongside local results', async () => {
+    await prisma.friend.create({
+      data: {
+        name: 'Alice',
+        address: '10.0.0.99',
+        port: 7734,
+        nodeId: 'alice-node',
+        status: 'ACCEPTED',
+      },
+    });
+    const fakeNetworkResult = {
+      filename: 'remote.mp3',
+      size: '9999',
+      sha256: 'a'.repeat(64),
+      mimeType: 'audio/mpeg',
+      metadata: null,
+      nodeId: 'alice-node',
+    };
+    const handler = createManagementFetch({
+      identity,
+      prisma,
+      connectPeer: neverConnect,
+      networkSearch: async () => [fakeNetworkResult],
+    });
+
+    const res = await handler(req('/api/search?network=true'));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(Array.isArray(body.network)).toBe(true);
+    expect(body.network).toHaveLength(1);
+    expect(body.network[0].filename).toBe('remote.mp3');
+    expect(body.network[0].nodeId).toBe('alice-node');
+    // Local results still present
+    expect(Array.isArray(body.files)).toBe(true);
+    expect(typeof body.total).toBe('number');
+  });
 });
 
 // ---------------------------------------------------------------------------
