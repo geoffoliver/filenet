@@ -105,6 +105,7 @@
 - [ ] Step: listening port + port-forwarding instructions
 - [ ] Step: degrees-of-separation preference
 - [ ] Extended profile fields (email, picture, bio, links) — deferred to Settings
+- [ ] Maybe: native folder-browser component (API-backed directory listing) to replace manual path input in shared folders + download folder steps
 
 ### Home (Dashboard)
 
