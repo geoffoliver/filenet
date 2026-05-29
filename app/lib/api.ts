@@ -111,6 +111,17 @@ export async function removeFriend(id: string): Promise<void> {
   }
 }
 
+export type Stats = {
+  sharedFiles: { count: number; totalSize: string };
+  friends: { total: number; online: number };
+};
+
+export async function getStats(): Promise<Stats> {
+  const res = await fetch('/api/stats');
+  if (!res.ok) throw new Error('Failed to load stats');
+  return res.json();
+}
+
 export async function triggerRescan(): Promise<{ indexed: number; removed: number }> {
   const res = await fetch('/api/rescan', { method: 'POST' });
   if (!res.ok) throw new Error('Rescan failed');

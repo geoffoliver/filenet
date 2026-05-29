@@ -387,6 +387,57 @@ describe('POST /api/rescan', () => {
 });
 
 // ---------------------------------------------------------------------------
+// GET /api/stats
+// ---------------------------------------------------------------------------
+
+describe('GET /api/stats', () => {
+  beforeEach(async () => {
+    await prisma.sharedFile.deleteMany();
+    await prisma.friend.deleteMany();
+  });
+
+  it('returns zero counts when nothing is indexed', async () => {
+    const res = await makeHandler()(req('/api/stats'));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.sharedFiles.count).toBe(0);
+    expect(body.sharedFiles.totalSize).toBe('0');
+    expect(body.friends.total).toBe(0);
+    expect(body.friends.online).toBe(0);
+  });
+
+  it('counts indexed files and sums their sizes', async () => {
+    await prisma.sharedFile.createMany({
+      data: [
+        { path: '/a.mp3', filename: 'a.mp3', size: 1000n, sha256: 'aa'.repeat(32) },
+        { path: '/b.mp3', filename: 'b.mp3', size: 2500n, sha256: 'bb'.repeat(32) },
+      ],
+    });
+    const res = await makeHandler()(req('/api/stats'));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.sharedFiles.count).toBe(2);
+    expect(body.sharedFiles.totalSize).toBe('3500');
+  });
+
+  it('counts only ACCEPTED friends', async () => {
+    await prisma.friend.createMany({
+      data: [
+        { name: 'Alice', address: '1.1.1.1', port: 7734, status: 'ACCEPTED' },
+        { name: 'Bob', address: '2.2.2.2', port: 7734, status: 'ACCEPTED' },
+        { name: 'Carol', address: '3.3.3.3', port: 7734, status: 'OUTGOING_PENDING' },
+        { name: 'Dave', address: '4.4.4.4', port: 7734, status: 'INCOMING_PENDING' },
+      ],
+    });
+    const res = await makeHandler()(req('/api/stats'));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.friends.total).toBe(2);
+    expect(body.friends.online).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // GET /api/search
 // ---------------------------------------------------------------------------
 

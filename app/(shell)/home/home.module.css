@@ -1,0 +1,64 @@
+@reference 'tailwindcss';
+
+.page {
+  @apply w-full
+    max-w-3xl
+    mx-auto
+    px-8
+    py-10;
+}
+
+.pageTitle {
+  @apply text-2xl
+    font-semibold
+    text-[var(--text-primary)]
+    mb-8;
+}
+
+.error {
+  @apply text-sm
+    text-[var(--color-danger)]
+    mb-6;
+}
+
+/* ── Stat grid ────────────────────────────────────────────────────────────── */
+
+.grid {
+  @apply grid
+    grid-cols-2
+    gap-4;
+}
+
+.card {
+  @apply flex
+    flex-col
+    gap-1
+    p-6
+    rounded-[var(--radius-md)]
+    border
+    border-[var(--border)]
+    bg-[var(--bg-surface)];
+}
+
+.cardDim {
+  @apply opacity-50;
+}
+
+.cardLabel {
+  @apply text-xs
+    font-medium
+    uppercase
+    tracking-wide
+    text-[var(--text-muted)];
+}
+
+.cardValue {
+  @apply text-3xl
+    font-semibold
+    text-[var(--text-primary)];
+}
+
+.cardSub {
+  @apply text-sm
+    text-[var(--text-muted)];
+}
