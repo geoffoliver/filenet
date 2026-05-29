@@ -1,12 +1,20 @@
-import type { Metadata } from 'next';
+'use client';
 
-export const metadata: Metadata = { title: 'Search — Filenet' };
+import { Suspense } from 'react';
+import { useSearchParams } from 'next/navigation';
+
+import SearchView from './SearchView';
+
+function SearchInner() {
+  const params = useSearchParams();
+  // Remount SearchView on every new search so state always starts fresh
+  return <SearchView key={params.toString()} />;
+}
 
 export default function SearchPage() {
   return (
-    <div style={{ padding: '40px 32px' }}>
-      <h1 style={{ fontSize: 22, fontWeight: 600, marginBottom: 8 }}>Search</h1>
-      <p style={{ color: 'var(--text-muted)' }}>File search coming soon.</p>
-    </div>
+    <Suspense>
+      <SearchInner />
+    </Suspense>
   );
 }
