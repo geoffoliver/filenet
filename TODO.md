@@ -49,7 +49,6 @@
 - [x] Inbound search: execute locally, forward to own friends (minus already-seen search IDs), return results directly to originating node
 - [x] Search deduplication (track seen search IDs to prevent cycles)
 - [x] Direct result delivery back to the requesting node over an encrypted connection
-- [ ] Configurable degrees of separation (friends / friends-of-friends / everyone)
 
 ### File Transfers
 
@@ -103,7 +102,6 @@
 - [x] Step 5: Auto-accept preferences + invite password
 - [x] Progress bar + back/skip/next/finish navigation
 - [ ] Step: listening port + port-forwarding instructions
-- [ ] Step: degrees-of-separation preference
 - [ ] Extended profile fields (email, picture, bio, links) — deferred to Settings
 - [ ] Maybe: native folder-browser component (API-backed directory listing) to replace manual path input in shared folders + download folder steps
 
@@ -120,7 +118,7 @@
 
 - [x] Search form: text input + file-type dropdown (All, Audio, Video, Image, Document, Ebook)
 - [x] Trigger search on enter / button click (also auto-runs from navbar)
-- [x] Network search toggle (fans out to connected peers)
+- [x] Network search always on (removed opt-in toggle — network search is the whole point)
 - [x] Results list: filename, size, mime type, source count (local + network merged by sha256)
 - [x] Result detail expand: full metadata, hash preview, "on this node" badge
 - [x] Download button placeholder (disabled until transfer system exists)
@@ -154,14 +152,13 @@
 
 ### Settings
 
-- [ ] Profile details form (name, email, picture, bio, links)
-- [ ] Shared folders: add / remove paths
-- [ ] Download folder picker
-- [ ] Listening port field + port-forwarding instructions
-- [ ] Auto-accept toggles + invite password
-- [ ] Degrees-of-separation selector
+- [x] Profile details form (name only for now; email, picture, bio, links deferred)
+- [x] Shared folders: add / remove paths
+- [x] Download folder picker
+- [x] Auto-accept toggles + invite password
+- [x] Force rescan button
+- [ ] Listening port field + port-forwarding instructions (needs schema migration)
 - [ ] Post-download scripts: add path, reorder, remove
-- [ ] Force rescan button
 
 ---
 

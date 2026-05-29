@@ -111,6 +111,12 @@ export async function removeFriend(id: string): Promise<void> {
   }
 }
 
+export async function triggerRescan(): Promise<{ indexed: number; removed: number }> {
+  const res = await fetch('/api/rescan', { method: 'POST' });
+  if (!res.ok) throw new Error('Rescan failed');
+  return res.json();
+}
+
 export type FileType = 'all' | 'audio' | 'video' | 'image' | 'document' | 'ebook';
 
 export type LocalFile = {
