@@ -261,6 +261,9 @@ export function createManagementFetch(deps: ManagementDeps): (req: Request) => P
           ) {
             return new Response('Invalid transfer request', { status: 400 });
           }
+          if (BigInt(size) > BigInt(Number.MAX_SAFE_INTEGER)) {
+            return new Response('File size too large', { status: 400 });
+          }
           const settings = await getOrCreateSettings(prisma);
           const downloadFolder = settings.downloadFolder;
           if (!downloadFolder) {

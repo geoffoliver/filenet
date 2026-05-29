@@ -103,11 +103,12 @@ function calcSpeed(dl: ActiveDownload): number {
 // ---------------------------------------------------------------------------
 
 async function uniqueFilePath(folder: string, filename: string): Promise<string> {
-  const candidate = join(folder, filename);
+  const safe = basename(filename); // strip any directory components to prevent path traversal
+  const candidate = join(folder, safe);
   if (!existsSync(candidate)) return candidate;
 
-  const ext = extname(filename);
-  const base = basename(filename, ext);
+  const ext = extname(safe);
+  const base = basename(safe, ext);
   for (let i = 1; i < 10_000; i++) {
     const next = join(folder, `${base} (${i})${ext}`);
     if (!existsSync(next)) return next;
@@ -146,10 +147,15 @@ async function downloadChunk(
       dl.inFlight.delete(chunkIndex);
       recordBytes(dl, data.length);
 
+      const lastIdx = dl.totalChunks - 1;
+      const lastChunkActualSize = Number(dl.size) - lastIdx * dl.chunkSize;
+      const bytesReceived =
+        dl.completedChunks.size * dl.chunkSize -
+        (dl.completedChunks.has(lastIdx) ? dl.chunkSize - lastChunkActualSize : 0);
       await prisma.download.update({
         where: { id: dl.id },
         data: {
-          bytesReceived: BigInt(dl.completedChunks.size * dl.chunkSize),
+          bytesReceived: BigInt(bytesReceived),
           completedChunks: JSON.stringify([...dl.completedChunks]),
         },
       });

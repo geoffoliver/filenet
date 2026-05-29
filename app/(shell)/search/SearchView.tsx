@@ -161,7 +161,7 @@ function MetaDetail({ hit }: { hit: SearchHit }) {
         <button
           type="button"
           className="btn btn-primary"
-          disabled={downloading || downloaded || sources === 0}
+          disabled={downloading || downloaded || hit.networkSources.length === 0}
           onClick={() => {
             const allSources = hit.networkSources.map((n) => n.nodeId);
             setDownloading(true);
