@@ -1,0 +1,154 @@
+@reference 'tailwindcss';
+
+.page {
+  @apply max-w-3xl
+    mx-auto
+    px-8
+    py-10;
+}
+
+.header {
+  @apply flex
+    items-center
+    justify-between
+    mb-8;
+}
+
+.title {
+  @apply text-2xl
+    font-bold
+    text-[var(--text-primary)];
+}
+
+/* ── Add Friend form ──────────────────────────────────────────────────────── */
+
+.addForm {
+  @apply bg-[var(--bg-surface)]
+    border
+    border-[var(--border)]
+    rounded-[var(--radius-md)]
+    p-6
+    mb-8;
+  box-shadow: var(--shadow-sm);
+}
+
+.addFormTitle {
+  @apply text-base
+    font-semibold
+    text-[var(--text-primary)]
+    mb-5;
+}
+
+.formGrid {
+  @apply grid
+    grid-cols-2
+    gap-x-4;
+}
+
+.optional {
+  @apply font-normal
+    text-[var(--text-muted)];
+}
+
+.formError {
+  @apply text-sm
+    text-[var(--color-danger)]
+    mb-3;
+}
+
+.formActions {
+  @apply flex
+    justify-end
+    gap-2
+    mt-2;
+}
+
+/* ── Sections ─────────────────────────────────────────────────────────────── */
+
+.section {
+  @apply mb-8;
+}
+
+.sectionTitle {
+  @apply text-xs
+    font-semibold
+    uppercase
+    tracking-widest
+    text-[var(--text-muted)]
+    mb-3;
+}
+
+/* ── Friend card ──────────────────────────────────────────────────────────── */
+
+.list {
+  @apply list-none
+    p-0
+    m-0
+    flex
+    flex-col
+    gap-2;
+}
+
+.card {
+  @apply flex
+    items-center
+    gap-4
+    bg-[var(--bg-surface)]
+    border
+    border-[var(--border)]
+    rounded-[var(--radius-md)]
+    px-4
+    py-3;
+}
+
+.avatar {
+  @apply w-10
+    h-10
+    rounded-full
+    bg-[var(--color-primary)]
+    text-white
+    text-sm
+    font-semibold
+    flex
+    items-center
+    justify-center
+    flex-shrink-0;
+}
+
+.info {
+  @apply flex-1 min-w-0;
+}
+
+.name {
+  @apply text-sm
+    font-medium
+    text-[var(--text-primary)]
+    truncate;
+}
+
+.meta {
+  @apply text-xs
+    text-[var(--text-muted)]
+    truncate
+    mt-0.5;
+}
+
+.actions {
+  @apply flex
+    items-center
+    gap-2
+    flex-shrink-0;
+}
+
+.confirmLabel {
+  @apply text-sm
+    text-[var(--text-secondary)];
+}
+
+/* ── Empty state ──────────────────────────────────────────────────────────── */
+
+.empty {
+  @apply text-sm
+    text-[var(--text-muted)]
+    mt-8;
+}
