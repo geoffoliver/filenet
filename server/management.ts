@@ -10,6 +10,7 @@ import { ConflictError, NotFoundError } from './errors';
 import {
   type ConnectedPeer,
   closeAndUnregisterPeer,
+  getAcceptedConnectedPeers,
   getConnectedPeer,
   notifyFriendAccepted,
   notifyFriendRejected,
@@ -22,6 +23,7 @@ import {
   updateSettings,
 } from './config';
 import type { Identity } from './identity';
+import { initiateNetworkSearch } from './search-protocol';
 import { scanAndIndex } from './indexer';
 import { searchFiles } from './search';
 
@@ -63,10 +65,11 @@ export type ManagementDeps = {
   identity: Identity;
   prisma: PrismaClient;
   connectPeer: ConnectPeerFn;
+  networkSearch?: typeof initiateNetworkSearch;
 };
 
 export function createManagementFetch(deps: ManagementDeps): (req: Request) => Promise<Response> {
-  const { identity, prisma, connectPeer } = deps;
+  const { identity, prisma, connectPeer, networkSearch = initiateNetworkSearch } = deps;
 
   return async function fetch(req: Request): Promise<Response> {
     const url = new URL(req.url);
@@ -122,7 +125,11 @@ export function createManagementFetch(deps: ManagementDeps): (req: Request) => P
             if (updated.nodeId) {
               const peer = getConnectedPeer(updated.nodeId);
               if (peer) {
-                notifyFriendAccepted(peer, localName);
+                try {
+                  notifyFriendAccepted(peer, localName);
+                } catch {
+                  // peer disconnected between lookup and send
+                }
               } else {
                 connectPeer(updated.address, updated.port)
                   .then((p) => {
@@ -142,7 +149,13 @@ export function createManagementFetch(deps: ManagementDeps): (req: Request) => P
             await rejectFriendRequest(prisma, id);
             if (friend.nodeId) {
               const peer = getConnectedPeer(friend.nodeId);
-              if (peer) notifyFriendRejected(peer);
+              if (peer) {
+                try {
+                  notifyFriendRejected(peer);
+                } catch {
+                  // peer disconnected between lookup and send
+                }
+              }
               closeAndUnregisterPeer(friend.nodeId);
             }
             return new Response(null, { status: 204 });
@@ -179,11 +192,21 @@ export function createManagementFetch(deps: ManagementDeps): (req: Request) => P
         if (!result.success) {
           return new Response(result.error.issues[0].message, { status: 400 });
         }
-        const { q, type, limit, offset } = result.data;
-        const searchResult = await searchFiles(prisma, { query: q, type, limit, offset });
+        const { q, type, limit, offset, network } = result.data;
+        const localSearchPromise = searchFiles(prisma, { query: q, type, limit, offset });
+        const networkResultsPromise = network
+          ? getAcceptedConnectedPeers(prisma).then((peers) =>
+              networkSearch(identity, peers, { query: q, fileType: type }),
+            )
+          : Promise.resolve([]);
+        const [localResult, networkResults] = await Promise.all([
+          localSearchPromise,
+          networkResultsPromise,
+        ]);
         return Response.json({
-          files: searchResult.files.map(toSharedFileDto),
-          total: searchResult.total,
+          files: localResult.files.map(toSharedFileDto),
+          total: localResult.total,
+          ...(network ? { network: networkResults } : {}),
         });
       }
 

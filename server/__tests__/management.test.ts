@@ -422,6 +422,12 @@ describe('GET /api/search', () => {
     expect(body.files).toHaveLength(2);
   });
 
+  it('omits network field when network param is not set', async () => {
+    const res = await makeHandler()(req('/api/search'));
+    const body = await res.json();
+    expect('network' in body).toBe(false);
+  });
+
   it('serializes size as a string', async () => {
     const res = await makeHandler()(req('/api/search'));
     const body = await res.json();
@@ -468,6 +474,76 @@ describe('GET /api/search', () => {
   it('returns 400 for negative offset', async () => {
     const res = await makeHandler()(req('/api/search?offset=-1'));
     expect(res.status).toBe(400);
+  });
+
+  it('network=true returns empty network array when accepted friends are not connected', async () => {
+    await prisma.friend.create({
+      data: {
+        name: 'Bob',
+        address: '127.0.0.1',
+        port: 7734,
+        nodeId: 'bob-node',
+        status: 'ACCEPTED',
+      },
+    });
+    const res = await makeHandler()(req('/api/search?network=true'));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(Array.isArray(body.network)).toBe(true);
+    expect(body.network).toHaveLength(0);
+  });
+
+  it('network=true does not fan out to pending friends', async () => {
+    await prisma.friend.create({
+      data: {
+        name: 'Pending',
+        address: '127.0.0.1',
+        port: 7734,
+        nodeId: 'pending-node',
+        status: 'INCOMING_PENDING',
+      },
+    });
+    const res = await makeHandler()(req('/api/search?network=true'));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.network).toHaveLength(0);
+  });
+
+  it('network=true includes results from connected peers alongside local results', async () => {
+    await prisma.friend.create({
+      data: {
+        name: 'Alice',
+        address: '10.0.0.99',
+        port: 7734,
+        nodeId: 'alice-node',
+        status: 'ACCEPTED',
+      },
+    });
+    const fakeNetworkResult = {
+      filename: 'remote.mp3',
+      size: '9999',
+      sha256: 'a'.repeat(64),
+      mimeType: 'audio/mpeg',
+      metadata: null,
+      nodeId: 'alice-node',
+    };
+    const handler = createManagementFetch({
+      identity,
+      prisma,
+      connectPeer: neverConnect,
+      networkSearch: async () => [fakeNetworkResult],
+    });
+
+    const res = await handler(req('/api/search?network=true'));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(Array.isArray(body.network)).toBe(true);
+    expect(body.network).toHaveLength(1);
+    expect(body.network[0].filename).toBe('remote.mp3');
+    expect(body.network[0].nodeId).toBe('alice-node');
+    // Local results still present
+    expect(Array.isArray(body.files)).toBe(true);
+    expect(typeof body.total).toBe('number');
   });
 });
 

@@ -79,6 +79,18 @@ export function getAllConnectedPeers(): ConnectedPeer[] {
   return Array.from(peers.values());
 }
 
+export async function getAcceptedConnectedPeers(prisma: PrismaClient): Promise<ConnectedPeer[]> {
+  const connected = getAllConnectedPeers();
+  if (connected.length === 0) return [];
+  const nodeIds = connected.map((p) => p.peerNodeId);
+  const accepted = await prisma.friend.findMany({
+    where: { status: 'ACCEPTED', nodeId: { in: nodeIds } },
+    select: { nodeId: true },
+  });
+  const acceptedSet = new Set(accepted.map((f) => f.nodeId as string));
+  return connected.filter((p) => acceptedSet.has(p.peerNodeId));
+}
+
 export function sendToPeer(peer: ConnectedPeer, msg: InnerMessage): void {
   peer.ws.send(encodeMessage(encryptMessage(msg, peer.sessionKey)));
 }
@@ -90,6 +102,7 @@ export async function connectToPeer(
   port: number,
   localPort: number,
   friendRequest?: { name: string; password?: string },
+  onMessage?: (nodeId: string, msg: InnerMessage) => Promise<void>,
 ): Promise<ConnectedPeer> {
   const url = `ws://${address}:${port}`;
   const ws = new WebSocket(url);
@@ -160,6 +173,15 @@ export async function connectToPeer(
             address,
             port,
           });
+          if (onMessage && peerNodeId) {
+            try {
+              await onMessage(peerNodeId, msg);
+            } catch (err) {
+              // A transient error in the optional message hook (e.g. DB blip) must not
+              // tear down an otherwise healthy connection.
+              console.error(`onMessage error from peer ${address}:${port}:`, err);
+            }
+          }
         }
       } catch (err) {
         if (peerNodeId) closeAndUnregisterPeer(peerNodeId);

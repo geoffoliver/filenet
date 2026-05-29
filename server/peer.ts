@@ -1,10 +1,17 @@
 import type { PrismaClient } from '@prisma/client';
 import type { ServerWebSocket } from 'bun';
 
-import { FriendRequestMessageSchema, FriendResponseMessageSchema } from './schemas';
+import {
+  FriendRequestMessageSchema,
+  FriendResponseMessageSchema,
+  SearchRequestMessageSchema,
+  SearchResultMessageSchema,
+} from './schemas';
 import type { HelloAckMessage, HelloMessage, InnerMessage } from './types';
 import {
   closeAndUnregisterPeer,
+  getAcceptedConnectedPeers,
+  getConnectedPeer,
   handleInboundFriendRequest,
   registerPeer,
   updatePeerPort,
@@ -18,6 +25,7 @@ import {
   finalizeHandshake,
   generateEphemeralKeypair,
 } from './handshake';
+import { handleSearchRequest, handleSearchResult } from './search-protocol';
 import type { Identity } from './identity';
 import { acceptFriendRequest } from './friends';
 
@@ -164,6 +172,49 @@ export async function dispatchMessage(
       await ws.data.prisma.friend.delete({ where: { id: friend.id } });
       closeAndUnregisterPeer(state.peerNodeId);
     }
+    return;
+  }
+
+  if (msg.type === 'search-request' || msg.type === 'search-result') {
+    await dispatchSearchMessage(msg, state.peerNodeId, ws.data.prisma, ws.data.identity);
+    return;
+  }
+}
+
+/**
+ * Handle search-request and search-result messages for any authenticated connection
+ * (both inbound ServerWebSocket and outbound native WebSocket).  Exported so index.ts
+ * can wire it up as the onMessage callback for outbound connections.
+ */
+export async function dispatchSearchMessage(
+  msg: InnerMessage,
+  senderNodeId: string,
+  prisma: PrismaClient,
+  identity: Identity,
+): Promise<void> {
+  if (msg.type === 'search-request') {
+    const result = SearchRequestMessageSchema.safeParse(msg);
+    if (!result.success) return; // malformed — drop
+    // Targeted check first so non-friends can't trigger a full-table scan
+    const senderFriend = await prisma.friend.findFirst({
+      where: { nodeId: senderNodeId, status: 'ACCEPTED' },
+    });
+    if (!senderFriend) return; // not an accepted friend — drop
+    const fromPeer = getConnectedPeer(senderNodeId);
+    if (!fromPeer) return;
+    // Only resolve accepted peers for forwarding when the request will actually be forwarded.
+    const acceptedPeers = result.data.ttl > 1 ? await getAcceptedConnectedPeers(prisma) : [];
+    await handleSearchRequest(result.data, prisma, identity, fromPeer, acceptedPeers);
+  } else if (msg.type === 'search-result') {
+    const result = SearchResultMessageSchema.safeParse(msg);
+    if (!result.success) return; // malformed — drop
+    const isFriend = await prisma.friend.findFirst({
+      where: { nodeId: senderNodeId, status: 'ACCEPTED' },
+    });
+    if (!isFriend) return; // not an accepted friend — drop
+    // Tag viaNodeId with the authenticated sender while preserving the original producer's
+    // fromNodeId so multi-hop results retain correct producer attribution.
+    handleSearchResult({ ...result.data, viaNodeId: senderNodeId });
   }
 }
 

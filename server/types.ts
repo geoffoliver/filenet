@@ -49,12 +49,43 @@ export type FriendResponseMessage = {
   name?: string;
 };
 
+export type SearchResultItem = {
+  filename: string;
+  size: string; // BigInt serialized as string
+  sha256: string;
+  mimeType: string | null;
+  metadata: string | null;
+};
+
+export type SearchRequestMessage = {
+  type: 'search-request';
+  searchId: string; // UUID
+  originNodeId: string;
+  query: string;
+  fileType: string;
+  ttl: number;
+};
+
+export type SearchResultMessage = {
+  type: 'search-result';
+  searchId: string;
+  // Producer attribution — self-reported by the originating node and relayed verbatim.
+  // NOT authenticated by intermediate relays; treat as untrusted unless verified by other means.
+  fromNodeId: string;
+  // Authenticated immediate sender: set by the *receiving* node from the transport-layer peer
+  // identity, so this field IS trusted for the direct hop but not for the full chain.
+  viaNodeId?: string;
+  results: SearchResultItem[];
+};
+
 export type InnerMessage =
   | ReadyMessage
   | PingMessage
   | PongMessage
   | FriendRequestMessage
-  | FriendResponseMessage;
+  | FriendResponseMessage
+  | SearchRequestMessage
+  | SearchResultMessage;
 
 export type WireMessage = HelloMessage | HelloAckMessage | { type: 'encrypted'; payload: string };
 
