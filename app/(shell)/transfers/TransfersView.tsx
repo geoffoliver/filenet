@@ -76,7 +76,14 @@ function DownloadRow({ transfer, onAction }: { transfer: Transfer; onAction: () 
       </div>
 
       {active && (
-        <div className={styles.progressBar}>
+        <div
+          className={styles.progressBar}
+          role="progressbar"
+          aria-valuenow={pct}
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-label={`${transfer.filename} download progress`}
+        >
           <div className={styles.progressFill} style={{ width: `${pct}%` }} />
         </div>
       )}

@@ -68,6 +68,7 @@ model Download {
   completedChunks String        @default("[]") // JSON: number[] of completed chunk indices
   sources         String        @default("[]") // JSON: string[] of nodeIds
   tmpPath         String?
+  downloadFolder  String?
   finalPath       String?
   error           String?
   createdAt       DateTime      @default(now())

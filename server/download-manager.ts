@@ -1,5 +1,5 @@
 import { basename, extname, join } from 'node:path';
-import { open, rename, rm, truncate } from 'node:fs/promises';
+import { copyFile, open, rename, rm, truncate } from 'node:fs/promises';
 import type { FileHandle } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
@@ -136,6 +136,10 @@ async function downloadChunk(
     try {
       const data = await requestChunkFn(nodeId, dl.sha256, offset, length);
 
+      if (data.length !== length) {
+        throw new Error(`Unexpected chunk size: expected ${length}, got ${data.length}`);
+      }
+
       if (dl.stopped) return;
 
       // Write chunk at the correct offset
@@ -241,14 +245,24 @@ async function finalizeDownload(prisma: PrismaClient, dl: ActiveDownload): Promi
 
   // Find a non-colliding final path
   const record = await prisma.download.findUniqueOrThrow({ where: { id: dl.id } });
-  const downloadFolder = activeDownloadFolders.get(dl.id) ?? tmpdir();
+  const downloadFolder = activeDownloadFolders.get(dl.id) ?? record.downloadFolder ?? tmpdir();
   const finalPath = await uniqueFilePath(downloadFolder, record.filename);
 
   try {
     await rename(dl.tmpPath, finalPath);
-  } catch {
-    await failDownload(prisma, dl, 'Could not move file to download folder');
-    return;
+  } catch (err: unknown) {
+    if ((err as NodeJS.ErrnoException).code === 'EXDEV') {
+      try {
+        await copyFile(dl.tmpPath, finalPath);
+        await rm(dl.tmpPath, { force: true });
+      } catch {
+        await failDownload(prisma, dl, 'Could not move file to download folder');
+        return;
+      }
+    } else {
+      await failDownload(prisma, dl, 'Could not move file to download folder');
+      return;
+    }
   }
 
   await prisma.download.update({
@@ -316,6 +330,7 @@ export async function startDownload(
       chunkSize,
       sources: JSON.stringify(sources),
       tmpPath,
+      downloadFolder,
     },
   });
 
@@ -381,13 +396,25 @@ export async function resumeDownload(
     const totalChunks = Math.ceil(Number(record.size) / chunkSize);
     const tmpPath = record.tmpPath ?? join(tmpdir(), `.filenet-dl-${id}.tmp`);
 
-    const fileHandle = await open(tmpPath, 'r+').catch(async () => {
-      // Temp file gone — recreate it
+    let fileHandle: FileHandle;
+    try {
+      fileHandle = await open(tmpPath, 'r+');
+    } catch {
+      // Temp file gone — recreate it and restart all chunks to avoid zero-fill corruption
+      completedChunks.splice(0);
+      await prisma.download.update({
+        where: { id },
+        data: { completedChunks: '[]', bytesReceived: 0n },
+      });
       const fh2 = await open(tmpPath, 'w');
       await truncate(tmpPath, Number(record.size));
       await fh2.close();
-      return open(tmpPath, 'r+');
-    });
+      fileHandle = await open(tmpPath, 'r+');
+    }
+
+    if (record.downloadFolder) {
+      activeDownloadFolders.set(id, record.downloadFolder);
+    }
 
     dl = {
       id,
