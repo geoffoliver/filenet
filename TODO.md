@@ -107,12 +107,11 @@
 
 ### Home (Dashboard)
 
-- [ ] Files shared count + total size
-- [ ] Files downloaded count + total size
-- [ ] Total bytes uploaded
-- [ ] Network size (approximate node count reachable)
-- [ ] Friends currently online
-- [ ] Active transfers overview (mini list)
+- [x] Files shared count + total size
+- [x] Friends online / total
+- [ ] Files downloaded count + total size (deferred — needs transfer tracking)
+- [ ] Total bytes uploaded/downloaded (deferred — needs transfer tracking)
+- [ ] Active transfers overview (deferred — needs transfer system)
 
 ### Search
 

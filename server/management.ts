@@ -210,6 +210,24 @@ export function createManagementFetch(deps: ManagementDeps): (req: Request) => P
         });
       }
 
+      if (url.pathname === '/api/stats' && req.method === 'GET') {
+        const [fileAgg, friendTotal, onlineFriends] = await Promise.all([
+          prisma.sharedFile.aggregate({ _count: true, _sum: { size: true } }),
+          prisma.friend.count({ where: { status: 'ACCEPTED' } }),
+          getAcceptedConnectedPeers(prisma),
+        ]);
+        return Response.json({
+          sharedFiles: {
+            count: fileAgg._count,
+            totalSize: String(fileAgg._sum.size ?? 0n),
+          },
+          friends: {
+            total: friendTotal,
+            online: onlineFriends.length,
+          },
+        });
+      }
+
       if (url.pathname === '/api/rescan' && req.method === 'POST') {
         const settings = await getOrCreateSettings(prisma);
         const folders = parseSharedFolders(settings.sharedFolders);
