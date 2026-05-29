@@ -28,6 +28,7 @@ import {
 import { handleSearchRequest, handleSearchResult } from './search-protocol';
 import type { Identity } from './identity';
 import { acceptFriendRequest } from './friends';
+import { dispatchTransferMessage } from './transfer-protocol';
 
 type PeerState =
   | { phase: 'pending' }
@@ -177,6 +178,11 @@ export async function dispatchMessage(
 
   if (msg.type === 'search-request' || msg.type === 'search-result') {
     await dispatchSearchMessage(msg, state.peerNodeId, ws.data.prisma, ws.data.identity);
+    return;
+  }
+
+  if (msg.type === 'chunk-request' || msg.type === 'chunk-response' || msg.type === 'chunk-error') {
+    await dispatchTransferMessage(msg, state.peerNodeId, ws.data.prisma);
     return;
   }
 }

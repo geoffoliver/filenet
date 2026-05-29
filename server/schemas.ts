@@ -84,6 +84,39 @@ export const FriendRequestMessageSchema = z.object({
   password: z.string().optional(),
 });
 
+const sha256Schema = z
+  .string()
+  .length(64)
+  .regex(/^[0-9a-f]{64}$/, 'sha256 must be 64 lowercase hex characters');
+
+export const ChunkRequestMessageSchema = z.object({
+  type: z.literal('chunk-request'),
+  transferId: z.string().uuid(),
+  sha256: sha256Schema,
+  offset: z.number().int().min(0),
+  length: z
+    .number()
+    .int()
+    .min(1)
+    .max(4 * 1024 * 1024), // max 4 MB per chunk
+});
+
+export const ChunkResponseMessageSchema = z.object({
+  type: z.literal('chunk-response'),
+  transferId: z.string().uuid(),
+  sha256: sha256Schema,
+  offset: z.number().int().min(0),
+  data: z.string().max(6 * 1024 * 1024), // base64 of up to 4 MB
+});
+
+export const ChunkErrorMessageSchema = z.object({
+  type: z.literal('chunk-error'),
+  transferId: z.string().uuid(),
+  sha256: sha256Schema,
+  offset: z.number().int().min(0),
+  reason: z.string().max(500),
+});
+
 export const FriendResponseMessageSchema = z.object({
   type: z.literal('friend-response'),
   accepted: z.boolean(),

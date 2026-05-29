@@ -3,6 +3,7 @@ import { connectToPeer, getConnectedPeer, unregisterPeer } from './connections';
 import { getOrCreateSettings, parseSharedFolders } from './config';
 import { createManagementFetch } from './management';
 import { createPrismaClient } from './db';
+import { dispatchTransferMessage } from './transfer-protocol';
 import { getOrCreateIdentity } from './identity';
 import { startPeriodicRescan } from './indexer';
 
@@ -43,9 +44,10 @@ Bun.serve({
     identity,
     prisma,
     connectPeer: (address, port, friendRequest) =>
-      connectToPeer(identity, prisma, address, port, PORT, friendRequest, (nodeId, msg) =>
-        dispatchSearchMessage(msg, nodeId, prisma, identity),
-      ),
+      connectToPeer(identity, prisma, address, port, PORT, friendRequest, async (nodeId, msg) => {
+        await dispatchSearchMessage(msg, nodeId, prisma, identity);
+        await dispatchTransferMessage(msg, nodeId, prisma);
+      }),
   }),
 });
 

@@ -17,6 +17,13 @@ import {
 } from './connections';
 import { acceptFriendRequest, addOutgoingFriend, getFriends, rejectFriendRequest } from './friends';
 import {
+  cancelDownload,
+  getTransfers,
+  pauseDownload,
+  resumeDownload,
+  startDownload,
+} from './download-manager';
+import {
   getOrCreateSettings,
   parseSharedFolders,
   sanitizeSettings,
@@ -226,6 +233,92 @@ export function createManagementFetch(deps: ManagementDeps): (req: Request) => P
             online: onlineFriends.length,
           },
         });
+      }
+
+      if (url.pathname === '/api/transfers') {
+        if (req.method === 'GET') {
+          const transfers = await getTransfers(prisma);
+          return Response.json(transfers);
+        }
+
+        if (req.method === 'POST') {
+          const body = await req.json();
+          const { sha256, filename, size, mimeType, sources } = body as {
+            sha256: string;
+            filename: string;
+            size: string;
+            mimeType?: string | null;
+            sources: string[];
+          };
+          if (
+            typeof sha256 !== 'string' ||
+            !/^[0-9a-f]{64}$/.test(sha256) ||
+            typeof filename !== 'string' ||
+            !filename.trim() ||
+            typeof size !== 'string' ||
+            !/^\d+$/.test(size) ||
+            !Array.isArray(sources)
+          ) {
+            return new Response('Invalid transfer request', { status: 400 });
+          }
+          const settings = await getOrCreateSettings(prisma);
+          const downloadFolder = settings.downloadFolder;
+          if (!downloadFolder) {
+            return new Response('Download folder not configured', { status: 422 });
+          }
+          const id = await startDownload(prisma, {
+            sha256,
+            filename: filename.trim(),
+            size: BigInt(size),
+            mimeType: mimeType ?? null,
+            sources,
+            downloadFolder,
+          });
+          return Response.json({ id }, { status: 201 });
+        }
+      }
+
+      if (url.pathname.startsWith('/api/transfers/')) {
+        const id = url.pathname.slice('/api/transfers/'.length);
+        if (!id || id.includes('/')) {
+          return new Response('Invalid transfer id', { status: 400 });
+        }
+
+        if (req.method === 'PATCH') {
+          const body = await req.json();
+          const { action } = body as { action?: string };
+          if (action === 'pause') {
+            const ok = await pauseDownload(prisma, id);
+            return ok
+              ? new Response(null, { status: 204 })
+              : new Response('Not pausable', { status: 409 });
+          }
+          if (action === 'resume') {
+            const ok = await resumeDownload(prisma, id);
+            return ok
+              ? new Response(null, { status: 204 })
+              : new Response('Not resumable', { status: 409 });
+          }
+          if (action === 'cancel') {
+            const ok = await cancelDownload(prisma, id);
+            return ok
+              ? new Response(null, { status: 204 })
+              : new Response('Not cancellable', { status: 409 });
+          }
+          return new Response('Unknown action', { status: 400 });
+        }
+
+        if (req.method === 'DELETE') {
+          const record = await prisma.download.findUnique({ where: { id } });
+          if (!record) return new Response('Not found', { status: 404 });
+          if (record.state === 'DOWNLOADING' || record.state === 'PAUSED') {
+            return new Response('Cannot delete an active download — cancel it first', {
+              status: 409,
+            });
+          }
+          await prisma.download.delete({ where: { id } });
+          return new Response(null, { status: 204 });
+        }
       }
 
       if (url.pathname === '/api/rescan' && req.method === 'POST') {
