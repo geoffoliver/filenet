@@ -45,11 +45,11 @@
 ### Search
 
 - [x] Local search (filename, file type, metadata fields)
-- [ ] Outbound search: fan out to all connected friends with a search ID + TTL
-- [ ] Inbound search: execute locally, forward to own friends (minus already-seen search IDs), return results directly to originating node
-- [ ] Search deduplication (track seen search IDs to prevent cycles)
+- [x] Outbound search: fan out to all connected friends with a search ID + TTL
+- [x] Inbound search: execute locally, forward to own friends (minus already-seen search IDs), return results directly to originating node
+- [x] Search deduplication (track seen search IDs to prevent cycles)
+- [x] Direct result delivery back to the requesting node over an encrypted connection
 - [ ] Configurable degrees of separation (friends / friends-of-friends / everyone)
-- [ ] Direct result delivery back to the requesting node over an encrypted connection
 
 ### File Transfers
 
@@ -73,21 +73,13 @@
 - [ ] Group chat: message history stored until user leaves room
 - [ ] Online presence: track which friends are currently connected
 
-### Configuration
-
-- [ ] Prisma schema (or config file): store all user settings
-- [ ] Profile: name, email, picture, bio, links
-- [ ] Shared folder(s) management (add / remove paths)
-- [ ] Download folder path
-- [ ] Listening port (default 7734)
-- [ ] Auto-accept friend request rules
-- [ ] Degrees-of-separation setting
-- [ ] Post-download scripts list (paths + order)
-
 ### API (Next.js → P2P server bridge)
 
-- [ ] Local management WebSocket or REST API so the Next.js UI can control the P2P server
-- [ ] Expose: friend list, friend requests, search, transfers, chat, settings, stats
+- [x] Management REST API on `127.0.0.1:7735` (localhost-only, no CORS)
+- [x] Next.js catch-all proxy (`/api/[...path]`) forwarding UI requests to P2P server
+- [x] Settings endpoints: `GET/PATCH /api/settings`
+- [x] Search endpoint: `GET /api/search` (local + network)
+- [ ] Expose remaining endpoints as features are built: friends, transfers, chat, stats
 
 ---
 
@@ -95,21 +87,24 @@
 
 ### Shell
 
-- [ ] Global layout: sticky navbar + main content area
-- [ ] Navbar: Home, Search, Chat, Friends, Transfers, Settings links
-- [ ] Navbar: search field (enter/click → navigate to Search + run query)
-- [ ] Client-side routing between sections (SPA, no full-page reloads)
-- [ ] CSS module + global stylesheet scaffolding (variables, resets, base styles)
+- [x] Global layout: sticky navbar + main content area
+- [x] Navbar: Home, Search, Chat, Friends, Transfers, Settings links
+- [x] Navbar: search field (enter/click → navigate to Search + run query)
+- [x] Client-side routing between sections (SPA, no full-page reloads)
+- [x] CSS module + global stylesheet scaffolding (variables, resets, base styles)
 
 ### Setup Wizard
 
-- [ ] First-launch detection (no profile configured)
-- [ ] Step: profile details (name, email, picture, bio, links)
-- [ ] Step: shared folders
-- [ ] Step: download folder
+- [x] First-launch detection (no profile configured → redirect to `/setup`)
+- [x] Step 1: Welcome
+- [x] Step 2: Display name
+- [x] Step 3: Shared folders
+- [x] Step 4: Download folder
+- [x] Step 5: Auto-accept preferences + invite password
+- [x] Progress bar + back/skip/next/finish navigation
 - [ ] Step: listening port + port-forwarding instructions
-- [ ] Step: auto-accept and degrees-of-separation preferences
-- [ ] Sensible defaults pre-filled throughout
+- [ ] Step: degrees-of-separation preference
+- [ ] Extended profile fields (email, picture, bio, links) — deferred to Settings
 
 ### Home (Dashboard)
 
@@ -156,11 +151,11 @@
 
 ### Settings
 
-- [ ] Profile details form
+- [ ] Profile details form (name, email, picture, bio, links)
 - [ ] Shared folders: add / remove paths
 - [ ] Download folder picker
 - [ ] Listening port field + port-forwarding instructions
-- [ ] Auto-accept toggles
+- [ ] Auto-accept toggles + invite password
 - [ ] Degrees-of-separation selector
 - [ ] Post-download scripts: add path, reorder, remove
 - [ ] Force rescan button
@@ -172,7 +167,7 @@
 - [x] Pre-commit hooks: lint + format check (Prettier / ESLint via lint-staged + husky)
 - [x] GitHub Actions: run tests on push / PR
 - [ ] GitHub Actions: release workflow (bump version, tag `v#.#.#`, publish)
-- [ ] Playwright frontend tests
+- [ ] Playwright frontend tests (deferred — add once UI pages have real interactions)
 - [ ] Improve backend test coverage as features are added
 - [ ] CHANGELOG (start and maintain)
 - [ ] README: installation, configuration, running, scripting API docs
