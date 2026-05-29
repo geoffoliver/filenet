@@ -597,7 +597,8 @@ describe('startPeriodicRescan', () => {
     const stop = startPeriodicRescan(prisma, getFolders, async () => 30 / 60_000);
     stop();
     await Bun.sleep(60);
-    expect(calls).toBe(0);
+    // initial tick always fires on startup; stop() prevents any reschedules
+    expect(calls).toBe(1);
   });
 
   it('picks up an updated interval on the next tick', async () => {
@@ -633,7 +634,7 @@ describe('startPeriodicRescan', () => {
     expect(calls).toBeGreaterThanOrEqual(2);
   });
 
-  it('does not fire immediately when getIntervalMinutes returns a value that would overflow setTimeout', async () => {
+  it('does not reschedule quickly when getIntervalMinutes returns a value that would overflow setTimeout', async () => {
     let calls = 0;
     const getFolders = async () => {
       calls++;
@@ -643,10 +644,11 @@ describe('startPeriodicRescan', () => {
     const stop = startPeriodicRescan(prisma, getFolders, async () => 35792);
     await Bun.sleep(50);
     stop();
-    expect(calls).toBe(0);
+    // initial tick always fires; overflow interval → 60s fallback, so only 1 call in 50ms
+    expect(calls).toBe(1);
   });
 
-  it('does not fire immediately when getIntervalMinutes returns NaN', async () => {
+  it('does not reschedule quickly when getIntervalMinutes returns NaN', async () => {
     let calls = 0;
     const getFolders = async () => {
       calls++;
@@ -655,7 +657,7 @@ describe('startPeriodicRescan', () => {
     const stop = startPeriodicRescan(prisma, getFolders, async () => NaN);
     await Bun.sleep(50);
     stop();
-    // NaN → treated as disabled → 60-second fallback, not an immediate fire
-    expect(calls).toBe(0);
+    // initial tick always fires; NaN → 60s fallback, so only 1 call in 50ms
+    expect(calls).toBe(1);
   });
 });
