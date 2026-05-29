@@ -1,26 +1,151 @@
 @import 'tailwindcss';
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
+/* ── Static design tokens — registered as Tailwind utilities ──────────────── */
+
+@theme {
+  --color-primary: #3b82f6;
+  --color-primary-hover: #2563eb;
+  --color-primary-fg: #ffffff;
+  --color-danger: #ef4444;
+  --color-danger-hover: #dc2626;
+  --color-success: #22c55e;
+
+  --font-sans: var(--font-geist-sans), system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
+
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 16px;
+
+  --navbar-height: 56px;
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+/* ── Dynamic tokens — dark-mode-aware runtime values ─────────────────────── */
+
+:root {
+  --bg-base: #f4f4f5;
+  --bg-surface: #ffffff;
+  --bg-elevated: #e4e4e7;
+
+  --text-primary: #18181b;
+  --text-secondary: #52525b;
+  --text-muted: #a1a1aa;
+
+  --border: rgba(0, 0, 0, 0.08);
+  --border-strong: rgba(0, 0, 0, 0.16);
+
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.08);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.1);
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+    --bg-base: #0f0f10;
+    --bg-surface: #1a1a1b;
+    --bg-elevated: #252527;
+
+    --text-primary: #f4f4f5;
+    --text-secondary: #a1a1aa;
+    --text-muted: #71717a;
+
+    --border: rgba(255, 255, 255, 0.08);
+    --border-strong: rgba(255, 255, 255, 0.16);
+
+    --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.4);
+    --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.5);
   }
 }
 
+/* Register dynamic tokens so they're available as Tailwind colour utilities */
+@theme inline {
+  --color-base: var(--bg-base);
+  --color-surface: var(--bg-surface);
+  --color-elevated: var(--bg-elevated);
+
+  --color-fg: var(--text-primary);
+  --color-fg-secondary: var(--text-secondary);
+  --color-fg-muted: var(--text-muted);
+}
+
+/* ── Global resets ─────────────────────────────────────────────────────────── */
+
+html,
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  @apply h-full;
+}
+
+body {
+  background: var(--bg-base);
+  color: var(--text-primary);
+  @apply font-sans text-sm leading-normal antialiased;
+}
+
+/* ── Shared component primitives ───────────────────────────────────────────── */
+
+.btn {
+  @apply inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-sm text-sm font-medium cursor-pointer border-0 no-underline whitespace-nowrap transition-colors duration-150;
+}
+
+.btn:disabled {
+  @apply opacity-45 cursor-not-allowed;
+}
+
+.btn-primary {
+  @apply bg-primary text-primary-fg hover:bg-[var(--color-primary-hover)];
+}
+
+.btn-primary:disabled {
+  @apply hover:bg-primary;
+}
+
+.btn-ghost {
+  @apply bg-transparent text-[var(--text-secondary)] border border-[var(--border-strong)] hover:bg-elevated hover:text-fg;
+}
+
+.btn-danger {
+  @apply bg-danger text-white hover:bg-[var(--color-danger-hover)];
+}
+
+.input {
+  @apply block w-full px-3 py-2 bg-surface text-fg border border-[var(--border-strong)] rounded-sm text-sm font-sans outline-none transition-colors duration-150 placeholder:text-fg-muted focus:border-primary;
+}
+
+.label {
+  @apply block text-xs font-medium text-[var(--text-secondary)] mb-1.5;
+}
+
+.field {
+  @apply flex flex-col gap-1 mb-4;
+}
+
+.field-hint {
+  @apply text-xs text-fg-muted;
+}
+
+/* ── Toggle ────────────────────────────────────────────────────────────────── */
+
+.toggle {
+  @apply relative inline-block w-10 h-5 flex-shrink-0;
+}
+
+.toggle input {
+  @apply sr-only;
+}
+
+.toggle-track {
+  @apply absolute inset-0 rounded-full border border-[var(--border-strong)] cursor-pointer transition-colors duration-200;
+  background: var(--bg-elevated);
+}
+
+.toggle input:checked + .toggle-track {
+  @apply bg-primary border-primary;
+}
+
+.toggle-track::after {
+  content: '';
+  @apply absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full transition-transform duration-200 shadow-[var(--shadow-sm)];
+}
+
+.toggle input:checked + .toggle-track::after {
+  @apply translate-x-5;
 }

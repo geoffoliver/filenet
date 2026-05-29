@@ -1,0 +1,13 @@
+@reference 'tailwindcss';
+
+.shell {
+  @apply flex
+    flex-col;
+  min-height: 100vh;
+}
+
+.main {
+  @apply flex-1
+    flex
+    flex-col;
+}
