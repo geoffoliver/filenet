@@ -135,10 +135,11 @@
 
 ### Friends
 
-- [ ] Friend list: name, avatar, friendship duration, shared file count, download/upload totals
-- [ ] Pending incoming requests with accept / reject actions
-- [ ] Add Friend form: name, address, port, optional password
-- [ ] Remove friend action (with confirmation)
+- [x] Friend list: name, avatar (initials), friendship duration
+- [x] Pending incoming requests with accept / reject actions
+- [x] Add Friend form: name, address, port, optional password
+- [x] Remove friend action (with inline confirmation)
+- [ ] Friend list: shared file count, download/upload totals (deferred — needs transfer tracking)
 
 ### Transfers
 
