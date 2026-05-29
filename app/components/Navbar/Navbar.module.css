@@ -4,6 +4,7 @@
   @apply sticky
     top-0
     z-100
+    min-h-[var(--navbar-height)]
     h-[var(--navbar-height)]
     bg-[var(--bg-surface)]
     border-b

@@ -1,0 +1,200 @@
+@reference 'tailwindcss';
+
+.page {
+  @apply w-full
+    max-w-2xl
+    mx-auto
+    px-8
+    py-10;
+}
+
+.pageTitle {
+  @apply text-2xl
+    font-semibold
+    text-[var(--text-primary)]
+    mb-8;
+}
+
+/* ── Sections ─────────────────────────────────────────────────────────────── */
+
+.section {
+  @apply mb-8
+    pb-8
+    border-b
+    border-[var(--border)];
+}
+
+.section:last-child {
+  @apply border-b-0
+    mb-0
+    pb-0;
+}
+
+.sectionTitle {
+  @apply text-base
+    font-semibold
+    text-[var(--text-primary)]
+    mb-4;
+}
+
+/* ── Form layout ──────────────────────────────────────────────────────────── */
+
+.form {
+  @apply flex
+    flex-col
+    gap-4;
+}
+
+.field {
+  @apply flex
+    flex-col
+    gap-1.5;
+}
+
+.label {
+  @apply flex
+    items-center
+    gap-2
+    text-sm
+    font-medium
+    text-[var(--text-secondary)];
+}
+
+.formFooter {
+  @apply flex
+    items-center
+    gap-3
+    pt-1;
+}
+
+.hint {
+  @apply text-sm
+    text-[var(--text-muted)];
+}
+
+.error {
+  @apply text-sm
+    text-[var(--color-danger)];
+}
+
+.loadError {
+  @apply text-sm
+    text-[var(--color-danger)]
+    p-8;
+}
+
+.loading {
+  @apply text-sm
+    text-[var(--text-muted)]
+    p-8;
+}
+
+/* ── Toggles ──────────────────────────────────────────────────────────────── */
+
+.toggle {
+  @apply flex
+    items-center
+    gap-2
+    text-sm
+    text-[var(--text-primary)]
+    cursor-pointer;
+}
+
+.dangerText {
+  @apply text-[var(--color-danger)];
+}
+
+/* ── Badge ────────────────────────────────────────────────────────────────── */
+
+.badge {
+  @apply inline-block
+    px-1.5
+    py-0.5
+    rounded
+    text-xs
+    font-medium
+    bg-[var(--color-primary)]
+    text-white;
+}
+
+/* ── Password group ───────────────────────────────────────────────────────── */
+
+.passwordGroup {
+  @apply flex
+    flex-col
+    gap-3
+    pl-4
+    border-l-2
+    border-[var(--border)];
+}
+
+/* ── Folder list ──────────────────────────────────────────────────────────── */
+
+.folderList {
+  @apply list-none
+    p-0
+    m-0
+    flex
+    flex-col
+    gap-1
+    mb-2;
+}
+
+.folderEmpty {
+  @apply text-sm
+    text-[var(--text-muted)]
+    py-1;
+}
+
+.folderItem {
+  @apply flex
+    items-center
+    gap-2
+    py-1.5
+    px-3
+    rounded
+    bg-[var(--bg-elevated)]
+    text-sm;
+}
+
+.folderPath {
+  @apply flex-1
+    font-mono
+    text-xs
+    text-[var(--text-primary)]
+    truncate;
+}
+
+.removeBtn {
+  @apply flex-shrink-0
+    text-xs;
+}
+
+.addFolderRow {
+  @apply flex
+    gap-2;
+}
+
+/* ── Rescan interval ──────────────────────────────────────────────────────── */
+
+.intervalRow {
+  @apply flex
+    items-center
+    gap-3;
+}
+
+.intervalInput {
+  @apply w-28;
+}
+
+.intervalUnit {
+  @apply text-sm
+    text-[var(--text-muted)];
+}
+
+/* ── Rescan result ────────────────────────────────────────────────────────── */
+
+.rescanResult {
+  @apply text-sm
+    text-[var(--text-muted)];
+}
