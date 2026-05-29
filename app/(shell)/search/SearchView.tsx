@@ -169,11 +169,9 @@ export default function SearchView() {
 
   const initialQ = params.get('q') ?? '';
   const initialType = (params.get('type') as FileType) ?? 'all';
-  const initialNetwork = params.get('network') === 'true';
 
   const [query, setQuery] = useState(initialQ);
   const [fileType, setFileType] = useState<FileType>(initialType);
-  const [networkSearch, setNetworkSearch] = useState(initialNetwork);
   const [hits, setHits] = useState<SearchHit[]>([]);
   // loading starts true when there's an initial query to auto-run
   const [loading, setLoading] = useState(!!initialQ.trim());
@@ -186,7 +184,7 @@ export default function SearchView() {
   useEffect(() => {
     if (!initialQ.trim()) return;
     let active = true;
-    searchFiles({ q: initialQ, type: initialType, network: initialNetwork })
+    searchFiles({ q: initialQ, type: initialType, network: true })
       .then((res) => {
         if (!active) return;
         setHits(mergeResults(res.files, res.network ?? []));
@@ -209,9 +207,7 @@ export default function SearchView() {
     e.preventDefault();
     const q = query.trim();
     if (!q) return;
-    const qs = new URLSearchParams({ q, type: fileType });
-    if (networkSearch) qs.set('network', 'true');
-    router.replace(`/search?${qs}`);
+    router.replace(`/search?${new URLSearchParams({ q, type: fileType })}`);
     // Navigation triggers a remount of this component via the key in SearchPage
   }
 
@@ -242,14 +238,6 @@ export default function SearchView() {
             </option>
           ))}
         </select>
-        <label className={styles.networkToggle}>
-          <input
-            type="checkbox"
-            checked={networkSearch}
-            onChange={(e) => setNetworkSearch(e.target.checked)}
-          />
-          Search network
-        </label>
         <button type="submit" className="btn btn-primary" disabled={loading}>
           {loading ? 'Searching…' : 'Search'}
         </button>
@@ -264,9 +252,6 @@ export default function SearchView() {
           ) : (
             <p className={styles.resultCount}>
               {hits.length} result{hits.length !== 1 ? 's' : ''}
-              {networkSearch &&
-                hits.some((h) => h.networkSources.length > 0) &&
-                ' (including network)'}
             </p>
           )}
         </div>

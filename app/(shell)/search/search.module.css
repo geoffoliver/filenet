@@ -26,17 +26,6 @@
     cursor-pointer;
 }
 
-.networkToggle {
-  @apply flex
-    items-center
-    gap-1.5
-    text-sm
-    text-[var(--text-secondary)]
-    whitespace-nowrap
-    cursor-pointer
-    flex-shrink-0;
-}
-
 /* ── Results header ───────────────────────────────────────────────────────── */
 
 .resultsHeader {
