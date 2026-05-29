@@ -118,11 +118,12 @@
 
 ### Search
 
-- [ ] Search form: text input + file-type dropdown (All, Audio, Video, Ebook, Document, …)
-- [ ] Trigger search on enter / button click
-- [ ] Results list: filename, size, file type, source count
-- [ ] Result detail expand: full metadata, per-source availability
-- [ ] Download button per result
+- [x] Search form: text input + file-type dropdown (All, Audio, Video, Image, Document, Ebook)
+- [x] Trigger search on enter / button click (also auto-runs from navbar)
+- [x] Network search toggle (fans out to connected peers)
+- [x] Results list: filename, size, mime type, source count (local + network merged by sha256)
+- [x] Result detail expand: full metadata, hash preview, "on this node" badge
+- [x] Download button placeholder (disabled until transfer system exists)
 
 ### Chat
 
