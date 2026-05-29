@@ -1,7 +1,8 @@
 @reference 'tailwindcss';
 
 .page {
-  @apply max-w-3xl
+  @apply w-full
+    max-w-3xl
     mx-auto
     px-8
     py-10;
