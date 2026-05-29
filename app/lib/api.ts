@@ -110,3 +110,52 @@ export async function removeFriend(id: string): Promise<void> {
     throw new Error(msg || 'Failed to remove friend');
   }
 }
+
+export type FileType = 'all' | 'audio' | 'video' | 'image' | 'document' | 'ebook';
+
+export type LocalFile = {
+  id: string;
+  filename: string;
+  size: string;
+  sha256: string;
+  mimeType: string | null;
+  metadata: string | null;
+  fileModifiedAt: string | null;
+  indexedAt: string;
+};
+
+export type NetworkFile = {
+  filename: string;
+  size: string;
+  sha256: string;
+  mimeType: string | null;
+  metadata: string | null;
+  nodeId: string;
+  viaNodeId?: string;
+};
+
+export type SearchResponse = {
+  files: LocalFile[];
+  total: number;
+  network?: NetworkFile[];
+};
+
+export type SearchParams = {
+  q: string;
+  type?: FileType;
+  limit?: number;
+  offset?: number;
+  network?: boolean;
+};
+
+export async function searchFiles(params: SearchParams): Promise<SearchResponse> {
+  const qs = new URLSearchParams();
+  if (params.q) qs.set('q', params.q);
+  if (params.type && params.type !== 'all') qs.set('type', params.type);
+  if (params.limit != null) qs.set('limit', String(params.limit));
+  if (params.offset != null) qs.set('offset', String(params.offset));
+  if (params.network) qs.set('network', 'true');
+  const res = await fetch(`/api/search?${qs}`);
+  if (!res.ok) throw new Error('Search failed');
+  return res.json();
+}

@@ -292,7 +292,7 @@ export function startPeriodicRescan(
     );
   }
 
-  scheduleNext().catch((err) => console.error('Periodic rescan init failed:', err));
+  tick().catch((err) => console.error('Periodic rescan init failed:', err));
 
   return () => {
     stopped = true;
