@@ -111,6 +111,9 @@ function mimeIcon(mimeType: string | null): string {
 
 function MetaDetail({ hit }: { hit: SearchHit }) {
   const meta = parseMeta(hit.metadata);
+  // Only include sources we're directly connected to — relayed results carry the
+  // producer's nodeId but we have no WebSocket to them, only to viaNodeId.
+  const directSources = hit.networkSources.filter((n) => !n.viaNodeId || n.viaNodeId === n.nodeId);
   const sources = (hit.local ? 1 : 0) + hit.networkSources.length;
   const rows: { label: string; value: string }[] = [];
   const [downloading, setDownloading] = useState(false);
@@ -161,9 +164,9 @@ function MetaDetail({ hit }: { hit: SearchHit }) {
         <button
           type="button"
           className="btn btn-primary"
-          disabled={downloading || downloaded || hit.networkSources.length === 0}
+          disabled={downloading || downloaded || directSources.length === 0}
           onClick={() => {
-            const allSources = hit.networkSources.map((n) => n.nodeId);
+            const allSources = directSources.map((n) => n.nodeId);
             setDownloading(true);
             setDownloadError('');
             startDownload({
