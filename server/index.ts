@@ -5,6 +5,7 @@ import { createManagementFetch } from './management';
 import { createPrismaClient } from './db';
 import { dispatchTransferMessage } from './transfer-protocol';
 import { getOrCreateIdentity } from './identity';
+import { pauseAllActiveDownloads } from './download-manager';
 import { startPeriodicRescan } from './indexer';
 
 const prisma = createPrismaClient();
@@ -35,7 +36,9 @@ const stopRescan = startPeriodicRescan(
 
 const shutdown = () => {
   stopRescan();
-  process.exit(0);
+  pauseAllActiveDownloads(prisma)
+    .catch(() => {})
+    .finally(() => process.exit(0));
 };
 process.on('SIGTERM', shutdown);
 process.on('SIGINT', shutdown);

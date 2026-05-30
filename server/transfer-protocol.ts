@@ -112,7 +112,13 @@ export function requestChunk(
       },
     });
 
-    sendToPeer(peer, { type: 'chunk-request', transferId, sha256, offset, length });
+    try {
+      sendToPeer(peer, { type: 'chunk-request', transferId, sha256, offset, length });
+    } catch (err: unknown) {
+      clearTimeout(timer);
+      pendingChunks.delete(transferId);
+      reject(err instanceof Error ? err : new Error(String(err)));
+    }
   });
 }
 

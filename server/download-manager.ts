@@ -320,6 +320,15 @@ export async function startDownload(
 
   const tmpPath = join(tmpdir(), `.filenet-dl-${randomUUID()}.tmp`);
 
+  // Pre-allocate temp file before creating the DB record so a disk/permission
+  // error here never leaves a stranded DOWNLOADING row.
+  const fh = await open(tmpPath, 'w');
+  if (Number(size) > 0) {
+    await truncate(tmpPath, Number(size));
+  }
+  await fh.close();
+  const fileHandle = await open(tmpPath, 'r+');
+
   const record = await prisma.download.create({
     data: {
       sha256,
@@ -333,15 +342,6 @@ export async function startDownload(
       downloadFolder,
     },
   });
-
-  // Pre-allocate temp file
-  const fh = await open(tmpPath, 'w');
-  if (Number(size) > 0) {
-    await truncate(tmpPath, Number(size));
-  }
-  // Re-open for random-access writing
-  await fh.close();
-  const fileHandle = await open(tmpPath, 'r+');
 
   const dl: ActiveDownload = {
     id: record.id,
@@ -504,4 +504,24 @@ export async function getTransfers(prisma: PrismaClient): Promise<TransferDto[]>
       completedAt: r.completedAt ? r.completedAt.toISOString() : null,
     };
   });
+}
+
+export async function pauseAllActiveDownloads(prisma: PrismaClient): Promise<void> {
+  const ids = [...activeDownloads.keys()];
+  await Promise.all(
+    ids.map(async (id) => {
+      const dl = activeDownloads.get(id);
+      if (!dl) return;
+      dl.stopped = true;
+      if (dl.fileHandle) {
+        try {
+          await dl.fileHandle.close();
+        } catch {}
+        dl.fileHandle = null;
+      }
+      activeDownloads.delete(id);
+      activeDownloadFolders.delete(id);
+      await prisma.download.update({ where: { id }, data: { state: 'PAUSED' } }).catch(() => {});
+    }),
+  );
 }
