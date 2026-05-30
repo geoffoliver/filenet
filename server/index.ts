@@ -33,8 +33,12 @@ const stopRescan = startPeriodicRescan(
   },
 );
 
-process.on('SIGTERM', stopRescan);
-process.on('SIGINT', stopRescan);
+const shutdown = () => {
+  stopRescan();
+  process.exit(0);
+};
+process.on('SIGTERM', shutdown);
+process.on('SIGINT', shutdown);
 
 // Management API — localhost only, no WebSocket upgrade
 Bun.serve({
