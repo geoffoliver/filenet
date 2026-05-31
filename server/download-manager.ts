@@ -187,6 +187,10 @@ async function downloadChunk(
       });
       return;
     } catch {
+      if (dl.stopped || dl.paused) {
+        dl.inFlight.delete(chunkIndex);
+        return;
+      }
       // Try next source
       continue;
     }
@@ -194,7 +198,7 @@ async function downloadChunk(
 
   // All sources failed for this chunk
   dl.inFlight.delete(chunkIndex);
-  if (!dl.stopped) {
+  if (!dl.stopped && !dl.paused) {
     await failDownload(prisma, dl, 'All sources failed to serve chunk');
   }
 }
@@ -545,7 +549,15 @@ export async function getTransfers(prisma: PrismaClient): Promise<TransferDto[]>
       progress,
       speedBps,
       etaSeconds,
-      sources: dl ? dl.sources.length : 0,
+      sources: dl
+        ? dl.sources.length
+        : (() => {
+            try {
+              return (JSON.parse(r.sources) as string[]).length;
+            } catch {
+              return 0;
+            }
+          })(),
       error: r.error,
       createdAt: r.createdAt.toISOString(),
       completedAt: r.completedAt ? r.completedAt.toISOString() : null,

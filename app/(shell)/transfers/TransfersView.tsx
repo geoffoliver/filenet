@@ -155,26 +155,37 @@ export default function TransfersView() {
   const [transfers, setTransfers] = useState<Transfer[]>([]);
   const [loadError, setLoadError] = useState('');
   const pollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const mountedRef = useRef(true);
 
-  const load = useCallback(() => {
-    getTransfers()
-      .then((data) => {
+  const load = useCallback(async () => {
+    try {
+      const data = await getTransfers();
+      if (mountedRef.current) {
         setTransfers(data);
         setLoadError('');
-      })
-      .catch(() => setLoadError('Could not load transfers. Is the server running?'));
+      }
+    } catch {
+      if (mountedRef.current) setLoadError('Could not load transfers. Is the server running?');
+    }
   }, []);
 
   useEffect(() => {
-    load();
-    function schedule() {
-      pollRef.current = setTimeout(() => {
-        load();
-        schedule();
-      }, POLL_MS);
+    mountedRef.current = true;
+
+    async function runPoll() {
+      while (mountedRef.current) {
+        await load();
+        if (!mountedRef.current) break;
+        await new Promise<void>((resolve) => {
+          pollRef.current = setTimeout(resolve, POLL_MS);
+        });
+      }
     }
-    schedule();
+
+    runPoll();
+
     return () => {
+      mountedRef.current = false;
       if (pollRef.current !== null) clearTimeout(pollRef.current);
     };
   }, [load]);
