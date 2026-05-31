@@ -131,7 +131,10 @@ async function downloadChunk(
 
   // Try each source in order until one succeeds
   for (const nodeId of dl.sources) {
-    if (dl.stopped || dl.paused) return;
+    if (dl.stopped || dl.paused) {
+      dl.inFlight.delete(chunkIndex);
+      return;
+    }
 
     try {
       const data = await requestChunkFn(nodeId, dl.sha256, offset, length);
@@ -140,7 +143,10 @@ async function downloadChunk(
         throw new Error(`Unexpected chunk size: expected ${length}, got ${data.length}`);
       }
 
-      if (dl.stopped) return;
+      if (dl.stopped || dl.paused) {
+        dl.inFlight.delete(chunkIndex);
+        return;
+      }
 
       // Write chunk at the correct offset
       if (dl.fileHandle) {
@@ -320,28 +326,45 @@ export async function startDownload(
 
   const tmpPath = join(tmpdir(), `.filenet-dl-${randomUUID()}.tmp`);
 
-  // Pre-allocate temp file before creating the DB record so a disk/permission
-  // error here never leaves a stranded DOWNLOADING row.
-  const fh = await open(tmpPath, 'w');
-  if (Number(size) > 0) {
-    await truncate(tmpPath, Number(size));
-  }
-  await fh.close();
-  const fileHandle = await open(tmpPath, 'r+');
+  let fileHandle: FileHandle | null = null;
+  let record: Awaited<ReturnType<typeof prisma.download.create>>;
+  try {
+    // Pre-allocate temp file before creating the DB record so a disk/permission
+    // error here never leaves a stranded DOWNLOADING row.
+    const fh = await open(tmpPath, 'w');
+    try {
+      if (Number(size) > 0) {
+        await truncate(tmpPath, Number(size));
+      }
+    } finally {
+      await fh.close();
+    }
+    fileHandle = await open(tmpPath, 'r+');
 
-  const record = await prisma.download.create({
-    data: {
-      sha256,
-      filename,
-      size,
-      mimeType: mimeType ?? null,
-      state: 'DOWNLOADING',
-      chunkSize,
-      sources: JSON.stringify(sources),
-      tmpPath,
-      downloadFolder,
-    },
-  });
+    record = await prisma.download.create({
+      data: {
+        sha256,
+        filename,
+        size,
+        mimeType: mimeType ?? null,
+        state: 'DOWNLOADING',
+        chunkSize,
+        sources: JSON.stringify(sources),
+        tmpPath,
+        downloadFolder,
+      },
+    });
+  } catch (err) {
+    if (fileHandle) {
+      try {
+        await fileHandle.close();
+      } catch {}
+    }
+    try {
+      await rm(tmpPath, { force: true });
+    } catch {}
+    throw err;
+  }
 
   const dl: ActiveDownload = {
     id: record.id,
@@ -352,7 +375,7 @@ export async function startDownload(
     completedChunks: new Set(),
     inFlight: new Set(),
     sources,
-    fileHandle,
+    fileHandle: fileHandle!,
     tmpPath,
     paused: false,
     stopped: false,
