@@ -1,7 +1,6 @@
 import { basename, extname, join } from 'node:path';
 import { copyFile, open, rename, rm, truncate } from 'node:fs/promises';
 import type { FileHandle } from 'node:fs/promises';
-import { existsSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { tmpdir } from 'node:os';
 
@@ -103,17 +102,34 @@ function calcSpeed(dl: ActiveDownload): number {
 // ---------------------------------------------------------------------------
 
 async function uniqueFilePath(folder: string, filename: string): Promise<string> {
-  const safe = basename(filename); // strip any directory components to prevent path traversal
+  let safe = basename(filename); // strip directory components to prevent path traversal
+  // basename returns '.' or '..' for those inputs and '' for an empty/root path —
+  // all resolve outside the download folder via join(), so fall back to a safe name.
+  if (safe === '' || safe === '.' || safe === '..') safe = 'download';
+
+  const tryReserve = async (p: string): Promise<boolean> => {
+    try {
+      const fh = await open(p, 'wx'); // exclusive create — fails with EEXIST if taken
+      await fh.close();
+      return true;
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === 'EEXIST') return false;
+      throw err;
+    }
+  };
+
   const candidate = join(folder, safe);
-  if (!existsSync(candidate)) return candidate;
+  if (await tryReserve(candidate)) return candidate;
 
   const ext = extname(safe);
   const base = basename(safe, ext);
   for (let i = 1; i < 10_000; i++) {
     const next = join(folder, `${base} (${i})${ext}`);
-    if (!existsSync(next)) return next;
+    if (await tryReserve(next)) return next;
   }
-  return join(folder, `${base}-${randomUUID()}${ext}`);
+  const fallback = join(folder, `${base}-${randomUUID()}${ext}`);
+  await (await open(fallback, 'wx')).close();
+  return fallback;
 }
 
 // ---------------------------------------------------------------------------
@@ -258,14 +274,22 @@ async function finalizeDownload(prisma: PrismaClient, dl: ActiveDownload): Promi
     await rename(dl.tmpPath, finalPath);
   } catch (err: unknown) {
     if ((err as NodeJS.ErrnoException).code === 'EXDEV') {
+      // Cross-device move: copy over the reserved placeholder, then remove the temp file.
       try {
         await copyFile(dl.tmpPath, finalPath);
         await rm(dl.tmpPath, { force: true });
       } catch {
+        try {
+          await rm(finalPath, { force: true });
+        } catch {}
         await failDownload(prisma, dl, 'Could not move file to download folder');
         return;
       }
     } else {
+      // rename failed for another reason — remove the placeholder we reserved.
+      try {
+        await rm(finalPath, { force: true });
+      } catch {}
       await failDownload(prisma, dl, 'Could not move file to download folder');
       return;
     }
