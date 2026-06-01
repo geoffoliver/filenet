@@ -172,6 +172,15 @@
     text-white;
 }
 
-.downloadBtn {
-  @apply flex-shrink-0;
+.downloadArea {
+  @apply flex
+    flex-col
+    items-end
+    gap-1
+    flex-shrink-0;
+}
+
+.downloadError {
+  @apply text-xs
+    text-[var(--color-danger)];
 }

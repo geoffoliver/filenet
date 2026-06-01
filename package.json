@@ -6,7 +6,7 @@
     "dev": "PORT=3001 bun --bun next dev",
     "build": "bun --bun next build",
     "start": "bun --bun next start",
-    "server": "bun server/index.ts",
+    "server": "exec bun server/index.ts",
     "test": "bun test server/__tests__",
     "lint": "eslint",
     "format": "prettier --write .",

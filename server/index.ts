@@ -3,7 +3,9 @@ import { connectToPeer, getConnectedPeer, unregisterPeer } from './connections';
 import { getOrCreateSettings, parseSharedFolders } from './config';
 import { createManagementFetch } from './management';
 import { createPrismaClient } from './db';
+import { dispatchTransferMessage } from './transfer-protocol';
 import { getOrCreateIdentity } from './identity';
+import { pauseAllActiveDownloads } from './download-manager';
 import { startPeriodicRescan } from './indexer';
 
 const prisma = createPrismaClient();
@@ -32,8 +34,14 @@ const stopRescan = startPeriodicRescan(
   },
 );
 
-process.on('SIGTERM', stopRescan);
-process.on('SIGINT', stopRescan);
+const shutdown = () => {
+  stopRescan();
+  pauseAllActiveDownloads(prisma)
+    .catch(() => {})
+    .finally(() => process.exit(0));
+};
+process.on('SIGTERM', shutdown);
+process.on('SIGINT', shutdown);
 
 // Management API — localhost only, no WebSocket upgrade
 Bun.serve({
@@ -43,9 +51,10 @@ Bun.serve({
     identity,
     prisma,
     connectPeer: (address, port, friendRequest) =>
-      connectToPeer(identity, prisma, address, port, PORT, friendRequest, (nodeId, msg) =>
-        dispatchSearchMessage(msg, nodeId, prisma, identity),
-      ),
+      connectToPeer(identity, prisma, address, port, PORT, friendRequest, async (nodeId, msg) => {
+        await dispatchSearchMessage(msg, nodeId, prisma, identity);
+        await dispatchTransferMessage(msg, nodeId, prisma);
+      }),
   }),
 });
 

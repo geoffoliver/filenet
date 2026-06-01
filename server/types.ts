@@ -78,6 +78,30 @@ export type SearchResultMessage = {
   results: SearchResultItem[];
 };
 
+export type ChunkRequestMessage = {
+  type: 'chunk-request';
+  transferId: string; // UUID, routes response back to waiting promise
+  sha256: string;
+  offset: number;
+  length: number;
+};
+
+export type ChunkResponseMessage = {
+  type: 'chunk-response';
+  transferId: string;
+  sha256: string;
+  offset: number;
+  data: string; // base64-encoded bytes
+};
+
+export type ChunkErrorMessage = {
+  type: 'chunk-error';
+  transferId: string;
+  sha256: string;
+  offset: number;
+  reason: string;
+};
+
 export type InnerMessage =
   | ReadyMessage
   | PingMessage
@@ -85,7 +109,10 @@ export type InnerMessage =
   | FriendRequestMessage
   | FriendResponseMessage
   | SearchRequestMessage
-  | SearchResultMessage;
+  | SearchResultMessage
+  | ChunkRequestMessage
+  | ChunkResponseMessage
+  | ChunkErrorMessage;
 
 export type WireMessage = HelloMessage | HelloAckMessage | { type: 'encrypted'; payload: string };
 

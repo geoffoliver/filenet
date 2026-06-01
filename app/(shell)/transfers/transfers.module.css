@@ -1,0 +1,166 @@
+@reference 'tailwindcss';
+
+.page {
+  @apply w-full
+    max-w-3xl
+    mx-auto
+    px-8
+    py-10;
+}
+
+.pageTitle {
+  @apply text-2xl
+    font-semibold
+    text-[var(--text-primary)]
+    mb-8;
+}
+
+.loadError {
+  @apply text-sm
+    text-[var(--color-danger)]
+    mb-6;
+}
+
+/* ── Panes ────────────────────────────────────────────────────────────────── */
+
+.pane {
+  @apply mb-10;
+}
+
+.paneTitle {
+  @apply text-base
+    font-semibold
+    text-[var(--text-primary)]
+    mb-3;
+}
+
+.empty {
+  @apply text-sm
+    text-[var(--text-muted)];
+}
+
+/* ── Row ──────────────────────────────────────────────────────────────────── */
+
+.list {
+  @apply list-none
+    p-0
+    m-0
+    flex
+    flex-col
+    gap-2;
+}
+
+.row {
+  @apply flex
+    flex-col
+    gap-2
+    px-4
+    py-3
+    rounded-[var(--radius-md)]
+    border
+    border-[var(--border)]
+    bg-[var(--bg-surface)];
+}
+
+.rowTop {
+  @apply flex
+    items-center
+    justify-between
+    gap-2;
+}
+
+.rowName {
+  @apply text-sm
+    font-medium
+    text-[var(--text-primary)]
+    truncate
+    flex-1;
+}
+
+/* ── State badge ──────────────────────────────────────────────────────────── */
+
+.stateBadge {
+  @apply inline-block
+    px-1.5
+    py-0.5
+    rounded
+    text-xs
+    font-medium
+    flex-shrink-0;
+}
+
+.stateDOWNLOADING {
+  @apply bg-[var(--color-primary)]
+    text-white;
+}
+
+.statePENDING {
+  @apply bg-[var(--bg-elevated)]
+    text-[var(--text-muted)];
+}
+
+.statePAUSED {
+  @apply bg-[var(--bg-elevated)]
+    text-[var(--text-secondary)];
+}
+
+.stateCOMPLETED {
+  @apply bg-green-600
+    text-white;
+}
+
+.stateFAILED {
+  @apply bg-[var(--color-danger)]
+    text-white;
+}
+
+.stateCANCELLED {
+  @apply bg-[var(--bg-elevated)]
+    text-[var(--text-muted)];
+}
+
+/* ── Progress bar ─────────────────────────────────────────────────────────── */
+
+.progressBar {
+  @apply w-full
+    h-1.5
+    rounded-full
+    bg-[var(--bg-elevated)]
+    overflow-hidden;
+}
+
+.progressFill {
+  @apply h-full
+    rounded-full
+    bg-[var(--color-primary)]
+    transition-[width];
+}
+
+/* ── Meta row ─────────────────────────────────────────────────────────────── */
+
+.rowMeta {
+  @apply flex
+    flex-wrap
+    gap-x-4
+    gap-y-0.5
+    text-xs
+    text-[var(--text-muted)];
+}
+
+.rowError {
+  @apply text-xs
+    text-[var(--color-danger)];
+}
+
+/* ── Action buttons ───────────────────────────────────────────────────────── */
+
+.rowActions {
+  @apply flex
+    items-center
+    gap-2;
+}
+
+.confirmText {
+  @apply text-sm
+    text-[var(--text-secondary)];
+}

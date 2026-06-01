@@ -599,6 +599,135 @@ describe('GET /api/search', () => {
 });
 
 // ---------------------------------------------------------------------------
+// GET /api/transfers  /  POST /api/transfers  /  PATCH  /  DELETE
+// ---------------------------------------------------------------------------
+
+describe('GET /api/transfers', () => {
+  beforeEach(async () => {
+    await prisma.download.deleteMany();
+  });
+
+  it('returns an empty array when no transfers exist', async () => {
+    const res = await makeHandler()(req('/api/transfers'));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual([]);
+  });
+
+  it('returns existing download records', async () => {
+    await prisma.download.create({
+      data: { sha256: 'a'.repeat(64), filename: 'test.mp3', size: 1000n, sources: '["node1"]' },
+    });
+    const res = await makeHandler()(req('/api/transfers'));
+    const body = await res.json();
+    expect(body).toHaveLength(1);
+    expect(body[0].filename).toBe('test.mp3');
+    expect(typeof body[0].progress).toBe('number');
+  });
+});
+
+describe('POST /api/transfers', () => {
+  beforeEach(async () => {
+    await prisma.download.deleteMany();
+    await makeHandler()(jsonReq('/api/settings', 'PATCH', { downloadFolder: tmpDir }));
+  });
+
+  it('returns 422 when download folder is not configured', async () => {
+    await makeHandler()(jsonReq('/api/settings', 'PATCH', { downloadFolder: null }));
+    const res = await makeHandler()(
+      jsonReq('/api/transfers', 'POST', {
+        sha256: 'b'.repeat(64),
+        filename: 'file.txt',
+        size: '100',
+        sources: ['node1'],
+      }),
+    );
+    expect(res.status).toBe(422);
+  });
+
+  it('returns 400 for missing/invalid fields', async () => {
+    const res = await makeHandler()(
+      jsonReq('/api/transfers', 'POST', { sha256: 'bad', filename: '', size: 'x', sources: [] }),
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it('creates a download and returns 201 with the id', async () => {
+    const res = await makeHandler()(
+      jsonReq('/api/transfers', 'POST', {
+        sha256: 'c'.repeat(64),
+        filename: 'song.mp3',
+        size: '12345',
+        mimeType: 'audio/mpeg',
+        sources: ['node1'],
+      }),
+    );
+    expect(res.status).toBe(201);
+    const body = await res.json();
+    expect(typeof body.id).toBe('string');
+  });
+});
+
+describe('PATCH /api/transfers/:id', () => {
+  beforeEach(async () => {
+    await prisma.download.deleteMany();
+  });
+
+  it('returns 400 for an unknown action', async () => {
+    const dl = await prisma.download.create({
+      data: {
+        sha256: 'd'.repeat(64),
+        filename: 'a.txt',
+        size: 100n,
+        state: 'DOWNLOADING',
+        sources: '[]',
+      },
+    });
+    const res = await makeHandler()(jsonReq(`/api/transfers/${dl.id}`, 'PATCH', { action: 'fly' }));
+    expect(res.status).toBe(400);
+  });
+});
+
+describe('DELETE /api/transfers/:id', () => {
+  beforeEach(async () => {
+    await prisma.download.deleteMany();
+  });
+
+  it('deletes a completed download', async () => {
+    const dl = await prisma.download.create({
+      data: {
+        sha256: 'e'.repeat(64),
+        filename: 'done.txt',
+        size: 100n,
+        state: 'COMPLETED',
+        sources: '[]',
+      },
+    });
+    const res = await makeHandler()(req(`/api/transfers/${dl.id}`, { method: 'DELETE' }));
+    expect(res.status).toBe(204);
+    expect(await prisma.download.findUnique({ where: { id: dl.id } })).toBeNull();
+  });
+
+  it('refuses to delete an active download', async () => {
+    const dl = await prisma.download.create({
+      data: {
+        sha256: 'f'.repeat(64),
+        filename: 'active.txt',
+        size: 100n,
+        state: 'DOWNLOADING',
+        sources: '[]',
+      },
+    });
+    const res = await makeHandler()(req(`/api/transfers/${dl.id}`, { method: 'DELETE' }));
+    expect(res.status).toBe(409);
+  });
+
+  it('returns 404 for unknown id', async () => {
+    const res = await makeHandler()(req('/api/transfers/nonexistent', { method: 'DELETE' }));
+    expect(res.status).toBe(404);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // 404 fallback
 // ---------------------------------------------------------------------------
 

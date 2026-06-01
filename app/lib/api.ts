@@ -122,6 +122,79 @@ export async function getStats(): Promise<Stats> {
   return res.json();
 }
 
+export type TransferState =
+  | 'PENDING'
+  | 'DOWNLOADING'
+  | 'PAUSED'
+  | 'COMPLETED'
+  | 'FAILED'
+  | 'CANCELLED';
+
+export type Transfer = {
+  id: string;
+  sha256: string;
+  filename: string;
+  size: string;
+  mimeType: string | null;
+  state: TransferState;
+  bytesReceived: string;
+  progress: number;
+  speedBps: number;
+  etaSeconds: number | null;
+  sources: number;
+  error: string | null;
+  createdAt: string;
+  completedAt: string | null;
+};
+
+export async function getTransfers(): Promise<Transfer[]> {
+  const res = await fetch('/api/transfers');
+  if (!res.ok) throw new Error('Failed to load transfers');
+  return res.json();
+}
+
+export async function startDownload(params: {
+  sha256: string;
+  filename: string;
+  size: string;
+  mimeType?: string | null;
+  sources: string[];
+}): Promise<{ id: string }> {
+  const res = await fetch('/api/transfers', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(params),
+  });
+  if (!res.ok) {
+    const msg = await res.text();
+    throw new Error(msg || 'Failed to start download');
+  }
+  return res.json();
+}
+
+export async function controlTransfer(
+  id: string,
+  action: 'pause' | 'resume' | 'cancel',
+): Promise<void> {
+  const res = await fetch(`/api/transfers/${id}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action }),
+  });
+  if (!res.ok) {
+    const msg = await res.text();
+    throw new Error(msg || `Failed to ${action} transfer`);
+  }
+}
+
+export async function dismissTransfer(id: string): Promise<void> {
+  const res = await fetch(`/api/transfers/${id}`, { method: 'DELETE' });
+  if (!res.ok) {
+    const msg = await res.text();
+    throw new Error(msg || 'Failed to dismiss transfer');
+  }
+}
+
 export async function triggerRescan(): Promise<{ indexed: number; removed: number }> {
   const res = await fetch('/api/rescan', { method: 'POST' });
   if (!res.ok) throw new Error('Rescan failed');

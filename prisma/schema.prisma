@@ -47,6 +47,35 @@ model Settings {
   rescanIntervalMinutes          Int     @default(0)
 }
 
+enum DownloadState {
+  PENDING
+  DOWNLOADING
+  PAUSED
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+model Download {
+  id              String        @id @default(cuid())
+  sha256          String
+  filename        String
+  size            BigInt
+  mimeType        String?
+  state           DownloadState @default(PENDING)
+  bytesReceived   BigInt        @default(0)
+  chunkSize       Int           @default(1048576)
+  completedChunks String        @default("[]") // JSON: number[] of completed chunk indices
+  sources         String        @default("[]") // JSON: string[] of nodeIds
+  tmpPath         String?
+  downloadFolder  String?
+  finalPath       String?
+  error           String?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  completedAt     DateTime?
+}
+
 model SharedFile {
   id             String    @id @default(cuid())
   path           String    @unique

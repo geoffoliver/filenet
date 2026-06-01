@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 
 import type { FileType, LocalFile, NetworkFile } from '../../lib/api';
-import { searchFiles } from '../../lib/api';
+import { searchFiles, startDownload } from '../../lib/api';
 
 import styles from './search.module.css';
 
@@ -111,8 +111,14 @@ function mimeIcon(mimeType: string | null): string {
 
 function MetaDetail({ hit }: { hit: SearchHit }) {
   const meta = parseMeta(hit.metadata);
+  // Only include sources we're directly connected to — relayed results carry the
+  // producer's nodeId but we have no WebSocket to them, only to viaNodeId.
+  const directSources = hit.networkSources.filter((n) => !n.viaNodeId || n.viaNodeId === n.nodeId);
   const sources = (hit.local ? 1 : 0) + hit.networkSources.length;
   const rows: { label: string; value: string }[] = [];
+  const [downloading, setDownloading] = useState(false);
+  const [downloadError, setDownloadError] = useState('');
+  const [downloaded, setDownloaded] = useState(false);
 
   if (meta) {
     if (meta.title) rows.push({ label: 'Title', value: String(meta.title) });
@@ -154,9 +160,31 @@ function MetaDetail({ hit }: { hit: SearchHit }) {
           </span>
         ))}
       </div>
-      <button type="button" className={`btn btn-ghost ${styles.downloadBtn}`} disabled>
-        Download
-      </button>
+      <div className={styles.downloadArea}>
+        <button
+          type="button"
+          className="btn btn-primary"
+          disabled={downloading || downloaded || directSources.length === 0}
+          onClick={() => {
+            const allSources = directSources.map((n) => n.nodeId);
+            setDownloading(true);
+            setDownloadError('');
+            startDownload({
+              sha256: hit.sha256,
+              filename: hit.filename,
+              size: hit.size,
+              mimeType: hit.mimeType ?? undefined,
+              sources: allSources,
+            })
+              .then(() => setDownloaded(true))
+              .catch((err: Error) => setDownloadError(err.message))
+              .finally(() => setDownloading(false));
+          }}
+        >
+          {downloading ? 'Starting…' : downloaded ? 'Queued' : 'Download'}
+        </button>
+        {downloadError && <span className={styles.downloadError}>{downloadError}</span>}
+      </div>
     </div>
   );
 }
