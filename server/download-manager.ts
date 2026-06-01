@@ -272,7 +272,13 @@ async function finalizeDownload(prisma: PrismaClient, dl: ActiveDownload): Promi
   // Find a non-colliding final path
   const record = await prisma.download.findUniqueOrThrow({ where: { id: dl.id } });
   const downloadFolder = activeDownloadFolders.get(dl.id) ?? record.downloadFolder ?? tmpdir();
-  const finalPath = await uniqueFilePath(downloadFolder, record.filename);
+  let finalPath: string;
+  try {
+    finalPath = await uniqueFilePath(downloadFolder, record.filename);
+  } catch {
+    await failDownload(prisma, dl, 'Could not create file in download folder');
+    return;
+  }
 
   try {
     await rename(dl.tmpPath, finalPath);
@@ -458,8 +464,11 @@ export async function resumeDownload(
         data: { completedChunks: '[]', bytesReceived: 0n },
       });
       const fh2 = await open(tmpPath, 'w');
-      await truncate(tmpPath, Number(record.size));
-      await fh2.close();
+      try {
+        await truncate(tmpPath, Number(record.size));
+      } finally {
+        await fh2.close();
+      }
       fileHandle = await open(tmpPath, 'r+');
     }
 
@@ -521,8 +530,10 @@ export async function cancelDownload(prisma: PrismaClient, id: string): Promise<
     } catch {}
   }
 
-  await prisma.download.update({
-    where: { id },
+  // Conditional update: do not overwrite a COMPLETED or already-CANCELLED record that
+  // raced us to the finish line between our initial DB read and now.
+  await prisma.download.updateMany({
+    where: { id, state: { notIn: ['COMPLETED', 'CANCELLED'] } },
     data: { state: 'CANCELLED', tmpPath: null },
   });
   return true;

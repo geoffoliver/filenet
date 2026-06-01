@@ -255,11 +255,12 @@ export function createManagementFetch(deps: ManagementDeps): (req: Request) => P
             !/^[0-9a-f]{64}$/.test(sha256) ||
             typeof filename !== 'string' ||
             !filename.trim() ||
+            filename.trim().length > 1000 ||
             typeof size !== 'string' ||
             !/^\d+$/.test(size) ||
             !Array.isArray(sources) ||
             sources.length === 0 ||
-            sources.some((s) => typeof s !== 'string') ||
+            sources.some((s) => typeof s !== 'string' || !s.trim()) ||
             (mimeType !== null && mimeType !== undefined && typeof mimeType !== 'string')
           ) {
             return new Response('Invalid transfer request', { status: 400 });
