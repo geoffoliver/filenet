@@ -406,10 +406,17 @@ export function createManagementFetch(deps: ManagementDeps): (req: Request) => P
           const limitParam = url.searchParams.get('limit');
           const beforeParam = url.searchParams.get('before');
           const limit = Math.max(1, Math.min(parseInt(limitParam ?? '50', 10) || 50, 200));
+          let beforeDate: Date | null = null;
+          if (beforeParam) {
+            beforeDate = new Date(beforeParam);
+            if (Number.isNaN(beforeDate.getTime())) {
+              return new Response('Invalid before date', { status: 400 });
+            }
+          }
           const messages = await prisma.message.findMany({
             where: {
               conversationId: convId,
-              ...(beforeParam ? { sentAt: { lt: new Date(beforeParam) } } : {}),
+              ...(beforeDate ? { sentAt: { lt: beforeDate } } : {}),
             },
             orderBy: { sentAt: 'asc' },
             take: limit,

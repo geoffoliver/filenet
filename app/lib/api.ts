@@ -304,13 +304,13 @@ export async function getMessages(
   const qs = new URLSearchParams();
   if (opts?.limit != null) qs.set('limit', String(opts.limit));
   if (opts?.before) qs.set('before', opts.before);
-  const res = await fetch(`/api/conversations/${encodeURIComponent(convId)}/messages?${qs}`);
+  const res = await fetch(`/api/conversations/${convId}/messages?${qs}`);
   if (!res.ok) throw new Error('Failed to load messages');
   return res.json();
 }
 
 export async function sendMessage(convId: string, body: string): Promise<Message> {
-  const res = await fetch(`/api/conversations/${encodeURIComponent(convId)}/messages`, {
+  const res = await fetch(`/api/conversations/${convId}/messages`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ body }),
@@ -323,7 +323,7 @@ export async function sendMessage(convId: string, body: string): Promise<Message
 }
 
 export async function deleteConversation(convId: string): Promise<void> {
-  const res = await fetch(`/api/conversations/${encodeURIComponent(convId)}`, {
+  const res = await fetch(`/api/conversations/${convId}`, {
     method: 'DELETE',
   });
   if (!res.ok) {

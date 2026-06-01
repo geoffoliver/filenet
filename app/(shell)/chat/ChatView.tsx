@@ -111,6 +111,7 @@ export default function ChatView() {
   const pollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const activeConvIdRef = useRef<string | null>(null);
+  const prevMsgCountRef = useRef(0);
 
   useEffect(() => {
     activeConvIdRef.current = activeConvId;
@@ -163,14 +164,18 @@ export default function ChatView() {
     };
   }, [loadConversations, loadMessages]);
 
-  // Scroll to bottom when messages change
+  // Only scroll to bottom when new messages arrive, not on every poll tick
   useEffect(() => {
-    scrollToBottom();
-  }, [messages, scrollToBottom]);
+    if (messages.length > prevMsgCountRef.current) {
+      scrollToBottom();
+    }
+    prevMsgCountRef.current = messages.length;
+  }, [messages.length, scrollToBottom]);
 
   function selectConv(convId: string) {
     if (convId === activeConvId) return;
     activeConvIdRef.current = convId; // sync update so loadMessages guard doesn't race
+    prevMsgCountRef.current = 0; // reset so first load always scrolls to bottom
     setActiveConvId(convId);
     setMessages([]);
     loadMessages(convId);

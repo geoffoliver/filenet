@@ -58,6 +58,20 @@ beforeEach(async () => {
 });
 
 // ---------------------------------------------------------------------------
+// GET /api/me
+// ---------------------------------------------------------------------------
+
+describe('GET /api/me', () => {
+  it('returns the local nodeId', async () => {
+    const res = await makeHandler()(req('/api/me'));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.nodeId).toBe(identity.nodeId);
+    expect(typeof body.nodeId).toBe('string');
+  });
+});
+
+// ---------------------------------------------------------------------------
 // GET /api/friends
 // ---------------------------------------------------------------------------
 
@@ -970,10 +984,31 @@ describe('GET /api/conversations/:id/messages', () => {
     expect(body).toHaveLength(3);
   });
 
-  it('caps limit at 200', async () => {
+  it('caps limit at 200 — returns exactly 200 messages even when more exist', async () => {
     await prisma.conversation.create({ data: { id: 'group:cap', type: 'GROUP', name: 'Cap' } });
+    await prisma.message.createMany({
+      data: Array.from({ length: 201 }, (_, i) => ({
+        id: randomUUID(),
+        conversationId: 'group:cap',
+        fromNodeId: 'n',
+        body: `msg${i}`,
+        sentAt: new Date(2025, 0, i + 1),
+      })),
+    });
     const res = await makeHandler()(req('/api/conversations/group:cap/messages?limit=9999'));
     expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body).toHaveLength(200);
+  });
+
+  it('returns 400 for an invalid before date', async () => {
+    await prisma.conversation.create({
+      data: { id: 'group:before-bad', type: 'GROUP', name: 'B' },
+    });
+    const res = await makeHandler()(
+      req('/api/conversations/group:before-bad/messages?before=not-a-date'),
+    );
+    expect(res.status).toBe(400);
   });
 
   it('clamps negative limit to 1 — does not pass a negative take to Prisma', async () => {
