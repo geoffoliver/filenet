@@ -367,6 +367,12 @@ export function createManagementFetch(deps: ManagementDeps): (req: Request) => P
 
           // Open or create a DM conversation
           if (typeof peerNodeId === 'string' && peerNodeId.trim()) {
+            const isFriend = await prisma.friend.findFirst({
+              where: { nodeId: peerNodeId.trim(), status: 'ACCEPTED' },
+            });
+            if (!isFriend) {
+              return new Response('peerNodeId must be an accepted friend', { status: 403 });
+            }
             const convId = dmConversationId(identity.nodeId, peerNodeId.trim());
             const conv = await prisma.conversation.upsert({
               where: { id: convId },
@@ -399,7 +405,7 @@ export function createManagementFetch(deps: ManagementDeps): (req: Request) => P
           }
           const limitParam = url.searchParams.get('limit');
           const beforeParam = url.searchParams.get('before');
-          const limit = Math.min(parseInt(limitParam ?? '50', 10) || 50, 200);
+          const limit = Math.max(1, Math.min(parseInt(limitParam ?? '50', 10) || 50, 200));
           const messages = await prisma.message.findMany({
             where: {
               conversationId: convId,
@@ -468,6 +474,9 @@ export function createManagementFetch(deps: ManagementDeps): (req: Request) => P
               }
             }
           } else {
+            // Group chats are network-wide by design: every connected friend
+            // receives the message and auto-joins the room, mirroring the
+            // "rooms shared across the entire network" spec requirement.
             const peers = await getAcceptedConnectedPeers(prisma);
             for (const peer of peers) {
               try {

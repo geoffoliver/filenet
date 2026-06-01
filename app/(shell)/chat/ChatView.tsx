@@ -170,6 +170,7 @@ export default function ChatView() {
 
   function selectConv(convId: string) {
     if (convId === activeConvId) return;
+    activeConvIdRef.current = convId; // sync update so loadMessages guard doesn't race
     setActiveConvId(convId);
     setMessages([]);
     loadMessages(convId);

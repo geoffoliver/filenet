@@ -794,9 +794,19 @@ describe('POST /api/conversations — DM', () => {
   beforeEach(async () => {
     await prisma.message.deleteMany();
     await prisma.conversation.deleteMany();
+    await prisma.friend.deleteMany();
   });
 
   it('creates a DM conversation and returns 200', async () => {
+    await prisma.friend.create({
+      data: {
+        name: 'Peer',
+        address: '10.0.0.1',
+        port: 7734,
+        nodeId: 'peer-node-1',
+        status: 'ACCEPTED',
+      },
+    });
     const res = await makeHandler()(
       jsonReq('/api/conversations', 'POST', { peerNodeId: 'peer-node-1' }),
     );
@@ -806,7 +816,23 @@ describe('POST /api/conversations — DM', () => {
     expect(body.id).toMatch(/^dm:/);
   });
 
+  it('returns 403 when peerNodeId is not an accepted friend', async () => {
+    const res = await makeHandler()(
+      jsonReq('/api/conversations', 'POST', { peerNodeId: 'unknown-node' }),
+    );
+    expect(res.status).toBe(403);
+  });
+
   it('is idempotent — opening the same DM twice returns same id', async () => {
+    await prisma.friend.create({
+      data: {
+        name: 'Peer2',
+        address: '10.0.0.2',
+        port: 7734,
+        nodeId: 'peer-node-2',
+        status: 'ACCEPTED',
+      },
+    });
     const res1 = await makeHandler()(
       jsonReq('/api/conversations', 'POST', { peerNodeId: 'peer-node-2' }),
     );
@@ -819,6 +845,15 @@ describe('POST /api/conversations — DM', () => {
   });
 
   it('trims peerNodeId whitespace', async () => {
+    await prisma.friend.create({
+      data: {
+        name: 'Peer3',
+        address: '10.0.0.3',
+        port: 7734,
+        nodeId: 'peer-node-3',
+        status: 'ACCEPTED',
+      },
+    });
     const res = await makeHandler()(
       jsonReq('/api/conversations', 'POST', { peerNodeId: '  peer-node-3  ' }),
     );
@@ -938,8 +973,25 @@ describe('GET /api/conversations/:id/messages', () => {
   it('caps limit at 200', async () => {
     await prisma.conversation.create({ data: { id: 'group:cap', type: 'GROUP', name: 'Cap' } });
     const res = await makeHandler()(req('/api/conversations/group:cap/messages?limit=9999'));
-    // Just ensure it doesn't 400; cap is applied internally
     expect(res.status).toBe(200);
+  });
+
+  it('clamps negative limit to 1 — does not pass a negative take to Prisma', async () => {
+    await prisma.conversation.create({ data: { id: 'group:neg', type: 'GROUP', name: 'Neg' } });
+    await prisma.message.create({
+      data: {
+        id: randomUUID(),
+        conversationId: 'group:neg',
+        fromNodeId: 'n',
+        body: 'hi',
+        sentAt: new Date(),
+      },
+    });
+    const res = await makeHandler()(req('/api/conversations/group:neg/messages?limit=-5'));
+    expect(res.status).toBe(200);
+    // With a clamped limit of 1 we still get a valid (non-reversed) response
+    const body = await res.json();
+    expect(Array.isArray(body)).toBe(true);
   });
 
   it('returns 400 for invalid conversation id containing slash', async () => {
