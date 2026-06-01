@@ -1,21 +1,31 @@
 import { randomUUID } from 'node:crypto';
 
-import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { afterAll, beforeAll, beforeEach, describe, expect, test } from 'bun:test';
+import { execSync } from 'child_process';
+import { unlinkSync } from 'fs';
 
 import { dmConversationId, handleChatMessage } from '../chat';
 import type { PrismaClient } from '@prisma/client';
 import { createPrismaClient } from '../db';
 
+const TEST_DB_URL = 'file:./data/test-chat.db';
 let prisma: PrismaClient;
 
-beforeEach(async () => {
-  prisma = createPrismaClient();
-  await prisma.message.deleteMany();
-  await prisma.conversation.deleteMany();
+beforeAll(() => {
+  execSync(`bunx prisma db push --url "${TEST_DB_URL}"`, { stdio: 'pipe' });
+  prisma = createPrismaClient(TEST_DB_URL);
 });
 
-afterEach(async () => {
+afterAll(async () => {
   await prisma.$disconnect();
+  try {
+    unlinkSync('./data/test-chat.db');
+  } catch {}
+});
+
+beforeEach(async () => {
+  await prisma.message.deleteMany();
+  await prisma.conversation.deleteMany();
 });
 
 const NODE_A = 'aaaa1111';
