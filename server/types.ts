@@ -78,6 +78,16 @@ export type SearchResultMessage = {
   results: SearchResultItem[];
 };
 
+export type ChatMessage = {
+  type: 'chat-message';
+  messageId: string; // UUID — used for deduplication
+  conversationId: string; // dm:{nodeA}:{nodeB} (sorted) | group:{uuid}
+  fromNodeId: string;
+  body: string;
+  sentAt: number; // unix ms
+  conversationName?: string; // group display name, helps receiver create the conversation
+};
+
 export type ChunkRequestMessage = {
   type: 'chunk-request';
   transferId: string; // UUID, routes response back to waiting promise
@@ -112,7 +122,8 @@ export type InnerMessage =
   | SearchResultMessage
   | ChunkRequestMessage
   | ChunkResponseMessage
-  | ChunkErrorMessage;
+  | ChunkErrorMessage
+  | ChatMessage;
 
 export type WireMessage = HelloMessage | HelloAckMessage | { type: 'encrypted'; payload: string };
 

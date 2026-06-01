@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto';
+
 import type { PrismaClient, SharedFile } from '@prisma/client';
 
 import {
@@ -14,6 +16,7 @@ import {
   getConnectedPeer,
   notifyFriendAccepted,
   notifyFriendRejected,
+  sendToPeer,
 } from './connections';
 import { acceptFriendRequest, addOutgoingFriend, getFriends, rejectFriendRequest } from './friends';
 import {
@@ -30,6 +33,7 @@ import {
   updateSettings,
 } from './config';
 import type { Identity } from './identity';
+import { dmConversationId } from './chat';
 import { initiateNetworkSearch } from './search-protocol';
 import { scanAndIndex } from './indexer';
 import { searchFiles } from './search';
@@ -82,10 +86,18 @@ export function createManagementFetch(deps: ManagementDeps): (req: Request) => P
     const url = new URL(req.url);
 
     try {
+      if (url.pathname === '/api/me' && req.method === 'GET') {
+        return Response.json({ nodeId: identity.nodeId });
+      }
+
       if (url.pathname === '/api/friends') {
         if (req.method === 'GET') {
           const friends = await getFriends(prisma);
-          return Response.json(friends);
+          const enriched = friends.map((f) => ({
+            ...f,
+            online: f.nodeId ? !!getConnectedPeer(f.nodeId) : false,
+          }));
+          return Response.json(enriched);
         }
 
         if (req.method === 'POST') {
@@ -336,6 +348,148 @@ export function createManagementFetch(deps: ManagementDeps): (req: Request) => P
           return new Response('Scan already in progress', { status: 409 });
         }
         return Response.json({ indexed: result.indexed, removed: result.removed });
+      }
+
+      // ── Chat ──────────────────────────────────────────────────────────────
+
+      if (url.pathname === '/api/conversations') {
+        if (req.method === 'GET') {
+          const conversations = await prisma.conversation.findMany({
+            include: { messages: { orderBy: { sentAt: 'desc' }, take: 1 } },
+            orderBy: { updatedAt: 'desc' },
+          });
+          return Response.json(conversations);
+        }
+
+        if (req.method === 'POST') {
+          const body = await req.json();
+          const { name, peerNodeId } = body as { name?: string; peerNodeId?: string };
+
+          // Open or create a DM conversation
+          if (typeof peerNodeId === 'string' && peerNodeId.trim()) {
+            const convId = dmConversationId(identity.nodeId, peerNodeId.trim());
+            const conv = await prisma.conversation.upsert({
+              where: { id: convId },
+              create: { id: convId, type: 'DM' },
+              update: {},
+            });
+            return Response.json(conv, { status: 200 });
+          }
+
+          // Create a new group conversation
+          if (typeof name !== 'string' || !name.trim()) {
+            return new Response('name is required for group conversations', { status: 400 });
+          }
+          const convId = `group:${randomUUID()}`;
+          const conv = await prisma.conversation.create({
+            data: { id: convId, type: 'GROUP', name: name.trim().slice(0, 200) },
+          });
+          return Response.json(conv, { status: 201 });
+        }
+      }
+
+      if (url.pathname.startsWith('/api/conversations/')) {
+        const rest = url.pathname.slice('/api/conversations/'.length);
+
+        // GET /api/conversations/:id/messages
+        if (rest.endsWith('/messages') && req.method === 'GET') {
+          const convId = rest.slice(0, -'/messages'.length);
+          if (!convId || convId.includes('/')) {
+            return new Response('Invalid conversation id', { status: 400 });
+          }
+          const limitParam = url.searchParams.get('limit');
+          const beforeParam = url.searchParams.get('before');
+          const limit = Math.min(parseInt(limitParam ?? '50', 10) || 50, 200);
+          const messages = await prisma.message.findMany({
+            where: {
+              conversationId: convId,
+              ...(beforeParam ? { sentAt: { lt: new Date(beforeParam) } } : {}),
+            },
+            orderBy: { sentAt: 'asc' },
+            take: limit,
+          });
+          return Response.json(messages);
+        }
+
+        // POST /api/conversations/:id/messages
+        if (rest.endsWith('/messages') && req.method === 'POST') {
+          const convId = rest.slice(0, -'/messages'.length);
+          if (!convId || convId.includes('/')) {
+            return new Response('Invalid conversation id', { status: 400 });
+          }
+          const body = await req.json();
+          const { body: msgBody } = body as { body?: string };
+          if (typeof msgBody !== 'string' || !msgBody.trim()) {
+            return new Response('body is required', { status: 400 });
+          }
+          if (msgBody.trim().length > 10_000) {
+            return new Response('Message too long', { status: 400 });
+          }
+
+          const conv = await prisma.conversation.findUnique({ where: { id: convId } });
+          if (!conv) return new Response('Conversation not found', { status: 404 });
+
+          const messageId = randomUUID();
+          const sentAt = new Date();
+          const msg = await prisma.message.create({
+            data: {
+              id: messageId,
+              conversationId: convId,
+              fromNodeId: identity.nodeId,
+              body: msgBody.trim(),
+              sentAt,
+            },
+          });
+          await prisma.conversation.update({
+            where: { id: convId },
+            data: { updatedAt: new Date() },
+          });
+
+          // Broadcast to peers
+          const chatWireMsg = {
+            type: 'chat-message' as const,
+            messageId,
+            conversationId: convId,
+            fromNodeId: identity.nodeId,
+            body: msgBody.trim(),
+            sentAt: sentAt.getTime(),
+            ...(conv.name ? { conversationName: conv.name } : {}),
+          };
+
+          if (convId.startsWith('dm:')) {
+            const parts = convId.slice(3).split(':');
+            const partnerNodeId = parts.find((n) => n !== identity.nodeId);
+            if (partnerNodeId) {
+              const peer = getConnectedPeer(partnerNodeId);
+              if (peer) {
+                try {
+                  sendToPeer(peer, chatWireMsg);
+                } catch {}
+              }
+            }
+          } else {
+            const peers = await getAcceptedConnectedPeers(prisma);
+            for (const peer of peers) {
+              try {
+                sendToPeer(peer, chatWireMsg);
+              } catch {}
+            }
+          }
+
+          return Response.json(msg, { status: 201 });
+        }
+
+        // DELETE /api/conversations/:id
+        const convId = rest;
+        if (!convId || convId.includes('/')) {
+          return new Response('Invalid conversation id', { status: 400 });
+        }
+        if (req.method === 'DELETE') {
+          const conv = await prisma.conversation.findUnique({ where: { id: convId } });
+          if (!conv) return new Response('Conversation not found', { status: 404 });
+          await prisma.conversation.delete({ where: { id: convId } });
+          return new Response(null, { status: 204 });
+        }
       }
 
       return new Response('Not Found', { status: 404 });

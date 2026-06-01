@@ -76,6 +76,31 @@ model Download {
   completedAt     DateTime?
 }
 
+enum ConvType {
+  DM
+  GROUP
+}
+
+model Conversation {
+  id        String    @id // dm:{nodeA}:{nodeB} (sorted) or group:{uuid}
+  type      ConvType  @default(DM)
+  name      String?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  messages  Message[]
+}
+
+model Message {
+  id             String       @id @default(cuid())
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  fromNodeId     String
+  body           String
+  sentAt         DateTime
+
+  @@index([conversationId, sentAt])
+}
+
 model SharedFile {
   id             String    @id @default(cuid())
   path           String    @unique

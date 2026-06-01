@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto';
+
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'bun:test';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import type { PrismaClient } from '@prisma/client';
@@ -724,6 +726,348 @@ describe('DELETE /api/transfers/:id', () => {
   it('returns 404 for unknown id', async () => {
     const res = await makeHandler()(req('/api/transfers/nonexistent', { method: 'DELETE' }));
     expect(res.status).toBe(404);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// GET /api/conversations
+// ---------------------------------------------------------------------------
+
+describe('GET /api/conversations', () => {
+  beforeEach(async () => {
+    await prisma.message.deleteMany();
+    await prisma.conversation.deleteMany();
+  });
+
+  it('returns empty array when no conversations', async () => {
+    const res = await makeHandler()(req('/api/conversations'));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual([]);
+  });
+
+  it('returns conversations with latest message included', async () => {
+    const conv = await prisma.conversation.create({
+      data: { id: 'group:abc', type: 'GROUP', name: 'Test' },
+    });
+    await prisma.message.create({
+      data: {
+        id: randomUUID(),
+        conversationId: conv.id,
+        fromNodeId: 'node-a',
+        body: 'Hello',
+        sentAt: new Date(),
+      },
+    });
+    const res = await makeHandler()(req('/api/conversations'));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body).toHaveLength(1);
+    expect(body[0].id).toBe('group:abc');
+    expect(body[0].messages).toHaveLength(1);
+    expect(body[0].messages[0].body).toBe('Hello');
+  });
+
+  it('orders conversations by updatedAt desc', async () => {
+    await prisma.conversation.create({
+      data: { id: 'group:first', type: 'GROUP', name: 'First', updatedAt: new Date('2025-01-01') },
+    });
+    await prisma.conversation.create({
+      data: {
+        id: 'group:second',
+        type: 'GROUP',
+        name: 'Second',
+        updatedAt: new Date('2025-06-01'),
+      },
+    });
+    const res = await makeHandler()(req('/api/conversations'));
+    const body = await res.json();
+    expect(body[0].id).toBe('group:second');
+    expect(body[1].id).toBe('group:first');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// POST /api/conversations
+// ---------------------------------------------------------------------------
+
+describe('POST /api/conversations — DM', () => {
+  beforeEach(async () => {
+    await prisma.message.deleteMany();
+    await prisma.conversation.deleteMany();
+  });
+
+  it('creates a DM conversation and returns 200', async () => {
+    const res = await makeHandler()(
+      jsonReq('/api/conversations', 'POST', { peerNodeId: 'peer-node-1' }),
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.type).toBe('DM');
+    expect(body.id).toMatch(/^dm:/);
+  });
+
+  it('is idempotent — opening the same DM twice returns same id', async () => {
+    const res1 = await makeHandler()(
+      jsonReq('/api/conversations', 'POST', { peerNodeId: 'peer-node-2' }),
+    );
+    const res2 = await makeHandler()(
+      jsonReq('/api/conversations', 'POST', { peerNodeId: 'peer-node-2' }),
+    );
+    const body1 = await res1.json();
+    const body2 = await res2.json();
+    expect(body1.id).toBe(body2.id);
+  });
+
+  it('trims peerNodeId whitespace', async () => {
+    const res = await makeHandler()(
+      jsonReq('/api/conversations', 'POST', { peerNodeId: '  peer-node-3  ' }),
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.id).not.toContain('  ');
+  });
+});
+
+describe('POST /api/conversations — group', () => {
+  beforeEach(async () => {
+    await prisma.message.deleteMany();
+    await prisma.conversation.deleteMany();
+  });
+
+  it('creates a group conversation and returns 201', async () => {
+    const res = await makeHandler()(jsonReq('/api/conversations', 'POST', { name: 'Dev Chat' }));
+    expect(res.status).toBe(201);
+    const body = await res.json();
+    expect(body.type).toBe('GROUP');
+    expect(body.name).toBe('Dev Chat');
+    expect(body.id).toMatch(/^group:/);
+  });
+
+  it('trims group name', async () => {
+    const res = await makeHandler()(jsonReq('/api/conversations', 'POST', { name: '  Trimmed  ' }));
+    expect(res.status).toBe(201);
+    const body = await res.json();
+    expect(body.name).toBe('Trimmed');
+  });
+
+  it('truncates group name to 200 chars', async () => {
+    const res = await makeHandler()(
+      jsonReq('/api/conversations', 'POST', { name: 'a'.repeat(300) }),
+    );
+    expect(res.status).toBe(201);
+    const body = await res.json();
+    expect(body.name!.length).toBe(200);
+  });
+
+  it('returns 400 when name is empty string', async () => {
+    const res = await makeHandler()(jsonReq('/api/conversations', 'POST', { name: '   ' }));
+    expect(res.status).toBe(400);
+  });
+
+  it('returns 400 when neither name nor peerNodeId is provided', async () => {
+    const res = await makeHandler()(jsonReq('/api/conversations', 'POST', {}));
+    expect(res.status).toBe(400);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// GET /api/conversations/:id/messages
+// ---------------------------------------------------------------------------
+
+describe('GET /api/conversations/:id/messages', () => {
+  beforeEach(async () => {
+    await prisma.message.deleteMany();
+    await prisma.conversation.deleteMany();
+  });
+
+  it('returns empty array when conversation has no messages', async () => {
+    await prisma.conversation.create({ data: { id: 'group:empty', type: 'GROUP', name: 'Empty' } });
+    const res = await makeHandler()(req('/api/conversations/group:empty/messages'));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual([]);
+  });
+
+  it('returns messages ordered by sentAt asc', async () => {
+    await prisma.conversation.create({
+      data: { id: 'group:ordered', type: 'GROUP', name: 'Ordered' },
+    });
+    await prisma.message.create({
+      data: {
+        id: randomUUID(),
+        conversationId: 'group:ordered',
+        fromNodeId: 'n',
+        body: 'First',
+        sentAt: new Date('2025-01-01'),
+      },
+    });
+    await prisma.message.create({
+      data: {
+        id: randomUUID(),
+        conversationId: 'group:ordered',
+        fromNodeId: 'n',
+        body: 'Second',
+        sentAt: new Date('2025-06-01'),
+      },
+    });
+    const res = await makeHandler()(req('/api/conversations/group:ordered/messages'));
+    const body = await res.json();
+    expect(body[0].body).toBe('First');
+    expect(body[1].body).toBe('Second');
+  });
+
+  it('respects the limit query param', async () => {
+    await prisma.conversation.create({
+      data: { id: 'group:limited', type: 'GROUP', name: 'Limited' },
+    });
+    for (let i = 0; i < 5; i++) {
+      await prisma.message.create({
+        data: {
+          id: randomUUID(),
+          conversationId: 'group:limited',
+          fromNodeId: 'n',
+          body: `msg${i}`,
+          sentAt: new Date(2025, 0, i + 1),
+        },
+      });
+    }
+    const res = await makeHandler()(req('/api/conversations/group:limited/messages?limit=3'));
+    const body = await res.json();
+    expect(body).toHaveLength(3);
+  });
+
+  it('caps limit at 200', async () => {
+    await prisma.conversation.create({ data: { id: 'group:cap', type: 'GROUP', name: 'Cap' } });
+    const res = await makeHandler()(req('/api/conversations/group:cap/messages?limit=9999'));
+    // Just ensure it doesn't 400; cap is applied internally
+    expect(res.status).toBe(200);
+  });
+
+  it('returns 400 for invalid conversation id containing slash', async () => {
+    const res = await makeHandler()(req('/api/conversations/foo/bar/messages'));
+    expect(res.status).toBe(400);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// POST /api/conversations/:id/messages
+// ---------------------------------------------------------------------------
+
+describe('POST /api/conversations/:id/messages', () => {
+  beforeEach(async () => {
+    await prisma.message.deleteMany();
+    await prisma.conversation.deleteMany();
+  });
+
+  it('creates a message and returns 201', async () => {
+    await prisma.conversation.create({ data: { id: 'group:send', type: 'GROUP', name: 'Send' } });
+    const res = await makeHandler()(
+      jsonReq('/api/conversations/group:send/messages', 'POST', { body: 'Hello world' }),
+    );
+    expect(res.status).toBe(201);
+    const msg = await res.json();
+    expect(msg.body).toBe('Hello world');
+    expect(msg.fromNodeId).toBe(identity.nodeId);
+  });
+
+  it('trims message body', async () => {
+    await prisma.conversation.create({ data: { id: 'group:trim', type: 'GROUP', name: 'Trim' } });
+    const res = await makeHandler()(
+      jsonReq('/api/conversations/group:trim/messages', 'POST', { body: '  trimmed  ' }),
+    );
+    expect(res.status).toBe(201);
+    const msg = await res.json();
+    expect(msg.body).toBe('trimmed');
+  });
+
+  it('returns 404 for unknown conversation', async () => {
+    const res = await makeHandler()(
+      jsonReq('/api/conversations/group:nope/messages', 'POST', { body: 'hi' }),
+    );
+    expect(res.status).toBe(404);
+  });
+
+  it('returns 400 for empty body', async () => {
+    await prisma.conversation.create({
+      data: { id: 'group:empty-body', type: 'GROUP', name: 'E' },
+    });
+    const res = await makeHandler()(
+      jsonReq('/api/conversations/group:empty-body/messages', 'POST', { body: '   ' }),
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it('returns 400 for missing body field', async () => {
+    await prisma.conversation.create({ data: { id: 'group:no-body', type: 'GROUP', name: 'N' } });
+    const res = await makeHandler()(
+      jsonReq('/api/conversations/group:no-body/messages', 'POST', {}),
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it('returns 400 for body exceeding 10000 chars', async () => {
+    await prisma.conversation.create({ data: { id: 'group:long-body', type: 'GROUP', name: 'L' } });
+    const res = await makeHandler()(
+      jsonReq('/api/conversations/group:long-body/messages', 'POST', { body: 'a'.repeat(10_001) }),
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it('always sets fromNodeId to identity.nodeId', async () => {
+    await prisma.conversation.create({ data: { id: 'group:identity', type: 'GROUP', name: 'I' } });
+    const res = await makeHandler()(
+      jsonReq('/api/conversations/group:identity/messages', 'POST', {
+        body: 'Test',
+        fromNodeId: 'SPOOFED',
+      }),
+    );
+    const msg = await res.json();
+    expect(msg.fromNodeId).toBe(identity.nodeId);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// DELETE /api/conversations/:id
+// ---------------------------------------------------------------------------
+
+describe('DELETE /api/conversations/:id', () => {
+  beforeEach(async () => {
+    await prisma.message.deleteMany();
+    await prisma.conversation.deleteMany();
+  });
+
+  it('deletes the conversation and returns 204', async () => {
+    await prisma.conversation.create({ data: { id: 'group:del', type: 'GROUP', name: 'Del' } });
+    const res = await makeHandler()(req('/api/conversations/group:del', { method: 'DELETE' }));
+    expect(res.status).toBe(204);
+    expect(await prisma.conversation.findUnique({ where: { id: 'group:del' } })).toBeNull();
+  });
+
+  it('cascades delete to messages', async () => {
+    await prisma.conversation.create({
+      data: { id: 'group:cascade', type: 'GROUP', name: 'Cascade' },
+    });
+    const msgId = randomUUID();
+    await prisma.message.create({
+      data: {
+        id: msgId,
+        conversationId: 'group:cascade',
+        fromNodeId: 'n',
+        body: 'Bye',
+        sentAt: new Date(),
+      },
+    });
+    await makeHandler()(req('/api/conversations/group:cascade', { method: 'DELETE' }));
+    expect(await prisma.message.findUnique({ where: { id: msgId } })).toBeNull();
+  });
+
+  it('returns 404 for unknown conversation', async () => {
+    const res = await makeHandler()(req('/api/conversations/group:nope', { method: 'DELETE' }));
+    expect(res.status).toBe(404);
+  });
+
+  it('returns 400 for invalid conversation id containing slash', async () => {
+    const res = await makeHandler()(req('/api/conversations/foo/bar', { method: 'DELETE' }));
+    expect(res.status).toBe(400);
   });
 });
 

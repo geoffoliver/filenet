@@ -117,6 +117,19 @@ export const ChunkErrorMessageSchema = z.object({
   reason: z.string().max(500),
 });
 
+export const ChatMessageSchema = z.object({
+  type: z.literal('chat-message'),
+  messageId: z.string().uuid(),
+  conversationId: z
+    .string()
+    .max(500)
+    .regex(/^(dm:|group:)/, 'conversationId must start with dm: or group:'),
+  fromNodeId: z.string().max(200).min(1),
+  body: z.string().min(1).max(10_000),
+  sentAt: z.number().int().positive(),
+  conversationName: z.string().max(200).optional(),
+});
+
 export const FriendResponseMessageSchema = z.object({
   type: z.literal('friend-response'),
   accepted: z.boolean(),

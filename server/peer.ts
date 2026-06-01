@@ -2,6 +2,7 @@ import type { PrismaClient } from '@prisma/client';
 import type { ServerWebSocket } from 'bun';
 
 import {
+  ChatMessageSchema,
   FriendRequestMessageSchema,
   FriendResponseMessageSchema,
   SearchRequestMessageSchema,
@@ -29,6 +30,7 @@ import { handleSearchRequest, handleSearchResult } from './search-protocol';
 import type { Identity } from './identity';
 import { acceptFriendRequest } from './friends';
 import { dispatchTransferMessage } from './transfer-protocol';
+import { handleChatMessage } from './chat';
 
 type PeerState =
   | { phase: 'pending' }
@@ -183,6 +185,17 @@ export async function dispatchMessage(
 
   if (msg.type === 'chunk-request' || msg.type === 'chunk-response' || msg.type === 'chunk-error') {
     await dispatchTransferMessage(msg, state.peerNodeId, ws.data.prisma);
+    return;
+  }
+
+  if (msg.type === 'chat-message') {
+    const result = ChatMessageSchema.safeParse(msg);
+    if (!result.success) return;
+    const isFriend = await ws.data.prisma.friend.findFirst({
+      where: { nodeId: state.peerNodeId, status: 'ACCEPTED' },
+    });
+    if (!isFriend) return;
+    await handleChatMessage(result.data, state.peerNodeId, ws.data.prisma, ws.data.identity.nodeId);
     return;
   }
 }
