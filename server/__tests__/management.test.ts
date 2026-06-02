@@ -1131,6 +1131,16 @@ describe('POST /api/conversations/:id/messages', () => {
     const msg = await res.json();
     expect(msg.fromNodeId).toBe(identity.nodeId);
   });
+
+  it('returns 403 when sending to a DM whose partner is no longer an accepted friend', async () => {
+    const convId = `dm:${[identity.nodeId, 'ex-friend-node'].sort().join(':')}`;
+    await prisma.conversation.create({ data: { id: convId, type: 'DM' } });
+    // no friend row seeded — partner is not accepted
+    const res = await makeHandler()(
+      jsonReq(`/api/conversations/${convId}/messages`, 'POST', { body: 'Hello' }),
+    );
+    expect(res.status).toBe(403);
+  });
 });
 
 // ---------------------------------------------------------------------------

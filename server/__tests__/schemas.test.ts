@@ -658,6 +658,12 @@ describe('ChatMessageSchema', () => {
     expect(ChatMessageSchema.safeParse({ ...valid, conversationId: 'bad:id' }).success).toBe(false);
   });
 
+  it('rejects conversationId containing /', () => {
+    expect(ChatMessageSchema.safeParse({ ...valid, conversationId: 'group:abc/def' }).success).toBe(
+      false,
+    );
+  });
+
   it('rejects empty body', () => {
     expect(ChatMessageSchema.safeParse({ ...valid, body: '' }).success).toBe(false);
   });
