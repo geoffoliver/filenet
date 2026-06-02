@@ -378,17 +378,19 @@ export function createManagementFetch(deps: ManagementDeps): (req: Request) => P
               where: { id: convId },
               create: { id: convId, type: 'DM' },
               update: {},
+              include: { messages: { orderBy: { sentAt: 'desc' }, take: 1 } },
             });
             return Response.json(conv, { status: 200 });
           }
 
           // Create a new group conversation
           if (typeof name !== 'string' || !name.trim()) {
-            return new Response('name is required for group conversations', { status: 400 });
+            return new Response('either peerNodeId or name is required', { status: 400 });
           }
           const convId = `group:${randomUUID()}`;
           const conv = await prisma.conversation.create({
             data: { id: convId, type: 'GROUP', name: name.trim().slice(0, 200) },
+            include: { messages: { orderBy: { sentAt: 'desc' }, take: 1 } },
           });
           return Response.json(conv, { status: 201 });
         }

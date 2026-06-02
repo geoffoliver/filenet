@@ -126,7 +126,11 @@ export const ChatMessageSchema = z.object({
     .regex(/^(dm:|group:)/, 'conversationId must start with dm: or group:')
     .regex(/^[^/]*$/, 'conversationId must not contain /'),
   fromNodeId: z.string().max(200).min(1),
-  body: z.string().min(1).max(10_000),
+  body: z
+    .string()
+    .min(1)
+    .max(10_000)
+    .refine((v) => v.trim().length > 0, 'body must not be blank'),
   sentAt: z.number().int().positive(),
   conversationName: z.preprocess(
     (v) => (typeof v === 'string' ? v.trim() || undefined : v),

@@ -830,6 +830,23 @@ describe('POST /api/conversations — DM', () => {
     expect(body.id).toMatch(/^dm:/);
   });
 
+  it('response includes messages array', async () => {
+    await prisma.friend.create({
+      data: {
+        name: 'Peer4',
+        address: '10.0.0.4',
+        port: 7734,
+        nodeId: 'peer-node-4',
+        status: 'ACCEPTED',
+      },
+    });
+    const res = await makeHandler()(
+      jsonReq('/api/conversations', 'POST', { peerNodeId: 'peer-node-4' }),
+    );
+    const body = await res.json();
+    expect(Array.isArray(body.messages)).toBe(true);
+  });
+
   it('returns 403 when peerNodeId is not an accepted friend', async () => {
     const res = await makeHandler()(
       jsonReq('/api/conversations', 'POST', { peerNodeId: 'unknown-node' }),
@@ -916,6 +933,15 @@ describe('POST /api/conversations — group', () => {
   it('returns 400 when neither name nor peerNodeId is provided', async () => {
     const res = await makeHandler()(jsonReq('/api/conversations', 'POST', {}));
     expect(res.status).toBe(400);
+    expect(await res.text()).toBe('either peerNodeId or name is required');
+  });
+
+  it('response includes messages array', async () => {
+    const res = await makeHandler()(
+      jsonReq('/api/conversations', 'POST', { name: 'With Messages' }),
+    );
+    const body = await res.json();
+    expect(Array.isArray(body.messages)).toBe(true);
   });
 });
 

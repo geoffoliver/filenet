@@ -667,4 +667,8 @@ describe('ChatMessageSchema', () => {
   it('rejects empty body', () => {
     expect(ChatMessageSchema.safeParse({ ...valid, body: '' }).success).toBe(false);
   });
+
+  it('rejects whitespace-only body', () => {
+    expect(ChatMessageSchema.safeParse({ ...valid, body: '   ' }).success).toBe(false);
+  });
 });
