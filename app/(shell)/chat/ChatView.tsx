@@ -197,6 +197,13 @@ export default function ChatView() {
     }
   }
 
+  function handleConvKeyDown(e: React.KeyboardEvent<HTMLDivElement>, convId: string) {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      selectConv(convId);
+    }
+  }
+
   function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
@@ -238,8 +245,11 @@ export default function ChatView() {
               {dmConvs.map((conv) => (
                 <div
                   key={conv.id}
+                  role="button"
+                  tabIndex={0}
                   className={`${styles.convItem} ${conv.id === activeConvId ? styles.convItemActive : ''}`}
                   onClick={() => selectConv(conv.id)}
+                  onKeyDown={(e) => handleConvKeyDown(e, conv.id)}
                 >
                   <span className={styles.convName}>{convLabel(conv, localNodeId)}</span>
                   <span className={styles.convPreview}>{lastPreview(conv)}</span>
@@ -253,8 +263,11 @@ export default function ChatView() {
               {groupConvs.map((conv) => (
                 <div
                   key={conv.id}
+                  role="button"
+                  tabIndex={0}
                   className={`${styles.convItem} ${conv.id === activeConvId ? styles.convItemActive : ''}`}
                   onClick={() => selectConv(conv.id)}
+                  onKeyDown={(e) => handleConvKeyDown(e, conv.id)}
                 >
                   <span className={styles.convName}>{convLabel(conv, localNodeId)}</span>
                   <span className={styles.convPreview}>{lastPreview(conv)}</span>

@@ -141,6 +141,53 @@ describe('handleChatMessage — DM', () => {
     expect(msg).toBeNull();
   });
 
+  test('bumps conversation updatedAt when a new message arrives', async () => {
+    const convId = dmConversationId(NODE_A, NODE_B);
+    await prisma.conversation.create({ data: { id: convId, type: 'DM' } });
+    const before = await prisma.conversation.findUnique({ where: { id: convId } });
+
+    await new Promise((r) => setTimeout(r, 20));
+
+    await handleChatMessage(
+      {
+        type: 'chat-message',
+        messageId: randomUUID(),
+        conversationId: convId,
+        fromNodeId: NODE_A,
+        body: 'Bump',
+        sentAt: Date.now(),
+      },
+      NODE_A,
+      prisma,
+      NODE_B,
+    );
+
+    const after = await prisma.conversation.findUnique({ where: { id: convId } });
+    expect(after!.updatedAt.getTime()).toBeGreaterThan(before!.updatedAt.getTime());
+  });
+
+  test('ignores conversationName on DM conversations', async () => {
+    const convId = dmConversationId(NODE_A, NODE_B);
+
+    await handleChatMessage(
+      {
+        type: 'chat-message',
+        messageId: randomUUID(),
+        conversationId: convId,
+        fromNodeId: NODE_A,
+        body: 'Hello',
+        sentAt: Date.now(),
+        conversationName: 'Should Be Ignored',
+      },
+      NODE_A,
+      prisma,
+      NODE_B,
+    );
+
+    const conv = await prisma.conversation.findUnique({ where: { id: convId } });
+    expect(conv!.name).toBeNull();
+  });
+
   test('deduplicates — second upsert with same messageId is a no-op', async () => {
     const msgId = randomUUID();
     const convId = dmConversationId(NODE_A, NODE_B);

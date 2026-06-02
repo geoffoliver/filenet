@@ -31,9 +31,12 @@ export async function handleChatMessage(
     create: {
       id: conversationId,
       type: isGroup ? 'GROUP' : 'DM',
-      name: msg.conversationName ?? null,
+      name: isGroup ? (msg.conversationName ?? null) : null,
     },
-    update: msg.conversationName ? { name: msg.conversationName } : {},
+    update: {
+      updatedAt: new Date(),
+      ...(isGroup && msg.conversationName ? { name: msg.conversationName } : {}),
+    },
   });
 
   // Always use the authenticated senderNodeId — never trust the self-reported fromNodeId.
