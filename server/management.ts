@@ -413,15 +413,18 @@ export function createManagementFetch(deps: ManagementDeps): (req: Request) => P
               return new Response('Invalid before date', { status: 400 });
             }
           }
+          // Fetch newest N descending, then reverse so the client receives
+          // chronological order. This ensures `limit` returns the most recent
+          // messages rather than the oldest ones.
           const messages = await prisma.message.findMany({
             where: {
               conversationId: convId,
               ...(beforeDate ? { sentAt: { lt: beforeDate } } : {}),
             },
-            orderBy: { sentAt: 'asc' },
+            orderBy: { sentAt: 'desc' },
             take: limit,
           });
-          return Response.json(messages);
+          return Response.json(messages.reverse());
         }
 
         // POST /api/conversations/:id/messages

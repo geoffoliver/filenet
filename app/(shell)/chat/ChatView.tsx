@@ -20,10 +20,11 @@ function formatTime(iso: string): string {
   return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
-function convLabel(conv: Conversation): string {
+function convLabel(conv: Conversation, localNodeId?: string | null): string {
   if (conv.type === 'GROUP') return conv.name ?? 'Unnamed group';
-  // DM: show the peer's node id (the half that isn't ours)
-  return conv.id.slice(3); // strip "dm:" prefix for display
+  // DM: show only the peer's node id, not both participants
+  const parts = conv.id.slice(3).split(':');
+  return parts.find((n) => n !== localNodeId) ?? parts[0];
 }
 
 function lastPreview(conv: Conversation): string {
@@ -240,7 +241,7 @@ export default function ChatView() {
                   className={`${styles.convItem} ${conv.id === activeConvId ? styles.convItemActive : ''}`}
                   onClick={() => selectConv(conv.id)}
                 >
-                  <span className={styles.convName}>{convLabel(conv)}</span>
+                  <span className={styles.convName}>{convLabel(conv, localNodeId)}</span>
                   <span className={styles.convPreview}>{lastPreview(conv)}</span>
                 </div>
               ))}
@@ -255,7 +256,7 @@ export default function ChatView() {
                   className={`${styles.convItem} ${conv.id === activeConvId ? styles.convItemActive : ''}`}
                   onClick={() => selectConv(conv.id)}
                 >
-                  <span className={styles.convName}>{convLabel(conv)}</span>
+                  <span className={styles.convName}>{convLabel(conv, localNodeId)}</span>
                   <span className={styles.convPreview}>{lastPreview(conv)}</span>
                 </div>
               ))}
@@ -274,7 +275,7 @@ export default function ChatView() {
         {activeConv ? (
           <>
             <div className={styles.mainHeader}>
-              <span className={styles.mainTitle}>{convLabel(activeConv)}</span>
+              <span className={styles.mainTitle}>{convLabel(activeConv, localNodeId)}</span>
               <button className={styles.deleteBtn} onClick={handleDelete}>
                 Delete
               </button>

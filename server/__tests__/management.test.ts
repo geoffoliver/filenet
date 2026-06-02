@@ -984,6 +984,27 @@ describe('GET /api/conversations/:id/messages', () => {
     expect(body).toHaveLength(3);
   });
 
+  it('returns the newest messages when count exceeds limit', async () => {
+    await prisma.conversation.create({
+      data: { id: 'group:newest', type: 'GROUP', name: 'Newest' },
+    });
+    await prisma.message.createMany({
+      data: Array.from({ length: 10 }, (_, i) => ({
+        id: randomUUID(),
+        conversationId: 'group:newest',
+        fromNodeId: 'n',
+        body: `msg${i}`,
+        sentAt: new Date(2025, 0, i + 1),
+      })),
+    });
+    const res = await makeHandler()(req('/api/conversations/group:newest/messages?limit=3'));
+    const body = await res.json();
+    // Should return the 3 newest in chronological order: msg7, msg8, msg9
+    expect(body).toHaveLength(3);
+    expect(body[0].body).toBe('msg7');
+    expect(body[2].body).toBe('msg9');
+  });
+
   it('caps limit at 200 — returns exactly 200 messages even when more exist', async () => {
     await prisma.conversation.create({ data: { id: 'group:cap', type: 'GROUP', name: 'Cap' } });
     await prisma.message.createMany({

@@ -127,7 +127,10 @@ export const ChatMessageSchema = z.object({
   fromNodeId: z.string().max(200).min(1),
   body: z.string().min(1).max(10_000),
   sentAt: z.number().int().positive(),
-  conversationName: z.string().max(200).optional(),
+  conversationName: z.preprocess(
+    (v) => (typeof v === 'string' ? v.trim() || undefined : v),
+    z.string().min(1).max(200).optional(),
+  ),
 });
 
 export const FriendResponseMessageSchema = z.object({
