@@ -161,4 +161,69 @@ describe('runPostDownloadScripts', () => {
       runPostDownloadScripts(prisma, '/some/file.mp3', testStats),
     ).resolves.toBeUndefined();
   });
+
+  it('threads a returned BunFile to subsequent scripts as the file argument', async () => {
+    const ts = Date.now();
+    const scriptA = join(REAL_TMPDIR, `test-script-thread-a-${ts}.ts`);
+    const scriptB = join(REAL_TMPDIR, `test-script-thread-b-${ts}.ts`);
+    const movedPath = join(REAL_TMPDIR, `test-moved-${ts}.txt`);
+
+    writeFileSync(movedPath, 'moved content');
+    writeFileSync(
+      scriptA,
+      `export default function() { return Bun.file(${JSON.stringify(movedPath)}); }`,
+    );
+    writeFileSync(
+      scriptB,
+      `export default function({ file }) { globalThis.__threadedFilePath = file.name; }`,
+    );
+
+    await prisma.postDownloadScript.createMany({
+      data: [
+        { path: scriptA, order: 0 },
+        { path: scriptB, order: 1 },
+      ],
+    });
+
+    (globalThis as Record<string, unknown>).__threadedFilePath = null;
+    await runPostDownloadScripts(prisma, '/some/original.mp3', testStats);
+    expect((globalThis as Record<string, unknown>).__threadedFilePath).toBe(movedPath);
+
+    try {
+      unlinkSync(scriptA);
+    } catch {}
+    try {
+      unlinkSync(scriptB);
+    } catch {}
+    try {
+      unlinkSync(movedPath);
+    } catch {}
+  });
+
+  it('stops the chain when a script returns false', async () => {
+    const ts = Date.now();
+    const scriptA = join(REAL_TMPDIR, `test-script-false-a-${ts}.ts`);
+    const scriptB = join(REAL_TMPDIR, `test-script-false-b-${ts}.ts`);
+
+    writeFileSync(scriptA, `export default function() { return false; }`);
+    writeFileSync(scriptB, `export default function() { globalThis.__ranAfterFalse = true; }`);
+
+    await prisma.postDownloadScript.createMany({
+      data: [
+        { path: scriptA, order: 0 },
+        { path: scriptB, order: 1 },
+      ],
+    });
+
+    (globalThis as Record<string, unknown>).__ranAfterFalse = false;
+    await runPostDownloadScripts(prisma, '/some/file.mp3', testStats);
+    expect((globalThis as Record<string, unknown>).__ranAfterFalse).toBe(false);
+
+    try {
+      unlinkSync(scriptA);
+    } catch {}
+    try {
+      unlinkSync(scriptB);
+    } catch {}
+  });
 });

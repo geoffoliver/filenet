@@ -367,7 +367,7 @@ function ScriptsSection() {
         </p>
         <pre
           className={styles.codeHint}
-        >{`export default async function({ file, stats }) {\n  // file: BunFile — the downloaded file\n  // stats: TransferStats — download metadata\n}`}</pre>
+        >{`export default async function({ file, stats }) {\n  // file: BunFile — the downloaded file\n  // stats: TransferStats — download metadata\n  // return a BunFile to update the file reference for subsequent scripts\n  // return false to stop subsequent scripts from running\n}`}</pre>
 
         {scripts.length > 0 && (
           <ul className={styles.folderList}>
