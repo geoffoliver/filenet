@@ -175,6 +175,29 @@
     gap-2;
 }
 
+/* ── Script list ──────────────────────────────────────────────────────────── */
+
+.scriptActions {
+  @apply flex
+    items-center
+    gap-1
+    flex-shrink-0;
+}
+
+.codeHint {
+  @apply text-xs
+    font-mono
+    bg-[var(--bg-elevated)]
+    border
+    border-[var(--border)]
+    rounded-[var(--radius-sm)]
+    px-3
+    py-2
+    text-[var(--text-muted)]
+    whitespace-pre
+    overflow-x-auto;
+}
+
 /* ── Rescan interval ──────────────────────────────────────────────────────── */
 
 .intervalRow {

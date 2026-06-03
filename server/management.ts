@@ -4,8 +4,10 @@ import type { PrismaClient, SharedFile } from '@prisma/client';
 
 import {
   AddFriendBodySchema,
+  AddScriptBodySchema,
   FriendActionBodySchema,
   PatchSettingsBodySchema,
+  ReorderScriptBodySchema,
   SearchQuerySchema,
 } from './schemas';
 import { ConflictError, NotFoundError } from './errors';
@@ -342,6 +344,75 @@ export function createManagementFetch(deps: ManagementDeps): (req: Request) => P
             });
           }
           await prisma.download.delete({ where: { id } });
+          return new Response(null, { status: 204 });
+        }
+      }
+
+      if (url.pathname === '/api/scripts') {
+        if (req.method === 'GET') {
+          const scripts = await prisma.postDownloadScript.findMany({ orderBy: { order: 'asc' } });
+          return Response.json(scripts);
+        }
+
+        if (req.method === 'POST') {
+          const result = AddScriptBodySchema.safeParse(await req.json());
+          if (!result.success) {
+            return new Response(result.error.issues[0].message, { status: 400 });
+          }
+          const { path } = result.data;
+          const existing = await prisma.postDownloadScript.findUnique({ where: { path } });
+          if (existing) return new Response('Script already exists', { status: 409 });
+          const agg = await prisma.postDownloadScript.aggregate({ _max: { order: true } });
+          const nextOrder = (agg._max.order ?? -1) + 1;
+          const script = await prisma.postDownloadScript.create({
+            data: { path, order: nextOrder },
+          });
+          return Response.json(script, { status: 201 });
+        }
+      }
+
+      if (url.pathname.startsWith('/api/scripts/')) {
+        const id = url.pathname.slice('/api/scripts/'.length);
+        if (!id || id.includes('/')) {
+          return new Response('Invalid script id', { status: 400 });
+        }
+
+        if (req.method === 'PATCH') {
+          const result = ReorderScriptBodySchema.safeParse(await req.json());
+          if (!result.success) {
+            return new Response(result.error.issues[0].message, { status: 400 });
+          }
+          const script = await prisma.postDownloadScript.findUnique({ where: { id } });
+          if (!script) return new Response('Script not found', { status: 404 });
+
+          const neighbor = await prisma.postDownloadScript.findFirst({
+            where:
+              result.data.direction === 'up'
+                ? { order: { lt: script.order } }
+                : { order: { gt: script.order } },
+            orderBy: { order: result.data.direction === 'up' ? 'desc' : 'asc' },
+          });
+          if (!neighbor) return new Response(null, { status: 204 });
+
+          await prisma.$transaction([
+            prisma.postDownloadScript.update({
+              where: { id: script.id },
+              data: { order: neighbor.order },
+            }),
+            prisma.postDownloadScript.update({
+              where: { id: neighbor.id },
+              data: { order: script.order },
+            }),
+          ]);
+
+          const updated = await prisma.postDownloadScript.findMany({ orderBy: { order: 'asc' } });
+          return Response.json(updated);
+        }
+
+        if (req.method === 'DELETE') {
+          const script = await prisma.postDownloadScript.findUnique({ where: { id } });
+          if (!script) return new Response('Script not found', { status: 404 });
+          await prisma.postDownloadScript.delete({ where: { id } });
           return new Response(null, { status: 204 });
         }
       }

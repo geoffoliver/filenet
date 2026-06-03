@@ -2,8 +2,16 @@
 
 import { useEffect, useRef, useState } from 'react';
 
-import { getSettings, patchSettings, triggerRescan } from '../../lib/api';
-import type { Settings } from '../../lib/api';
+import type { PostDownloadScript, Settings } from '../../lib/api';
+import {
+  addScript,
+  getScripts,
+  getSettings,
+  patchSettings,
+  removeScript,
+  reorderScript,
+  triggerRescan,
+} from '../../lib/api';
 
 import styles from './settings.module.css';
 
@@ -299,6 +307,126 @@ function FilesSection({ initial }: { initial: Settings }) {
   );
 }
 
+// ── Scripts section ───────────────────────────────────────────────────────────
+
+function ScriptsSection() {
+  const [scripts, setScripts] = useState<PostDownloadScript[]>([]);
+  const [newPath, setNewPath] = useState('');
+  const [adding, setAdding] = useState(false);
+  const [error, setError] = useState('');
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    getScripts()
+      .then(setScripts)
+      .catch(() => {});
+  }, []);
+
+  async function handleAdd(e: React.FormEvent) {
+    e.preventDefault();
+    const path = newPath.trim();
+    if (!path) return;
+    setAdding(true);
+    setError('');
+    try {
+      const script = await addScript(path);
+      setScripts((prev) => [...prev, script]);
+      setNewPath('');
+      inputRef.current?.focus();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to add script');
+    } finally {
+      setAdding(false);
+    }
+  }
+
+  async function handleReorder(id: string, direction: 'up' | 'down') {
+    try {
+      const updated = await reorderScript(id, direction);
+      if (updated.length > 0) setScripts(updated);
+    } catch {
+      // ignore transient errors
+    }
+  }
+
+  async function handleRemove(id: string) {
+    try {
+      await removeScript(id);
+      setScripts((prev) => prev.filter((s) => s.id !== id));
+    } catch {
+      // ignore transient errors
+    }
+  }
+
+  return (
+    <Section title="Post-download scripts">
+      <div className={styles.form}>
+        <p className={styles.hint}>
+          Scripts run in order after each download completes. Each script must be a <code>.ts</code>{' '}
+          or <code>.js</code> file with a default-exported async function:
+        </p>
+        <pre
+          className={styles.codeHint}
+        >{`export default async function({ file, stats }) {\n  // file: BunFile — the downloaded file\n  // stats: TransferStats — download metadata\n}`}</pre>
+
+        {scripts.length > 0 && (
+          <ul className={styles.folderList}>
+            {scripts.map((s, i) => (
+              <li key={s.id} className={styles.folderItem}>
+                <span className={styles.folderPath}>{s.path}</span>
+                <div className={styles.scriptActions}>
+                  <button
+                    type="button"
+                    className="btn btn-ghost"
+                    onClick={() => handleReorder(s.id, 'up')}
+                    disabled={i === 0}
+                    aria-label="Move up"
+                  >
+                    ↑
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-ghost"
+                    onClick={() => handleReorder(s.id, 'down')}
+                    disabled={i === scripts.length - 1}
+                    aria-label="Move down"
+                  >
+                    ↓
+                  </button>
+                  <button
+                    type="button"
+                    className={`btn btn-ghost ${styles.removeBtn}`}
+                    onClick={() => handleRemove(s.id)}
+                    aria-label={`Remove ${s.path}`}
+                  >
+                    Remove
+                  </button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+
+        <form onSubmit={handleAdd} className={styles.addFolderRow}>
+          <input
+            ref={inputRef}
+            className="input"
+            type="text"
+            value={newPath}
+            onChange={(e) => setNewPath(e.target.value)}
+            placeholder="/path/to/script.ts"
+            disabled={adding}
+          />
+          <button type="submit" className="btn btn-ghost" disabled={adding || !newPath.trim()}>
+            {adding ? 'Adding…' : 'Add'}
+          </button>
+        </form>
+        {error && <p className={styles.error}>{error}</p>}
+      </div>
+    </Section>
+  );
+}
+
 // ── Maintenance section ───────────────────────────────────────────────────────
 
 function MaintenanceSection() {
@@ -373,6 +501,7 @@ export default function SettingsView() {
       <ProfileSection initial={settings} />
       <PrivacySection initial={settings} />
       <FilesSection initial={settings} />
+      <ScriptsSection />
       <MaintenanceSection />
     </div>
   );

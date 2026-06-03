@@ -9,6 +9,7 @@ import type { PrismaClient } from '@prisma/client';
 import { CHUNK_SIZE, requestChunk } from './transfer-protocol';
 import { getConnectedPeer } from './connections';
 import { hashFile } from './indexer';
+import { runPostDownloadScripts } from './scripts';
 
 export type RequestChunkFn = (
   nodeId: string,
@@ -72,6 +73,7 @@ type ActiveDownload = {
   paused: boolean;
   stopped: boolean;
   speedSamples: SpeedSample[];
+  startedAt: Date;
 };
 
 const activeDownloads = new Map<string, ActiveDownload>();
@@ -305,18 +307,32 @@ async function finalizeDownload(prisma: PrismaClient, dl: ActiveDownload): Promi
     }
   }
 
+  const completedAt = new Date();
   await prisma.download.update({
     where: { id: dl.id },
     data: {
       state: 'COMPLETED',
       finalPath,
-      completedAt: new Date(),
+      completedAt,
       bytesReceived: dl.size,
       tmpPath: null,
     },
   });
   activeDownloads.delete(dl.id);
   activeDownloadFolders.delete(dl.id);
+
+  runPostDownloadScripts(prisma, finalPath, {
+    downloadId: dl.id,
+    filename: record.filename,
+    sha256: dl.sha256,
+    size: dl.size,
+    mimeType: record.mimeType,
+    durationMs: completedAt.getTime() - dl.startedAt.getTime(),
+    bytesReceived: dl.size,
+    maxSources: dl.sources.length,
+    startedAt: dl.startedAt,
+    completedAt,
+  }).catch((err: unknown) => console.error('Post-download scripts error:', err));
 }
 
 async function failDownload(
@@ -414,6 +430,7 @@ export async function startDownload(
     paused: false,
     stopped: false,
     speedSamples: [],
+    startedAt: record.createdAt,
   };
 
   activeDownloads.set(record.id, dl);
@@ -490,6 +507,7 @@ export async function resumeDownload(
       paused: false,
       stopped: false,
       speedSamples: [],
+      startedAt: record.createdAt,
     };
     activeDownloads.set(id, dl);
   }

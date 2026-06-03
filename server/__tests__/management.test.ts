@@ -55,6 +55,7 @@ beforeEach(async () => {
   await prisma.sharedFile.deleteMany();
   await prisma.friend.deleteMany();
   await prisma.settings.deleteMany();
+  await prisma.postDownloadScript.deleteMany();
 });
 
 // ---------------------------------------------------------------------------
@@ -1246,6 +1247,142 @@ describe('DELETE /api/conversations/:id', () => {
   it('returns 400 for invalid conversation id containing slash', async () => {
     const res = await makeHandler()(req('/api/conversations/foo/bar', { method: 'DELETE' }));
     expect(res.status).toBe(400);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// POST/GET/PATCH/DELETE /api/scripts
+// ---------------------------------------------------------------------------
+
+describe('scripts API', () => {
+  beforeEach(async () => {
+    await prisma.postDownloadScript.deleteMany();
+  });
+
+  describe('GET /api/scripts', () => {
+    it('returns empty array when no scripts', async () => {
+      const res = await makeHandler()(req('/api/scripts'));
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual([]);
+    });
+
+    it('returns scripts ordered by order field', async () => {
+      await prisma.postDownloadScript.createMany({
+        data: [
+          { path: '/b.ts', order: 1 },
+          { path: '/a.ts', order: 0 },
+        ],
+      });
+      const res = await makeHandler()(req('/api/scripts'));
+      const body = await res.json();
+      expect(body[0].path).toBe('/a.ts');
+      expect(body[1].path).toBe('/b.ts');
+    });
+  });
+
+  describe('POST /api/scripts', () => {
+    it('creates a new script and returns 201', async () => {
+      const res = await makeHandler()(jsonReq('/api/scripts', 'POST', { path: '/my/script.ts' }));
+      expect(res.status).toBe(201);
+      const body = await res.json();
+      expect(body.path).toBe('/my/script.ts');
+      expect(typeof body.id).toBe('string');
+      expect(typeof body.order).toBe('number');
+    });
+
+    it('assigns incrementing order values', async () => {
+      await makeHandler()(jsonReq('/api/scripts', 'POST', { path: '/first.ts' }));
+      const res = await makeHandler()(jsonReq('/api/scripts', 'POST', { path: '/second.ts' }));
+      const body = await res.json();
+      const first = await prisma.postDownloadScript.findUnique({ where: { path: '/first.ts' } });
+      expect(body.order).toBe((first?.order ?? -1) + 1);
+    });
+
+    it('returns 409 when path already exists', async () => {
+      await prisma.postDownloadScript.create({ data: { path: '/dup.ts', order: 0 } });
+      const res = await makeHandler()(jsonReq('/api/scripts', 'POST', { path: '/dup.ts' }));
+      expect(res.status).toBe(409);
+    });
+
+    it('returns 400 for missing path', async () => {
+      const res = await makeHandler()(jsonReq('/api/scripts', 'POST', {}));
+      expect(res.status).toBe(400);
+    });
+
+    it('returns 400 for path longer than 1000 characters', async () => {
+      const res = await makeHandler()(jsonReq('/api/scripts', 'POST', { path: 'x'.repeat(1001) }));
+      expect(res.status).toBe(400);
+    });
+  });
+
+  describe('PATCH /api/scripts/:id (reorder)', () => {
+    it('swaps orders when moving down', async () => {
+      const [a, _b] = await Promise.all([
+        prisma.postDownloadScript.create({ data: { path: '/a.ts', order: 0 } }),
+        prisma.postDownloadScript.create({ data: { path: '/b.ts', order: 1 } }),
+      ]);
+      const res = await makeHandler()(
+        jsonReq(`/api/scripts/${a.id}`, 'PATCH', { direction: 'down' }),
+      );
+      expect(res.status).toBe(200);
+      const updated = await res.json();
+      expect(updated[0].path).toBe('/b.ts');
+      expect(updated[1].path).toBe('/a.ts');
+    });
+
+    it('swaps orders when moving up', async () => {
+      const [_a, b] = await Promise.all([
+        prisma.postDownloadScript.create({ data: { path: '/a.ts', order: 0 } }),
+        prisma.postDownloadScript.create({ data: { path: '/b.ts', order: 1 } }),
+      ]);
+      const res = await makeHandler()(
+        jsonReq(`/api/scripts/${b.id}`, 'PATCH', { direction: 'up' }),
+      );
+      expect(res.status).toBe(200);
+      const updated = await res.json();
+      expect(updated[0].path).toBe('/b.ts');
+      expect(updated[1].path).toBe('/a.ts');
+    });
+
+    it('returns 204 when already at the boundary', async () => {
+      const s = await prisma.postDownloadScript.create({ data: { path: '/only.ts', order: 0 } });
+      const res = await makeHandler()(
+        jsonReq(`/api/scripts/${s.id}`, 'PATCH', { direction: 'up' }),
+      );
+      expect(res.status).toBe(204);
+    });
+
+    it('returns 404 for unknown script id', async () => {
+      const res = await makeHandler()(jsonReq('/api/scripts/nope', 'PATCH', { direction: 'up' }));
+      expect(res.status).toBe(404);
+    });
+
+    it('returns 400 for invalid direction', async () => {
+      const s = await prisma.postDownloadScript.create({ data: { path: '/x.ts', order: 0 } });
+      const res = await makeHandler()(
+        jsonReq(`/api/scripts/${s.id}`, 'PATCH', { direction: 'sideways' }),
+      );
+      expect(res.status).toBe(400);
+    });
+  });
+
+  describe('DELETE /api/scripts/:id', () => {
+    it('deletes the script and returns 204', async () => {
+      const s = await prisma.postDownloadScript.create({ data: { path: '/del.ts', order: 0 } });
+      const res = await makeHandler()(req(`/api/scripts/${s.id}`, { method: 'DELETE' }));
+      expect(res.status).toBe(204);
+      expect(await prisma.postDownloadScript.findUnique({ where: { id: s.id } })).toBeNull();
+    });
+
+    it('returns 404 for unknown script id', async () => {
+      const res = await makeHandler()(req('/api/scripts/nope', { method: 'DELETE' }));
+      expect(res.status).toBe(404);
+    });
+
+    it('returns 400 for id containing slash', async () => {
+      const res = await makeHandler()(req('/api/scripts/a/b', { method: 'DELETE' }));
+      expect(res.status).toBe(400);
+    });
   });
 });
 
