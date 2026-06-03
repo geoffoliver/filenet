@@ -360,14 +360,18 @@ export function createManagementFetch(deps: ManagementDeps): (req: Request) => P
             return new Response(result.error.issues[0].message, { status: 400 });
           }
           const { path } = result.data;
-          const existing = await prisma.postDownloadScript.findUnique({ where: { path } });
-          if (existing) return new Response('Script already exists', { status: 409 });
-          const agg = await prisma.postDownloadScript.aggregate({ _max: { order: true } });
-          const nextOrder = (agg._max.order ?? -1) + 1;
-          const script = await prisma.postDownloadScript.create({
-            data: { path, order: nextOrder },
-          });
-          return Response.json(script, { status: 201 });
+          try {
+            const agg = await prisma.postDownloadScript.aggregate({ _max: { order: true } });
+            const nextOrder = (agg._max.order ?? -1) + 1;
+            const script = await prisma.postDownloadScript.create({
+              data: { path, order: nextOrder },
+            });
+            return Response.json(script, { status: 201 });
+          } catch (err) {
+            if (err instanceof Error && 'code' in err && (err as { code: string }).code === 'P2002')
+              return new Response('Script already exists', { status: 409 });
+            throw err;
+          }
         }
       }
 

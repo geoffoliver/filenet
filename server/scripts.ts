@@ -33,7 +33,14 @@ export async function runPostDownloadScripts(
       break;
     }
     if (result instanceof Blob) {
-      file = result as BunFile;
+      const name = (result as BunFile).name;
+      if (typeof name === 'string' && name) {
+        file = result as BunFile;
+      } else {
+        console.warn(
+          `Post-download script ${script.path}: returned a Blob without a name, ignoring`,
+        );
+      }
     }
   }
 }
