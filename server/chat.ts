@@ -28,35 +28,34 @@ export async function handleChatMessage(
   const sentAt = new Date(msg.sentAt);
   if (isNaN(sentAt.getTime())) return;
 
-  // Deduplicate before any writes — a replayed messageId must not create or bump a Conversation.
-  const existing = await prisma.message.findUnique({ where: { id: msg.messageId } });
-  if (existing) return;
+  // Wrap the dedup check and both writes in a transaction so no concurrent delivery can
+  // slip between the findUnique and the message write and incorrectly bump the conversation.
+  await prisma.$transaction(async (tx) => {
+    const existing = await tx.message.findUnique({ where: { id: msg.messageId } });
+    if (existing) return;
 
-  await prisma.conversation.upsert({
-    where: { id: conversationId },
-    create: {
-      id: conversationId,
-      type: isGroup ? 'GROUP' : 'DM',
-      name: isGroup ? (msg.conversationName ?? null) : null,
-    },
-    update: {
-      updatedAt: new Date(),
-      ...(isGroup && msg.conversationName ? { name: msg.conversationName } : {}),
-    },
-  });
+    await tx.conversation.upsert({
+      where: { id: conversationId },
+      create: {
+        id: conversationId,
+        type: isGroup ? 'GROUP' : 'DM',
+        name: isGroup ? (msg.conversationName ?? null) : null,
+      },
+      update: {
+        updatedAt: new Date(),
+        ...(isGroup && msg.conversationName ? { name: msg.conversationName } : {}),
+      },
+    });
 
-  // Always use the authenticated senderNodeId — never trust the self-reported fromNodeId.
-  // upsert (not create) so concurrent delivery of the same message doesn't throw a unique
-  // constraint error — the update: {} no-op makes the second writer harmless.
-  await prisma.message.upsert({
-    where: { id: msg.messageId },
-    create: {
-      id: msg.messageId,
-      conversationId,
-      fromNodeId: senderNodeId,
-      body: msg.body,
-      sentAt,
-    },
-    update: {},
+    // Always use the authenticated senderNodeId — never trust the self-reported fromNodeId.
+    await tx.message.create({
+      data: {
+        id: msg.messageId,
+        conversationId,
+        fromNodeId: senderNodeId,
+        body: msg.body,
+        sentAt,
+      },
+    });
   });
 }
