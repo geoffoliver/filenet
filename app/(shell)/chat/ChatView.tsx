@@ -148,6 +148,7 @@ export default function ChatView() {
     try {
       const now = Date.now();
       const fetchFriends = now - lastFriendsFetchRef.current >= FRIENDS_POLL_MS;
+      if (fetchFriends) lastFriendsFetchRef.current = now; // stamp before request so failures still throttle
       const [convs, friends] = await Promise.all([
         getConversations(),
         fetchFriends ? getFriends().catch(() => null) : Promise.resolve(null),
@@ -155,7 +156,6 @@ export default function ChatView() {
       if (!mountedRef.current) return;
       setConversations(convs);
       if (friends !== null) {
-        lastFriendsFetchRef.current = now;
         setFriendsByNodeId(
           new Map(friends.filter((f) => f.nodeId).map((f) => [f.nodeId as string, f])),
         );
@@ -179,19 +179,15 @@ export default function ChatView() {
   useEffect(() => {
     mountedRef.current = true;
 
-    async function runPoll() {
-      while (mountedRef.current) {
-        await loadConversations();
-        const convId = activeConvIdRef.current;
-        if (convId) await loadMessages(convId);
-        if (!mountedRef.current) break;
-        await new Promise<void>((resolve) => {
-          pollRef.current = setTimeout(resolve, POLL_MS);
-        });
-      }
+    async function tick() {
+      if (!mountedRef.current) return;
+      await loadConversations();
+      const convId = activeConvIdRef.current;
+      if (convId) await loadMessages(convId);
+      if (mountedRef.current) pollRef.current = setTimeout(tick, POLL_MS);
     }
 
-    runPoll();
+    tick();
     return () => {
       mountedRef.current = false;
       if (pollRef.current !== null) clearTimeout(pollRef.current);

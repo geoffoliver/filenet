@@ -78,17 +78,13 @@ export default function FriendsPage() {
   useEffect(() => {
     mountedRef.current = true;
 
-    async function runPoll() {
+    async function tick() {
+      if (!mountedRef.current) return;
       await loadFriends();
-      while (mountedRef.current) {
-        await new Promise<void>((resolve) => {
-          pollRef.current = setTimeout(resolve, POLL_MS);
-        });
-        if (mountedRef.current) await loadFriends();
-      }
+      if (mountedRef.current) pollRef.current = setTimeout(tick, POLL_MS);
     }
 
-    runPoll();
+    tick();
     return () => {
       mountedRef.current = false;
       if (pollRef.current !== null) clearTimeout(pollRef.current);
