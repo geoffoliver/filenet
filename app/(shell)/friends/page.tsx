@@ -324,7 +324,7 @@ export default function FriendsPage() {
               <li key={f.id} className={styles.card}>
                 <div className={styles.avatarWrapper}>
                   <div className={styles.avatar}>{initials(f.name)}</div>
-                  {f.online && <span className={styles.onlineDot} aria-label="Online" />}
+                  {f.online && <span className={styles.onlineDot} role="img" aria-label="Online" />}
                 </div>
                 <div className={styles.info}>
                   <div className={styles.name}>{f.name}</div>

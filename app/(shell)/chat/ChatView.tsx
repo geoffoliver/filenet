@@ -15,6 +15,7 @@ import {
 import styles from './chat.module.css';
 
 const POLL_MS = 500;
+const FRIENDS_POLL_MS = 5_000;
 
 function formatTime(iso: string): string {
   const d = new Date(iso);
@@ -133,6 +134,7 @@ export default function ChatView() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const activeConvIdRef = useRef<string | null>(null);
   const prevMsgCountRef = useRef(0);
+  const lastFriendsFetchRef = useRef(0);
 
   useEffect(() => {
     activeConvIdRef.current = activeConvId;
@@ -144,12 +146,20 @@ export default function ChatView() {
 
   const loadConversations = useCallback(async () => {
     try {
-      const [convs, friends] = await Promise.all([getConversations(), getFriends()]);
+      const now = Date.now();
+      const fetchFriends = now - lastFriendsFetchRef.current >= FRIENDS_POLL_MS;
+      const [convs, friends] = await Promise.all([
+        getConversations(),
+        fetchFriends ? getFriends() : Promise.resolve(null),
+      ]);
       if (!mountedRef.current) return;
       setConversations(convs);
-      setFriendsByNodeId(
-        new Map(friends.filter((f) => f.nodeId).map((f) => [f.nodeId as string, f])),
-      );
+      if (friends !== null) {
+        lastFriendsFetchRef.current = now;
+        setFriendsByNodeId(
+          new Map(friends.filter((f) => f.nodeId).map((f) => [f.nodeId as string, f])),
+        );
+      }
     } catch {
       // silently retry next poll
     }
@@ -249,10 +259,10 @@ export default function ChatView() {
 
   function isDmOnline(conv: Conversation): boolean {
     if (conv.type !== 'DM' || !localNodeId) return false;
-    const peerNodeId = conv.id
-      .slice(3)
-      .split(':')
-      .find((n) => n !== localNodeId);
+    if (!conv.id.startsWith('dm:')) return false;
+    const parts = conv.id.slice(3).split(':');
+    if (parts.length !== 2 || !parts.includes(localNodeId)) return false;
+    const peerNodeId = parts.find((n) => n !== localNodeId);
     if (!peerNodeId) return false;
     return friendsByNodeId.get(peerNodeId)?.online ?? false;
   }
@@ -286,7 +296,9 @@ export default function ChatView() {
                 >
                   <div className={styles.convNameRow}>
                     <span className={styles.convName}>{convLabel(conv, localNodeId)}</span>
-                    {isDmOnline(conv) && <span className={styles.onlineDot} aria-label="Online" />}
+                    {isDmOnline(conv) && (
+                      <span className={styles.onlineDot} role="img" aria-label="Online" />
+                    )}
                   </div>
                   <span className={styles.convPreview}>{lastPreview(conv)}</span>
                 </div>
