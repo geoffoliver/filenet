@@ -2,11 +2,12 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-import type { Conversation, Message } from '../../lib/api';
+import type { Conversation, Friend, Message } from '../../lib/api';
 import {
   createGroupConversation,
   deleteConversation,
   getConversations,
+  getFriends,
   getMessages,
   getMyInfo,
   sendMessage,
@@ -113,6 +114,7 @@ function NewGroupModal({
 export default function ChatView() {
   const [localNodeId, setLocalNodeId] = useState<string | null>(null);
   const [conversations, setConversations] = useState<Conversation[]>([]);
+  const [friendsByNodeId, setFriendsByNodeId] = useState<Map<string, Friend>>(new Map());
   const [activeConvId, setActiveConvId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [draft, setDraft] = useState('');
@@ -142,9 +144,12 @@ export default function ChatView() {
 
   const loadConversations = useCallback(async () => {
     try {
-      const convs = await getConversations();
+      const [convs, friends] = await Promise.all([getConversations(), getFriends()]);
       if (!mountedRef.current) return;
       setConversations(convs);
+      setFriendsByNodeId(
+        new Map(friends.filter((f) => f.nodeId).map((f) => [f.nodeId as string, f])),
+      );
     } catch {
       // silently retry next poll
     }
@@ -242,6 +247,16 @@ export default function ChatView() {
     }
   }
 
+  function isDmOnline(conv: Conversation): boolean {
+    if (conv.type !== 'DM' || !localNodeId) return false;
+    const peerNodeId = conv.id
+      .slice(3)
+      .split(':')
+      .find((n) => n !== localNodeId);
+    if (!peerNodeId) return false;
+    return friendsByNodeId.get(peerNodeId)?.online ?? false;
+  }
+
   const dmConvs = conversations.filter((c) => c.type === 'DM');
   const groupConvs = conversations.filter((c) => c.type === 'GROUP');
   const activeConv = conversations.find((c) => c.id === activeConvId) ?? null;
@@ -269,7 +284,10 @@ export default function ChatView() {
                   onClick={() => selectConv(conv.id)}
                   onKeyDown={(e) => handleConvKeyDown(e, conv.id)}
                 >
-                  <span className={styles.convName}>{convLabel(conv, localNodeId)}</span>
+                  <div className={styles.convNameRow}>
+                    <span className={styles.convName}>{convLabel(conv, localNodeId)}</span>
+                    {isDmOnline(conv) && <span className={styles.onlineDot} aria-label="Online" />}
+                  </div>
                   <span className={styles.convPreview}>{lastPreview(conv)}</span>
                 </div>
               ))}

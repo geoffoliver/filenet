@@ -80,11 +80,26 @@
   @apply bg-[var(--bg-elevated)];
 }
 
+.convNameRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
 .convName {
   @apply text-sm
     font-medium
     text-[var(--text-primary)]
     truncate;
+}
+
+.onlineDot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--color-success, #22c55e);
+  flex-shrink: 0;
 }
 
 .convPreview {
