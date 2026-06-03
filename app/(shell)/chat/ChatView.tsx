@@ -2,11 +2,12 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-import type { Conversation, Message } from '../../lib/api';
+import type { Conversation, Friend, Message } from '../../lib/api';
 import {
   createGroupConversation,
   deleteConversation,
   getConversations,
+  getFriends,
   getMessages,
   getMyInfo,
   sendMessage,
@@ -14,6 +15,7 @@ import {
 import styles from './chat.module.css';
 
 const POLL_MS = 500;
+const FRIENDS_POLL_MS = 5_000;
 
 function formatTime(iso: string): string {
   const d = new Date(iso);
@@ -113,6 +115,7 @@ function NewGroupModal({
 export default function ChatView() {
   const [localNodeId, setLocalNodeId] = useState<string | null>(null);
   const [conversations, setConversations] = useState<Conversation[]>([]);
+  const [friendsByNodeId, setFriendsByNodeId] = useState<Map<string, Friend>>(new Map());
   const [activeConvId, setActiveConvId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [draft, setDraft] = useState('');
@@ -131,6 +134,7 @@ export default function ChatView() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const activeConvIdRef = useRef<string | null>(null);
   const prevMsgCountRef = useRef(0);
+  const lastFriendsFetchRef = useRef(0);
 
   useEffect(() => {
     activeConvIdRef.current = activeConvId;
@@ -142,9 +146,20 @@ export default function ChatView() {
 
   const loadConversations = useCallback(async () => {
     try {
-      const convs = await getConversations();
+      const now = Date.now();
+      const fetchFriends = now - lastFriendsFetchRef.current >= FRIENDS_POLL_MS;
+      if (fetchFriends) lastFriendsFetchRef.current = now; // stamp before request so failures still throttle
+      const [convs, friends] = await Promise.all([
+        getConversations(),
+        fetchFriends ? getFriends().catch(() => null) : Promise.resolve(null),
+      ]);
       if (!mountedRef.current) return;
       setConversations(convs);
+      if (friends !== null) {
+        setFriendsByNodeId(
+          new Map(friends.filter((f) => f.nodeId).map((f) => [f.nodeId as string, f])),
+        );
+      }
     } catch {
       // silently retry next poll
     }
@@ -164,19 +179,15 @@ export default function ChatView() {
   useEffect(() => {
     mountedRef.current = true;
 
-    async function runPoll() {
-      while (mountedRef.current) {
-        await loadConversations();
-        const convId = activeConvIdRef.current;
-        if (convId) await loadMessages(convId);
-        if (!mountedRef.current) break;
-        await new Promise<void>((resolve) => {
-          pollRef.current = setTimeout(resolve, POLL_MS);
-        });
-      }
+    async function tick() {
+      if (!mountedRef.current) return;
+      await loadConversations();
+      const convId = activeConvIdRef.current;
+      if (convId) await loadMessages(convId);
+      if (mountedRef.current) pollRef.current = setTimeout(tick, POLL_MS);
     }
 
-    runPoll();
+    tick();
     return () => {
       mountedRef.current = false;
       if (pollRef.current !== null) clearTimeout(pollRef.current);
@@ -242,6 +253,17 @@ export default function ChatView() {
     }
   }
 
+  function isDmOnline(conv: Conversation): boolean {
+    if (conv.type !== 'DM' || !localNodeId) return false;
+    if (!conv.id.startsWith('dm:')) return false;
+    const parts = conv.id.slice(3).split(':');
+    if (parts.length !== 2 || !parts.includes(localNodeId)) return false;
+    const peerNodeId = parts.find((n) => n !== localNodeId);
+    if (!peerNodeId) return false;
+    if (conv.id !== `dm:${[localNodeId, peerNodeId].sort().join(':')}`) return false;
+    return friendsByNodeId.get(peerNodeId)?.online ?? false;
+  }
+
   const dmConvs = conversations.filter((c) => c.type === 'DM');
   const groupConvs = conversations.filter((c) => c.type === 'GROUP');
   const activeConv = conversations.find((c) => c.id === activeConvId) ?? null;
@@ -269,7 +291,12 @@ export default function ChatView() {
                   onClick={() => selectConv(conv.id)}
                   onKeyDown={(e) => handleConvKeyDown(e, conv.id)}
                 >
-                  <span className={styles.convName}>{convLabel(conv, localNodeId)}</span>
+                  <div className={styles.convNameRow}>
+                    <span className={styles.convName}>{convLabel(conv, localNodeId)}</span>
+                    {isDmOnline(conv) && (
+                      <span className={styles.onlineDot} role="img" aria-label="Online" />
+                    )}
+                  </div>
                   <span className={styles.convPreview}>{lastPreview(conv)}</span>
                 </div>
               ))}

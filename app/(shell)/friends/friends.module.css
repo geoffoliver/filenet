@@ -102,6 +102,11 @@
     py-3;
 }
 
+.avatarWrapper {
+  position: relative;
+  flex-shrink: 0;
+}
+
 .avatar {
   @apply w-10
     h-10
@@ -112,8 +117,18 @@
     font-semibold
     flex
     items-center
-    justify-center
-    flex-shrink-0;
+    justify-center;
+}
+
+.onlineDot {
+  position: absolute;
+  bottom: 0;
+  right: 0;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--color-success, #22c55e);
+  border: 2px solid var(--bg-surface);
 }
 
 .info {

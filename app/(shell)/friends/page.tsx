@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import type { AddFriendParams, Friend } from '../../lib/api';
 import { acceptFriend, addFriend, getFriends, rejectFriend, removeFriend } from '../../lib/api';
@@ -15,6 +15,7 @@ type FormState = {
 };
 
 const DEFAULT_FORM: FormState = { name: '', address: '', port: '7734', password: '' };
+const POLL_MS = 5_000;
 
 function initials(name: string): string {
   return name
@@ -52,23 +53,43 @@ export default function FriendsPage() {
   const [formError, setFormError] = useState('');
   const [actionId, setActionId] = useState<string | null>(null);
   const [confirmRemoveId, setConfirmRemoveId] = useState<string | null>(null);
+  const mountedRef = useRef(true);
+  const pollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const hasLoadedRef = useRef(false);
+
+  const loadFriends = useCallback(async () => {
+    try {
+      const data = await getFriends();
+      if (!mountedRef.current) return;
+      hasLoadedRef.current = true;
+      setFriends(data);
+      setLoadError('');
+    } catch {
+      // Only surface the error on initial load failure — poll errors after
+      // first success are silent so a transient blip doesn't blank the list.
+      if (mountedRef.current && !hasLoadedRef.current) {
+        setLoadError('Could not load friends.');
+      }
+    } finally {
+      if (mountedRef.current) setLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
-    let active = true;
-    getFriends()
-      .then((data) => {
-        if (active) setFriends(data);
-      })
-      .catch(() => {
-        if (active) setLoadError('Could not load friends.');
-      })
-      .finally(() => {
-        if (active) setLoading(false);
-      });
+    mountedRef.current = true;
+
+    async function tick() {
+      if (!mountedRef.current) return;
+      await loadFriends();
+      if (mountedRef.current) pollRef.current = setTimeout(tick, POLL_MS);
+    }
+
+    tick();
     return () => {
-      active = false;
+      mountedRef.current = false;
+      if (pollRef.current !== null) clearTimeout(pollRef.current);
     };
-  }, []);
+  }, [loadFriends]);
 
   function setField(key: keyof FormState, value: string) {
     setForm((f) => ({ ...f, [key]: value }));
@@ -264,7 +285,9 @@ export default function FriendsPage() {
           <ul className={styles.list}>
             {incoming.map((f) => (
               <li key={f.id} className={styles.card}>
-                <div className={styles.avatar}>{initials(f.name)}</div>
+                <div className={styles.avatarWrapper}>
+                  <div className={styles.avatar}>{initials(f.name)}</div>
+                </div>
                 <div className={styles.info}>
                   <div className={styles.name}>{f.name}</div>
                   <div className={styles.meta}>
@@ -301,7 +324,10 @@ export default function FriendsPage() {
           <ul className={styles.list}>
             {accepted.map((f) => (
               <li key={f.id} className={styles.card}>
-                <div className={styles.avatar}>{initials(f.name)}</div>
+                <div className={styles.avatarWrapper}>
+                  <div className={styles.avatar}>{initials(f.name)}</div>
+                  {f.online && <span className={styles.onlineDot} role="img" aria-label="Online" />}
+                </div>
                 <div className={styles.info}>
                   <div className={styles.name}>{f.name}</div>
                   <div className={styles.meta}>
@@ -352,7 +378,9 @@ export default function FriendsPage() {
           <ul className={styles.list}>
             {outgoing.map((f) => (
               <li key={f.id} className={styles.card}>
-                <div className={styles.avatar}>{initials(f.name)}</div>
+                <div className={styles.avatarWrapper}>
+                  <div className={styles.avatar}>{initials(f.name)}</div>
+                </div>
                 <div className={styles.info}>
                   <div className={styles.name}>{f.name}</div>
                   <div className={styles.meta}>
