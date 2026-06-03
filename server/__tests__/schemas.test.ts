@@ -664,6 +664,30 @@ describe('ChatMessageSchema', () => {
     );
   });
 
+  it('rejects conversationId containing ?', () => {
+    expect(ChatMessageSchema.safeParse({ ...valid, conversationId: 'group:abc?x=1' }).success).toBe(
+      false,
+    );
+  });
+
+  it('rejects conversationId containing #', () => {
+    expect(
+      ChatMessageSchema.safeParse({ ...valid, conversationId: 'group:abc#frag' }).success,
+    ).toBe(false);
+  });
+
+  it('rejects sentAt above max valid Date timestamp', () => {
+    expect(ChatMessageSchema.safeParse({ ...valid, sentAt: 8_640_000_000_000_001 }).success).toBe(
+      false,
+    );
+  });
+
+  it('accepts sentAt at max valid Date timestamp', () => {
+    expect(ChatMessageSchema.safeParse({ ...valid, sentAt: 8_640_000_000_000_000 }).success).toBe(
+      true,
+    );
+  });
+
   it('rejects empty body', () => {
     expect(ChatMessageSchema.safeParse({ ...valid, body: '' }).success).toBe(false);
   });

@@ -188,6 +188,27 @@ describe('handleChatMessage — DM', () => {
     expect(conv!.name).toBeNull();
   });
 
+  test('drops message with out-of-range sentAt (invalid Date)', async () => {
+    const msgId = randomUUID();
+    const convId = dmConversationId(NODE_A, NODE_B);
+    // 8_640_000_000_000_001 exceeds the max valid JS Date timestamp — new Date() would be Invalid
+    await handleChatMessage(
+      {
+        type: 'chat-message',
+        messageId: msgId,
+        conversationId: convId,
+        fromNodeId: NODE_A,
+        body: 'Bad date',
+        sentAt: 8_640_000_000_000_001,
+      },
+      NODE_A,
+      prisma,
+      NODE_B,
+    );
+    const msg = await prisma.message.findUnique({ where: { id: msgId } });
+    expect(msg).toBeNull();
+  });
+
   test('deduplicates — second upsert with same messageId is a no-op', async () => {
     const msgId = randomUUID();
     const convId = dmConversationId(NODE_A, NODE_B);

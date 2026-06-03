@@ -39,6 +39,9 @@ export async function handleChatMessage(
     },
   });
 
+  const sentAt = new Date(msg.sentAt);
+  if (isNaN(sentAt.getTime())) return;
+
   // Always use the authenticated senderNodeId — never trust the self-reported fromNodeId.
   await prisma.message.upsert({
     where: { id: msg.messageId },
@@ -47,7 +50,7 @@ export async function handleChatMessage(
       conversationId,
       fromNodeId: senderNodeId,
       body: msg.body,
-      sentAt: new Date(msg.sentAt),
+      sentAt,
     },
     update: {}, // first write wins — deduplication
   });
