@@ -232,7 +232,7 @@ describe('handleChatMessage — DM', () => {
     expect(conv).toBeNull();
   });
 
-  test('deduplicates — second upsert with same messageId is a no-op', async () => {
+  test('deduplicates — replayed messageId is a complete no-op (no conversation bump)', async () => {
     const msgId = randomUUID();
     const convId = dmConversationId(NODE_A, NODE_B);
     const base = {
@@ -245,10 +245,17 @@ describe('handleChatMessage — DM', () => {
     };
 
     await handleChatMessage(base, NODE_A, prisma, NODE_B);
+    const convAfterFirst = await prisma.conversation.findUnique({ where: { id: convId } });
+
+    await new Promise((r) => setTimeout(r, 20));
     await handleChatMessage({ ...base, body: 'Second' }, NODE_A, prisma, NODE_B);
 
     const msg = await prisma.message.findUnique({ where: { id: msgId } });
     expect(msg!.body).toBe('First'); // first write wins
+
+    // The conversation must not have been touched by the replay
+    const convAfterReplay = await prisma.conversation.findUnique({ where: { id: convId } });
+    expect(convAfterReplay!.updatedAt.getTime()).toBe(convAfterFirst!.updatedAt.getTime());
   });
 });
 
