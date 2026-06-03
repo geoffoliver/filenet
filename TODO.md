@@ -52,14 +52,14 @@
 
 ### File Transfers
 
-- [ ] Prisma schema: `Download` model (file hash, chunks, sources, state, progress)
-- [ ] Chunk-based download protocol (request/serve specific byte ranges)
-- [ ] Multi-source downloading (same file from multiple peers simultaneously)
-- [ ] SHA-256 verification of completed chunks and whole file
-- [ ] Resumable downloads (persist chunk state to DB)
-- [ ] Pause / resume / cancel download
-- [ ] Serve file chunks to requesting peers (upload side)
-- [ ] Transfer stats: speed, remaining time, bytes transferred, source count
+- [x] Prisma schema: `Download` model (file hash, chunks, sources, state, progress)
+- [x] Chunk-based download protocol (request/serve specific byte ranges; 1 MB chunks, 4 concurrent, 30s timeout)
+- [x] Multi-source downloading (same file from multiple peers simultaneously)
+- [x] SHA-256 verification of completed chunks and whole file
+- [x] Resumable downloads (persist chunk state to DB)
+- [x] Pause / resume / cancel download
+- [x] Serve file chunks to requesting peers (upload side)
+- [x] Transfer stats: speed, remaining time, bytes transferred, source count
 - [ ] Post-download script execution (run user scripts in order, pass `BunFile` + `TransferStats`)
 
 ### Chat
@@ -78,7 +78,7 @@
 - [x] Next.js catch-all proxy (`/api/[...path]`) forwarding UI requests to P2P server
 - [x] Settings endpoints: `GET/PATCH /api/settings`
 - [x] Search endpoint: `GET /api/search` (local + network)
-- [ ] Expose remaining endpoints as features are built: friends, transfers, chat, stats
+- [x] Expose remaining endpoints as features are built: friends, transfers, chat, stats
 
 ---
 
@@ -142,13 +142,13 @@
 
 ### Transfers
 
-- [ ] Split-pane: uploads (top) + downloads (bottom)
-- [ ] Upload row: filename, progress bar, speed, time remaining, bytes transferred (auto-dismiss on completion)
-- [ ] Download row: filename, progress bar, speed, time remaining, bytes transferred, source count
-- [ ] Download controls: pause, resume, cancel (in-progress only)
-- [ ] Cancel confirmation + partial file cleanup
-- [ ] Manual dismiss of completed downloads
-- [ ] Completed downloads locked (no cancel — script may have moved file)
+- [x] Split-pane: uploads (top) + downloads (bottom)
+- [x] Upload row: filename, progress bar, speed, time remaining, bytes transferred (auto-dismiss on completion)
+- [x] Download row: filename, progress bar, speed, time remaining, bytes transferred, source count
+- [x] Download controls: pause, resume, cancel (in-progress only)
+- [x] Cancel confirmation + partial file cleanup
+- [x] Manual dismiss of completed downloads
+- [x] Completed downloads locked (no cancel — script may have moved file)
 
 ### Settings
 
