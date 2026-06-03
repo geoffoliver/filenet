@@ -1090,6 +1090,11 @@ describe('GET /api/conversations/:id/messages', () => {
     const res = await makeHandler()(req('/api/conversations/foo/bar/messages'));
     expect(res.status).toBe(400);
   });
+
+  it('returns 404 for unknown conversation', async () => {
+    const res = await makeHandler()(req('/api/conversations/group:nope/messages'));
+    expect(res.status).toBe(404);
+  });
 });
 
 // ---------------------------------------------------------------------------

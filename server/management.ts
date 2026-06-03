@@ -255,6 +255,9 @@ export function createManagementFetch(deps: ManagementDeps): (req: Request) => P
 
         if (req.method === 'POST') {
           const body = await req.json();
+          if (!body || typeof body !== 'object' || Array.isArray(body)) {
+            return new Response('Invalid JSON body', { status: 400 });
+          }
           const { sha256, filename, size, mimeType, sources } = body as {
             sha256: string;
             filename: string;
@@ -305,6 +308,9 @@ export function createManagementFetch(deps: ManagementDeps): (req: Request) => P
 
         if (req.method === 'PATCH') {
           const body = await req.json();
+          if (!body || typeof body !== 'object' || Array.isArray(body)) {
+            return new Response('Invalid JSON body', { status: 400 });
+          }
           const { action } = body as { action?: string };
           if (action === 'pause') {
             const ok = await pauseDownload(prisma, id);
@@ -363,6 +369,9 @@ export function createManagementFetch(deps: ManagementDeps): (req: Request) => P
 
         if (req.method === 'POST') {
           const body = await req.json();
+          if (!body || typeof body !== 'object' || Array.isArray(body)) {
+            return new Response('Invalid JSON body', { status: 400 });
+          }
           const { name, peerNodeId } = body as { name?: string; peerNodeId?: string };
 
           // Open or create a DM conversation
@@ -405,6 +414,8 @@ export function createManagementFetch(deps: ManagementDeps): (req: Request) => P
           if (!convId || convId.includes('/')) {
             return new Response('Invalid conversation id', { status: 400 });
           }
+          const convExists = await prisma.conversation.findUnique({ where: { id: convId } });
+          if (!convExists) return new Response('Conversation not found', { status: 404 });
           const limitParam = url.searchParams.get('limit');
           const beforeParam = url.searchParams.get('before');
           const limit = Math.max(1, Math.min(parseInt(limitParam ?? '50', 10) || 50, 200));
@@ -436,11 +447,15 @@ export function createManagementFetch(deps: ManagementDeps): (req: Request) => P
             return new Response('Invalid conversation id', { status: 400 });
           }
           const body = await req.json();
+          if (!body || typeof body !== 'object' || Array.isArray(body)) {
+            return new Response('Invalid JSON body', { status: 400 });
+          }
           const { body: msgBody } = body as { body?: string };
           if (typeof msgBody !== 'string' || !msgBody.trim()) {
             return new Response('body is required', { status: 400 });
           }
-          if (msgBody.trim().length > 10_000) {
+          const text = msgBody.trim();
+          if (text.length > 10_000) {
             return new Response('Message too long', { status: 400 });
           }
 
@@ -467,18 +482,21 @@ export function createManagementFetch(deps: ManagementDeps): (req: Request) => P
 
           const messageId = randomUUID();
           const sentAt = new Date();
-          const msg = await prisma.message.create({
-            data: {
-              id: messageId,
-              conversationId: convId,
-              fromNodeId: identity.nodeId,
-              body: msgBody.trim(),
-              sentAt,
-            },
-          });
-          await prisma.conversation.update({
-            where: { id: convId },
-            data: { updatedAt: new Date() },
+          const msg = await prisma.$transaction(async (tx) => {
+            const created = await tx.message.create({
+              data: {
+                id: messageId,
+                conversationId: convId,
+                fromNodeId: identity.nodeId,
+                body: text,
+                sentAt,
+              },
+            });
+            await tx.conversation.update({
+              where: { id: convId },
+              data: { updatedAt: sentAt },
+            });
+            return created;
           });
 
           // Broadcast to peers
@@ -487,7 +505,7 @@ export function createManagementFetch(deps: ManagementDeps): (req: Request) => P
             messageId,
             conversationId: convId,
             fromNodeId: identity.nodeId,
-            body: msgBody.trim(),
+            body: text,
             sentAt: sentAt.getTime(),
             ...(conv.name ? { conversationName: conv.name } : {}),
           };
@@ -531,8 +549,7 @@ export function createManagementFetch(deps: ManagementDeps): (req: Request) => P
     } catch (err: unknown) {
       if (err instanceof NotFoundError) return new Response(err.message, { status: 404 });
       if (err instanceof ConflictError) return new Response(err.message, { status: 409 });
-      if (err instanceof SyntaxError || err instanceof TypeError)
-        return new Response('Invalid JSON body', { status: 400 });
+      if (err instanceof SyntaxError) return new Response('Invalid JSON body', { status: 400 });
       console.error('Management API error:', err);
       return new Response('Internal Server Error', { status: 500 });
     }
