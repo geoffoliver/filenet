@@ -447,17 +447,18 @@ export function createManagementFetch(deps: ManagementDeps): (req: Request) => P
           const conv = await prisma.conversation.findUnique({ where: { id: convId } });
           if (!conv) return new Response('Conversation not found', { status: 404 });
 
+          let dmPartnerId: string | undefined;
           if (conv.type === 'DM') {
             if (!convId.startsWith('dm:')) {
               return new Response('Invalid DM conversation id', { status: 400 });
             }
             const parts = convId.slice(3).split(':');
-            const partnerNodeId = parts.find((n) => n !== identity.nodeId);
-            if (!partnerNodeId || dmConversationId(identity.nodeId, partnerNodeId) !== convId) {
+            dmPartnerId = parts.find((n) => n !== identity.nodeId);
+            if (!dmPartnerId || dmConversationId(identity.nodeId, dmPartnerId) !== convId) {
               return new Response('Invalid DM conversation id', { status: 400 });
             }
             const isFriend = await prisma.friend.findFirst({
-              where: { nodeId: partnerNodeId, status: 'ACCEPTED' },
+              where: { nodeId: dmPartnerId, status: 'ACCEPTED' },
             });
             if (!isFriend) {
               return new Response('DM partner is no longer an accepted friend', { status: 403 });
@@ -491,16 +492,12 @@ export function createManagementFetch(deps: ManagementDeps): (req: Request) => P
             ...(conv.name ? { conversationName: conv.name } : {}),
           };
 
-          if (convId.startsWith('dm:')) {
-            const parts = convId.slice(3).split(':');
-            const partnerNodeId = parts.find((n) => n !== identity.nodeId);
-            if (partnerNodeId) {
-              const peer = getConnectedPeer(partnerNodeId);
-              if (peer) {
-                try {
-                  sendToPeer(peer, chatWireMsg);
-                } catch {}
-              }
+          if (dmPartnerId) {
+            const peer = getConnectedPeer(dmPartnerId);
+            if (peer) {
+              try {
+                sendToPeer(peer, chatWireMsg);
+              } catch {}
             }
           } else {
             // Group chats are network-wide by design: every connected friend

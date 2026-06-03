@@ -340,6 +340,7 @@ export default function ChatView() {
                 className={styles.textarea}
                 rows={1}
                 placeholder="Message…"
+                aria-label="Message"
                 value={draft}
                 onChange={(e) => setDraft(e.target.value)}
                 onKeyDown={handleKeyDown}
