@@ -531,7 +531,8 @@ export function createManagementFetch(deps: ManagementDeps): (req: Request) => P
     } catch (err: unknown) {
       if (err instanceof NotFoundError) return new Response(err.message, { status: 404 });
       if (err instanceof ConflictError) return new Response(err.message, { status: 409 });
-      if (err instanceof SyntaxError) return new Response('Invalid JSON body', { status: 400 });
+      if (err instanceof SyntaxError || err instanceof TypeError)
+        return new Response('Invalid JSON body', { status: 400 });
       console.error('Management API error:', err);
       return new Response('Internal Server Error', { status: 500 });
     }

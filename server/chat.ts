@@ -46,13 +46,17 @@ export async function handleChatMessage(
   });
 
   // Always use the authenticated senderNodeId — never trust the self-reported fromNodeId.
-  await prisma.message.create({
-    data: {
+  // upsert (not create) so concurrent delivery of the same message doesn't throw a unique
+  // constraint error — the update: {} no-op makes the second writer harmless.
+  await prisma.message.upsert({
+    where: { id: msg.messageId },
+    create: {
       id: msg.messageId,
       conversationId,
       fromNodeId: senderNodeId,
       body: msg.body,
       sentAt,
     },
+    update: {},
   });
 }
