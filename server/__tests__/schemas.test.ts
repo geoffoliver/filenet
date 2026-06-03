@@ -3,6 +3,7 @@ import { describe, expect, it } from 'bun:test';
 import {
   AddFriendBodySchema,
   ChatMessageSchema,
+  ChunkRequestMessageSchema,
   FriendActionBodySchema,
   FriendRequestMessageSchema,
   FriendResponseMessageSchema,
@@ -395,6 +396,105 @@ describe('FriendRequestMessageSchema', () => {
       password: 123,
     });
     expect(r.success).toBe(false);
+  });
+
+  it('rejects name longer than 200 characters', () => {
+    expect(
+      FriendRequestMessageSchema.safeParse({
+        type: 'friend-request',
+        name: 'a'.repeat(201),
+        port: 7734,
+      }).success,
+    ).toBe(false);
+  });
+
+  it('accepts name at exactly 200 characters', () => {
+    expect(
+      FriendRequestMessageSchema.safeParse({
+        type: 'friend-request',
+        name: 'a'.repeat(200),
+        port: 7734,
+      }).success,
+    ).toBe(true);
+  });
+
+  it('rejects password longer than 200 characters', () => {
+    expect(
+      FriendRequestMessageSchema.safeParse({
+        type: 'friend-request',
+        name: 'Alice',
+        port: 7734,
+        password: 'x'.repeat(201),
+      }).success,
+    ).toBe(false);
+  });
+
+  it('accepts password at exactly 200 characters', () => {
+    expect(
+      FriendRequestMessageSchema.safeParse({
+        type: 'friend-request',
+        name: 'Alice',
+        port: 7734,
+        password: 'x'.repeat(200),
+      }).success,
+    ).toBe(true);
+  });
+});
+
+describe('ChunkRequestMessageSchema', () => {
+  const valid = {
+    type: 'chunk-request',
+    transferId: '00000000-0000-0000-0000-000000000000',
+    sha256: 'a'.repeat(64),
+    offset: 0,
+    length: 1024,
+  };
+
+  it('accepts a valid chunk request', () => {
+    expect(ChunkRequestMessageSchema.safeParse(valid).success).toBe(true);
+  });
+
+  it('rejects negative offset', () => {
+    expect(ChunkRequestMessageSchema.safeParse({ ...valid, offset: -1 }).success).toBe(false);
+  });
+
+  it('rejects offset above Number.MAX_SAFE_INTEGER', () => {
+    expect(
+      ChunkRequestMessageSchema.safeParse({ ...valid, offset: Number.MAX_SAFE_INTEGER + 1 })
+        .success,
+    ).toBe(false);
+  });
+
+  it('accepts offset at Number.MAX_SAFE_INTEGER', () => {
+    expect(
+      ChunkRequestMessageSchema.safeParse({ ...valid, offset: Number.MAX_SAFE_INTEGER }).success,
+    ).toBe(true);
+  });
+
+  it('rejects length above 4 MB', () => {
+    expect(
+      ChunkRequestMessageSchema.safeParse({ ...valid, length: 4 * 1024 * 1024 + 1 }).success,
+    ).toBe(false);
+  });
+
+  it('accepts length at exactly 4 MB', () => {
+    expect(ChunkRequestMessageSchema.safeParse({ ...valid, length: 4 * 1024 * 1024 }).success).toBe(
+      true,
+    );
+  });
+
+  it('rejects length of 0', () => {
+    expect(ChunkRequestMessageSchema.safeParse({ ...valid, length: 0 }).success).toBe(false);
+  });
+
+  it('rejects invalid transferId', () => {
+    expect(
+      ChunkRequestMessageSchema.safeParse({ ...valid, transferId: 'not-a-uuid' }).success,
+    ).toBe(false);
+  });
+
+  it('rejects invalid sha256', () => {
+    expect(ChunkRequestMessageSchema.safeParse({ ...valid, sha256: 'short' }).success).toBe(false);
   });
 });
 

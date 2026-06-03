@@ -417,4 +417,15 @@ describe('shouldAutoAccept', () => {
     const result = await shouldAutoAccept(settings, 'wrong-password');
     expect(result).toBe(false);
   });
+
+  it('returns false when invite password is set but no password provided', async () => {
+    const settings = await updateSettings(prisma, { invitePassword: 'secret' });
+    expect(shouldAutoAccept(settings, undefined)).toBe(false);
+  });
+
+  it('returns false when passwords differ only in length (timing-safe check)', async () => {
+    const settings = await updateSettings(prisma, { invitePassword: 'abc' });
+    expect(shouldAutoAccept(settings, 'abcd')).toBe(false);
+    expect(shouldAutoAccept(settings, 'ab')).toBe(false);
+  });
 });

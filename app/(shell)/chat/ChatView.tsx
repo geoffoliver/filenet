@@ -260,6 +260,7 @@ export default function ChatView() {
     if (parts.length !== 2 || !parts.includes(localNodeId)) return false;
     const peerNodeId = parts.find((n) => n !== localNodeId);
     if (!peerNodeId) return false;
+    if (conv.id !== `dm:${[localNodeId, peerNodeId].sort().join(':')}`) return false;
     return friendsByNodeId.get(peerNodeId)?.online ?? false;
   }
 

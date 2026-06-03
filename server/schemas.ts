@@ -79,9 +79,9 @@ export const SearchResultMessageSchema = z.object({
 
 export const FriendRequestMessageSchema = z.object({
   type: z.literal('friend-request'),
-  name: z.string().trim().min(1),
+  name: z.string().trim().min(1).max(200),
   port: portSchema,
-  password: z.string().optional(),
+  password: z.string().max(200).optional(),
 });
 
 const sha256Schema = z
@@ -93,7 +93,7 @@ export const ChunkRequestMessageSchema = z.object({
   type: z.literal('chunk-request'),
   transferId: z.string().uuid(),
   sha256: sha256Schema,
-  offset: z.number().int().min(0),
+  offset: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
   length: z
     .number()
     .int()

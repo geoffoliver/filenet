@@ -1,3 +1,5 @@
+import { timingSafeEqual } from 'node:crypto';
+
 import type { Friend, FriendStatus, PrismaClient, Settings } from '@prisma/client';
 
 import { ConflictError, NotFoundError } from './errors';
@@ -130,6 +132,10 @@ export function shouldAutoAccept(
   providedPassword: string | undefined,
 ): boolean {
   if (settings.autoAcceptFromAnyone) return true;
-  if (settings.invitePassword !== null && providedPassword === settings.invitePassword) return true;
+  if (settings.invitePassword !== null && providedPassword !== undefined) {
+    const a = Buffer.from(providedPassword);
+    const b = Buffer.from(settings.invitePassword);
+    if (a.length === b.length && timingSafeEqual(a, b)) return true;
+  }
   return false;
 }
