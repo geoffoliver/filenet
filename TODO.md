@@ -64,12 +64,12 @@
 
 ### Chat
 
-- [ ] Prisma schema: `ChatMessage`, `ChatRoom`, `ChatMember` models
-- [ ] One-on-one encrypted messaging over authenticated connection
-- [ ] Persist one-on-one message history indefinitely (delete on user request)
-- [ ] Group chat: room creation, room metadata shared across network
-- [ ] Group chat: room owner rebroadcasts messages to all members
-- [ ] Group chat: message history stored until user leaves room
+- [x] Prisma schema: `Conversation` (DM / GROUP) and `Message` models
+- [x] One-on-one encrypted messaging over authenticated connection; canonical `dm:{nodeA}:{nodeB}` IDs prevent split-history
+- [x] Persist message history indefinitely (delete on user request via `DELETE /api/conversations/:id`)
+- [x] Group chat: conversation creation, name propagated to all peers via wire message
+- [x] Group chat: fan-out to all accepted connected peers on send
+- [x] `ChatMessageSchema` (Zod) validates inbound peer messages; deduplication + atomic transaction
 - [ ] Online presence: track which friends are currently connected
 
 ### API (Next.js → P2P server bridge)
@@ -124,12 +124,13 @@
 
 ### Chat
 
-- [ ] Split-pane layout
-- [ ] Left pane: online friends list + group chat / room list
-- [ ] Right pane: message thread (newest at bottom)
-- [ ] Message input + send
-- [ ] Create new group chat / room
-- [ ] Messages persist for lifetime of the page (in-memory, not re-fetched)
+- [x] Split-pane layout (sidebar + thread + composer)
+- [x] Left pane: DM list + group list, sorted by most recent activity
+- [x] Right pane: message thread, newest at bottom; own messages bubble right
+- [x] Message input + send (Enter to send, Shift+Enter for newline)
+- [x] Create new group chat via modal (ARIA dialog, Escape to close)
+- [x] Delete conversation (with confirmation)
+- [x] 500 ms polling loop; scroll-to-bottom only on new messages
 
 ### Friends
 
@@ -168,5 +169,5 @@
 - [ ] GitHub Actions: release workflow (bump version, tag `v#.#.#`, publish)
 - [ ] Playwright frontend tests (deferred — add once UI pages have real interactions)
 - [ ] Improve backend test coverage as features are added
-- [ ] CHANGELOG (start and maintain)
-- [ ] README: installation, configuration, running, scripting API docs
+- [x] CHANGELOG (start and maintain)
+- [x] README: installation, configuration, running, scripting API docs
