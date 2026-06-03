@@ -241,7 +241,7 @@ export async function reorderScript(
     const msg = await res.text();
     throw new Error(msg || 'Failed to reorder script');
   }
-  if (res.status === 204) return [];
+  if (res.status === 204) return getScripts();
   return res.json();
 }
 

@@ -342,8 +342,7 @@ function ScriptsSection() {
 
   async function handleReorder(id: string, direction: 'up' | 'down') {
     try {
-      const updated = await reorderScript(id, direction);
-      if (updated.length > 0) setScripts(updated);
+      setScripts(await reorderScript(id, direction));
     } catch {
       // ignore transient errors
     }
@@ -380,7 +379,7 @@ function ScriptsSection() {
                     className="btn btn-ghost"
                     onClick={() => handleReorder(s.id, 'up')}
                     disabled={i === 0}
-                    aria-label="Move up"
+                    aria-label={`Move ${s.path} up`}
                   >
                     ↑
                   </button>
@@ -389,7 +388,7 @@ function ScriptsSection() {
                     className="btn btn-ghost"
                     onClick={() => handleReorder(s.id, 'down')}
                     disabled={i === scripts.length - 1}
-                    aria-label="Move down"
+                    aria-label={`Move ${s.path} down`}
                   >
                     ↓
                   </button>
