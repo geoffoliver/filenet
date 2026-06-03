@@ -55,15 +55,21 @@ export default function FriendsPage() {
   const [confirmRemoveId, setConfirmRemoveId] = useState<string | null>(null);
   const mountedRef = useRef(true);
   const pollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const hasLoadedRef = useRef(false);
 
   const loadFriends = useCallback(async () => {
     try {
       const data = await getFriends();
       if (!mountedRef.current) return;
+      hasLoadedRef.current = true;
       setFriends(data);
       setLoadError('');
     } catch {
-      if (mountedRef.current) setLoadError('Could not load friends.');
+      // Only surface the error on initial load failure — poll errors after
+      // first success are silent so a transient blip doesn't blank the list.
+      if (mountedRef.current && !hasLoadedRef.current) {
+        setLoadError('Could not load friends.');
+      }
     } finally {
       if (mountedRef.current) setLoading(false);
     }

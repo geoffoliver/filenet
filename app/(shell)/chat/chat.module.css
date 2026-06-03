@@ -91,7 +91,9 @@
   @apply text-sm
     font-medium
     text-[var(--text-primary)]
-    truncate;
+    truncate
+    min-w-0
+    flex-1;
 }
 
 .onlineDot {

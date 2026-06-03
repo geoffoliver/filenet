@@ -150,7 +150,7 @@ export default function ChatView() {
       const fetchFriends = now - lastFriendsFetchRef.current >= FRIENDS_POLL_MS;
       const [convs, friends] = await Promise.all([
         getConversations(),
-        fetchFriends ? getFriends() : Promise.resolve(null),
+        fetchFriends ? getFriends().catch(() => null) : Promise.resolve(null),
       ]);
       if (!mountedRef.current) return;
       setConversations(convs);
