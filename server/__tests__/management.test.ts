@@ -1177,6 +1177,25 @@ describe('POST /api/conversations/:id/messages', () => {
     );
     expect(res.status).toBe(403);
   });
+
+  it('returns 400 for a DM conversation whose id does not include the local node', async () => {
+    // A DM between two other nodes — local node is not a participant
+    const convId = `dm:${['other-node-a', 'other-node-b'].sort().join(':')}`;
+    await prisma.conversation.create({ data: { id: convId, type: 'DM' } });
+    const res = await makeHandler()(
+      jsonReq(`/api/conversations/${convId}/messages`, 'POST', { body: 'Sneaky' }),
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it('returns 400 for a DM conversation with a malformed id (wrong prefix)', async () => {
+    // type=DM but id doesn't start with dm: — malformed data
+    await prisma.conversation.create({ data: { id: 'group:malformed-as-dm', type: 'DM' } });
+    const res = await makeHandler()(
+      jsonReq(`/api/conversations/group:malformed-as-dm/messages`, 'POST', { body: 'Bad' }),
+    );
+    expect(res.status).toBe(400);
+  });
 });
 
 // ---------------------------------------------------------------------------

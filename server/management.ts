@@ -448,13 +448,17 @@ export function createManagementFetch(deps: ManagementDeps): (req: Request) => P
           if (!conv) return new Response('Conversation not found', { status: 404 });
 
           if (conv.type === 'DM') {
+            if (!convId.startsWith('dm:')) {
+              return new Response('Invalid DM conversation id', { status: 400 });
+            }
             const parts = convId.slice(3).split(':');
             const partnerNodeId = parts.find((n) => n !== identity.nodeId);
-            const isFriend =
-              partnerNodeId &&
-              (await prisma.friend.findFirst({
-                where: { nodeId: partnerNodeId, status: 'ACCEPTED' },
-              }));
+            if (!partnerNodeId || dmConversationId(identity.nodeId, partnerNodeId) !== convId) {
+              return new Response('Invalid DM conversation id', { status: 400 });
+            }
+            const isFriend = await prisma.friend.findFirst({
+              where: { nodeId: partnerNodeId, status: 'ACCEPTED' },
+            });
             if (!isFriend) {
               return new Response('DM partner is no longer an accepted friend', { status: 403 });
             }
