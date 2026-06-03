@@ -25,6 +25,9 @@ export async function handleChatMessage(
 
   const isGroup = conversationId.startsWith('group:');
 
+  const sentAt = new Date(msg.sentAt);
+  if (isNaN(sentAt.getTime())) return;
+
   await prisma.conversation.upsert({
     where: { id: conversationId },
     create: {
@@ -37,9 +40,6 @@ export async function handleChatMessage(
       ...(isGroup && msg.conversationName ? { name: msg.conversationName } : {}),
     },
   });
-
-  const sentAt = new Date(msg.sentAt);
-  if (isNaN(sentAt.getTime())) return;
 
   // Always use the authenticated senderNodeId — never trust the self-reported fromNodeId.
   await prisma.message.upsert({

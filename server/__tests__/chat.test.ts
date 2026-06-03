@@ -228,6 +228,8 @@ describe('handleChatMessage — DM', () => {
     );
     const msg = await prisma.message.findUnique({ where: { id: msgId } });
     expect(msg).toBeNull();
+    const conv = await prisma.conversation.findUnique({ where: { id: convId } });
+    expect(conv).toBeNull();
   });
 
   test('deduplicates — second upsert with same messageId is a no-op', async () => {
