@@ -118,6 +118,7 @@ export default function ChatView() {
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
   const [showNewGroup, setShowNewGroup] = useState(false);
+  const handleCloseNewGroup = useCallback(() => setShowNewGroup(false), []);
 
   useEffect(() => {
     getMyInfo()
@@ -362,7 +363,7 @@ export default function ChatView() {
 
       {showNewGroup && (
         <NewGroupModal
-          onClose={() => setShowNewGroup(false)}
+          onClose={handleCloseNewGroup}
           onCreate={(conv) => {
             setShowNewGroup(false);
             setConversations((prev) => [conv, ...prev]);

@@ -48,12 +48,13 @@ export async function handleChatMessage(
     });
 
     // Always use the authenticated senderNodeId — never trust the self-reported fromNodeId.
+    // Trim body to match the REST API send path — peers could send leading/trailing whitespace.
     await tx.message.create({
       data: {
         id: msg.messageId,
         conversationId,
         fromNodeId: senderNodeId,
-        body: msg.body,
+        body: msg.body.trim(),
         sentAt,
       },
     });

@@ -79,6 +79,26 @@ describe('handleChatMessage — DM', () => {
     expect(msg!.fromNodeId).toBe(NODE_A);
   });
 
+  test('trims leading/trailing whitespace from body before storing', async () => {
+    const msgId = randomUUID();
+    const convId = dmConversationId(NODE_A, NODE_B);
+    await handleChatMessage(
+      {
+        type: 'chat-message',
+        messageId: msgId,
+        conversationId: convId,
+        fromNodeId: NODE_A,
+        body: '  hello  ',
+        sentAt: Date.now(),
+      },
+      NODE_A,
+      prisma,
+      NODE_B,
+    );
+    const msg = await prisma.message.findUnique({ where: { id: msgId } });
+    expect(msg!.body).toBe('hello');
+  });
+
   test('ignores self-reported fromNodeId — always uses authenticated senderNodeId', async () => {
     const msgId = randomUUID();
     await handleChatMessage(
