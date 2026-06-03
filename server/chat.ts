@@ -15,9 +15,8 @@ export async function handleChatMessage(
   const { conversationId } = msg;
 
   if (conversationId.startsWith('dm:')) {
-    // Validate both the authenticated sender and the local node are the two participants.
-    const parts = conversationId.slice(3).split(':');
-    if (parts.length !== 2 || !parts.includes(senderNodeId) || !parts.includes(localNodeId)) {
+    // Enforce the canonical sorted form — prevents duplicate threads from non-sorted IDs.
+    if (conversationId !== dmConversationId(senderNodeId, localNodeId)) {
       return;
     }
   } else if (!conversationId.startsWith('group:')) {

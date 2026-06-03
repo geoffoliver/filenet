@@ -56,6 +56,7 @@ export type Friend = {
   addedAt: string;
   acceptedAt: string | null;
   updatedAt: string;
+  online: boolean;
 };
 
 export type AddFriendParams = {

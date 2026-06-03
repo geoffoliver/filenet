@@ -93,6 +93,16 @@ describe('GET /api/friends', () => {
     expect(body.length).toBe(1);
     expect(body[0].name).toBe('Alice');
   });
+
+  it('includes online boolean on each friend', async () => {
+    await prisma.friend.create({
+      data: { name: 'Bob', address: '10.0.0.2', port: 7734, status: 'ACCEPTED' },
+    });
+    const res = await makeHandler()(req('/api/friends'));
+    const body = await res.json();
+    expect(typeof body[0].online).toBe('boolean');
+    expect(body[0].online).toBe(false); // no peers connected in tests
+  });
 });
 
 // ---------------------------------------------------------------------------

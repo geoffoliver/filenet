@@ -99,6 +99,27 @@ describe('handleChatMessage — DM', () => {
     expect(msg!.fromNodeId).toBe(NODE_A);
   });
 
+  test('drops DM with non-canonical (unsorted) conversationId', async () => {
+    const msgId = randomUUID();
+    // Canonical for NODE_A→NODE_B is dm:aaaa1111:bbbb2222; flip the order to make it non-canonical.
+    const nonCanonical = `dm:${NODE_B}:${NODE_A}`;
+    await handleChatMessage(
+      {
+        type: 'chat-message',
+        messageId: msgId,
+        conversationId: nonCanonical,
+        fromNodeId: NODE_A,
+        body: 'Split history attack',
+        sentAt: Date.now(),
+      },
+      NODE_A,
+      prisma,
+      NODE_B,
+    );
+    const msg = await prisma.message.findUnique({ where: { id: msgId } });
+    expect(msg).toBeNull();
+  });
+
   test('drops DM whose conversationId does not contain the authenticated sender', async () => {
     const msgId = randomUUID();
     // Conversation is between NODE_A and NODE_C, but sender is NODE_B — invalid

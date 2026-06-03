@@ -63,13 +63,22 @@ function NewGroupModal({
 
   return (
     <div className={styles.modal} onClick={onClose}>
-      <div className={styles.modalCard} onClick={(e) => e.stopPropagation()}>
-        <div className={styles.modalTitle}>New group chat</div>
+      <div
+        className={styles.modalCard}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="new-group-title"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className={styles.modalTitle} id="new-group-title">
+          New group chat
+        </div>
         <form onSubmit={handleSubmit}>
           <input
             ref={inputRef}
             className={styles.modalInput}
             placeholder="Group name"
+            aria-label="Group name"
             value={name}
             onChange={(e) => setName(e.target.value)}
             maxLength={200}
