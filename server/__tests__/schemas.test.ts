@@ -2,6 +2,7 @@ import { describe, expect, it } from 'bun:test';
 
 import {
   AddFriendBodySchema,
+  ChatMessageSchema,
   FriendActionBodySchema,
   FriendRequestMessageSchema,
   FriendResponseMessageSchema,
@@ -611,5 +612,87 @@ describe('SearchResultMessageSchema', () => {
 
   it('rejects invalid searchId', () => {
     expect(SearchResultMessageSchema.safeParse({ ...valid, searchId: 'bad' }).success).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// ChatMessageSchema
+// ---------------------------------------------------------------------------
+
+describe('ChatMessageSchema', () => {
+  const valid = {
+    type: 'chat-message',
+    messageId: '00000000-0000-0000-0000-000000000000',
+    conversationId: 'group:abc',
+    fromNodeId: 'node-a',
+    body: 'Hello',
+    sentAt: 1_000_000,
+  };
+
+  it('accepts a valid chat message', () => {
+    expect(ChatMessageSchema.safeParse(valid).success).toBe(true);
+  });
+
+  it('accepts an optional conversationName', () => {
+    const r = ChatMessageSchema.safeParse({ ...valid, conversationName: 'Dev Chat' });
+    expect(r.success).toBe(true);
+    if (!r.success) return;
+    expect(r.data.conversationName).toBe('Dev Chat');
+  });
+
+  it('trims conversationName and treats empty string as undefined', () => {
+    const r = ChatMessageSchema.safeParse({ ...valid, conversationName: '   ' });
+    expect(r.success).toBe(true);
+    if (!r.success) return;
+    expect(r.data.conversationName).toBeUndefined();
+  });
+
+  it('trims conversationName whitespace', () => {
+    const r = ChatMessageSchema.safeParse({ ...valid, conversationName: '  My Group  ' });
+    expect(r.success).toBe(true);
+    if (!r.success) return;
+    expect(r.data.conversationName).toBe('My Group');
+  });
+
+  it('rejects conversationId without valid prefix', () => {
+    expect(ChatMessageSchema.safeParse({ ...valid, conversationId: 'bad:id' }).success).toBe(false);
+  });
+
+  it('rejects conversationId containing /', () => {
+    expect(ChatMessageSchema.safeParse({ ...valid, conversationId: 'group:abc/def' }).success).toBe(
+      false,
+    );
+  });
+
+  it('rejects conversationId containing ?', () => {
+    expect(ChatMessageSchema.safeParse({ ...valid, conversationId: 'group:abc?x=1' }).success).toBe(
+      false,
+    );
+  });
+
+  it('rejects conversationId containing #', () => {
+    expect(
+      ChatMessageSchema.safeParse({ ...valid, conversationId: 'group:abc#frag' }).success,
+    ).toBe(false);
+  });
+
+  it('rejects sentAt above max valid Date timestamp', () => {
+    expect(ChatMessageSchema.safeParse({ ...valid, sentAt: 8_640_000_000_000_001 }).success).toBe(
+      false,
+    );
+  });
+
+  it('accepts sentAt at max valid Date timestamp', () => {
+    expect(ChatMessageSchema.safeParse({ ...valid, sentAt: 8_640_000_000_000_000 }).success).toBe(
+      true,
+    );
+  });
+
+  it('rejects empty body', () => {
+    expect(ChatMessageSchema.safeParse({ ...valid, body: '' }).success).toBe(false);
+  });
+
+  it('rejects whitespace-only body', () => {
+    expect(ChatMessageSchema.safeParse({ ...valid, body: '   ' }).success).toBe(false);
   });
 });

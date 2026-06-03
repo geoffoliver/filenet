@@ -1,36 +1,111 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Filenet
 
-## Getting Started
+A self-hosted, peer-to-peer file sharing and chat application. Users maintain a list of friends and connect to them directly — no central server. All communication (chat, searches, file transfers) happens over encrypted WebSockets.
 
-First, run the development server:
+## Features
+
+- **Friends** — add friends by address/port with optional invite passwords; auto-accept rules
+- **File indexing** — scans shared folders, extracts metadata (audio/video), periodic background rescans
+- **Search** — searches your entire network; results flow directly back from each node
+- **File transfers** — chunk-based multi-source downloads (BitTorrent-style), resumable, SHA-256 verified
+- **Chat** — direct messages and group conversations over the encrypted P2P connection
+- **Post-download scripts** — run custom JS/TS after a download completes
+
+## Requirements
+
+- [Bun](https://bun.sh) ≥ 1.0
+
+## Installation
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+git clone https://github.com/geoffoliver/filenet.git
+cd filenet
+bun install
+bunx prisma db push
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Running
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```bash
+bun run dev
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+Open [http://localhost:3000](http://localhost:3000). On first launch the setup wizard walks you through the initial configuration.
 
-## Learn More
+The application runs two servers:
 
-To learn more about Next.js, take a look at the following resources:
+| Server         | Default | Purpose                                    |
+| -------------- | ------- | ------------------------------------------ |
+| Next.js        | `:3000` | Web UI + API proxy                         |
+| P2P server     | `:7734` | Encrypted WebSocket connections to peers   |
+| Management API | `:7735` | Localhost-only REST API consumed by the UI |
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Configuration
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+All settings are available in the **Settings** page of the UI:
 
-## Deploy on Vercel
+- **Name** — your display name shared with friends
+- **Shared folders** — directories whose contents are indexed and shared
+- **Download folder** — where downloaded files are saved
+- **Auto-accept** — automatically accept friend requests from anyone, or require a password
+- **Invite password** — peers who supply this password are auto-accepted
+- **Rescan interval** — how often to re-index shared folders (0 = manual only)
+- **Port** — the port peers connect to (default 7734); you must forward this port on your router
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+### Port forwarding
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Filenet requires a manually forwarded port — there is no automatic NAT traversal. To allow peers to connect to you:
+
+1. Find your router's admin interface (usually `192.168.1.1` or `192.168.0.1`)
+2. Look for "Port Forwarding" or "Virtual Server"
+3. Forward **TCP port 7734** (or your configured port) to your machine's local IP address
+4. Share your **public IP address** (or a domain name pointing to it) with friends
+
+## Post-download scripts
+
+Scripts run in order after a download completes. Each script is a TypeScript/JavaScript file with a default export:
+
+```typescript
+import type { BunFile } from 'bun';
+
+interface TransferStats {
+  downloadTimeMs: number;
+  bytesTransferred: number;
+  maxSources: number;
+}
+
+export default async function ({ file, stats }: { file: BunFile; stats: TransferStats }) {
+  // file  — the downloaded BunFile
+  // stats — transfer statistics
+  console.log(`Downloaded ${file.name} in ${stats.downloadTimeMs}ms`);
+}
+```
+
+Add script paths in **Settings → Scripts** and reorder them. Scripts receive the file as a `BunFile` — if a script moves or renames the file, subsequent scripts in the chain receive the updated path.
+
+## Development
+
+```bash
+# Run tests
+bun test
+
+# Lint
+bun run lint
+
+# Format
+bun run format
+
+# Build
+bun run build
+```
+
+### Database
+
+The app uses Prisma with SQLite. After changing `prisma/schema.prisma`:
+
+```bash
+bunx prisma db push        # apply to dev DB
+bunx prisma generate       # regenerate client
+```
+
+Test databases are created automatically by the test suite and cleaned up afterwards.

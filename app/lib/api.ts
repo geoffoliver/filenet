@@ -19,6 +19,12 @@ export type SettingsPatch = {
   rescanIntervalMinutes?: number;
 };
 
+export async function getMyInfo(): Promise<{ nodeId: string }> {
+  const res = await fetch('/api/me');
+  if (!res.ok) throw new Error('Failed to load identity');
+  return res.json();
+}
+
 export async function getSettings(): Promise<Settings> {
   const res = await fetch('/api/settings');
   if (!res.ok) throw new Error('Failed to load settings');
@@ -50,6 +56,7 @@ export type Friend = {
   addedAt: string;
   acceptedAt: string | null;
   updatedAt: string;
+  online: boolean;
 };
 
 export type AddFriendParams = {
@@ -237,6 +244,94 @@ export type SearchParams = {
   offset?: number;
   network?: boolean;
 };
+
+// ── Chat ──────────────────────────────────────────────────────────────────────
+
+export type ConvType = 'DM' | 'GROUP';
+
+export type Message = {
+  id: string;
+  conversationId: string;
+  fromNodeId: string;
+  body: string;
+  sentAt: string;
+};
+
+export type Conversation = {
+  id: string;
+  type: ConvType;
+  name: string | null;
+  createdAt: string;
+  updatedAt: string;
+  messages: Message[];
+};
+
+export async function getConversations(): Promise<Conversation[]> {
+  const res = await fetch('/api/conversations');
+  if (!res.ok) throw new Error('Failed to load conversations');
+  return res.json();
+}
+
+export async function openDmConversation(peerNodeId: string): Promise<Conversation> {
+  const res = await fetch('/api/conversations', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ peerNodeId }),
+  });
+  if (!res.ok) {
+    const msg = await res.text();
+    throw new Error(msg || 'Failed to open DM');
+  }
+  return res.json();
+}
+
+export async function createGroupConversation(name: string): Promise<Conversation> {
+  const res = await fetch('/api/conversations', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name }),
+  });
+  if (!res.ok) {
+    const msg = await res.text();
+    throw new Error(msg || 'Failed to create group');
+  }
+  return res.json();
+}
+
+export async function getMessages(
+  convId: string,
+  opts?: { limit?: number; before?: string },
+): Promise<Message[]> {
+  const qs = new URLSearchParams();
+  if (opts?.limit != null) qs.set('limit', String(opts.limit));
+  if (opts?.before) qs.set('before', opts.before);
+  const res = await fetch(`/api/conversations/${convId}/messages?${qs}`);
+  if (!res.ok) throw new Error('Failed to load messages');
+  return res.json();
+}
+
+export async function sendMessage(convId: string, body: string): Promise<Message> {
+  const res = await fetch(`/api/conversations/${convId}/messages`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ body }),
+  });
+  if (!res.ok) {
+    const msg = await res.text();
+    throw new Error(msg || 'Failed to send message');
+  }
+  return res.json();
+}
+
+export async function deleteConversation(convId: string): Promise<void> {
+  const res = await fetch(`/api/conversations/${convId}`, {
+    method: 'DELETE',
+  });
+  if (!res.ok) {
+    const msg = await res.text();
+    throw new Error(msg || 'Failed to delete conversation');
+  }
+}
 
 export async function searchFiles(params: SearchParams): Promise<SearchResponse> {
   const qs = new URLSearchParams();

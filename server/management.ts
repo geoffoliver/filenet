@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto';
+
 import type { PrismaClient, SharedFile } from '@prisma/client';
 
 import {
@@ -14,6 +16,7 @@ import {
   getConnectedPeer,
   notifyFriendAccepted,
   notifyFriendRejected,
+  sendToPeer,
 } from './connections';
 import { acceptFriendRequest, addOutgoingFriend, getFriends, rejectFriendRequest } from './friends';
 import {
@@ -30,6 +33,7 @@ import {
   updateSettings,
 } from './config';
 import type { Identity } from './identity';
+import { dmConversationId } from './chat';
 import { initiateNetworkSearch } from './search-protocol';
 import { scanAndIndex } from './indexer';
 import { searchFiles } from './search';
@@ -82,10 +86,18 @@ export function createManagementFetch(deps: ManagementDeps): (req: Request) => P
     const url = new URL(req.url);
 
     try {
+      if (url.pathname === '/api/me' && req.method === 'GET') {
+        return Response.json({ nodeId: identity.nodeId });
+      }
+
       if (url.pathname === '/api/friends') {
         if (req.method === 'GET') {
           const friends = await getFriends(prisma);
-          return Response.json(friends);
+          const enriched = friends.map((f) => ({
+            ...f,
+            online: f.nodeId ? !!getConnectedPeer(f.nodeId) : false,
+          }));
+          return Response.json(enriched);
         }
 
         if (req.method === 'POST') {
@@ -243,6 +255,9 @@ export function createManagementFetch(deps: ManagementDeps): (req: Request) => P
 
         if (req.method === 'POST') {
           const body = await req.json();
+          if (!body || typeof body !== 'object' || Array.isArray(body)) {
+            return new Response('Invalid JSON body', { status: 400 });
+          }
           const { sha256, filename, size, mimeType, sources } = body as {
             sha256: string;
             filename: string;
@@ -293,6 +308,9 @@ export function createManagementFetch(deps: ManagementDeps): (req: Request) => P
 
         if (req.method === 'PATCH') {
           const body = await req.json();
+          if (!body || typeof body !== 'object' || Array.isArray(body)) {
+            return new Response('Invalid JSON body', { status: 400 });
+          }
           const { action } = body as { action?: string };
           if (action === 'pause') {
             const ok = await pauseDownload(prisma, id);
@@ -336,6 +354,195 @@ export function createManagementFetch(deps: ManagementDeps): (req: Request) => P
           return new Response('Scan already in progress', { status: 409 });
         }
         return Response.json({ indexed: result.indexed, removed: result.removed });
+      }
+
+      // ── Chat ──────────────────────────────────────────────────────────────
+
+      if (url.pathname === '/api/conversations') {
+        if (req.method === 'GET') {
+          const conversations = await prisma.conversation.findMany({
+            include: { messages: { orderBy: { sentAt: 'desc' }, take: 1 } },
+            orderBy: { updatedAt: 'desc' },
+          });
+          return Response.json(conversations);
+        }
+
+        if (req.method === 'POST') {
+          const body = await req.json();
+          if (!body || typeof body !== 'object' || Array.isArray(body)) {
+            return new Response('Invalid JSON body', { status: 400 });
+          }
+          const { name, peerNodeId } = body as { name?: string; peerNodeId?: string };
+
+          // Open or create a DM conversation
+          if (typeof peerNodeId === 'string' && peerNodeId.trim()) {
+            const isFriend = await prisma.friend.findFirst({
+              where: { nodeId: peerNodeId.trim(), status: 'ACCEPTED' },
+            });
+            if (!isFriend) {
+              return new Response('peerNodeId must be an accepted friend', { status: 403 });
+            }
+            const convId = dmConversationId(identity.nodeId, peerNodeId.trim());
+            const conv = await prisma.conversation.upsert({
+              where: { id: convId },
+              create: { id: convId, type: 'DM' },
+              update: {},
+              include: { messages: { orderBy: { sentAt: 'desc' }, take: 1 } },
+            });
+            return Response.json(conv, { status: 200 });
+          }
+
+          // Create a new group conversation
+          if (typeof name !== 'string' || !name.trim()) {
+            return new Response('either peerNodeId or name is required', { status: 400 });
+          }
+          const convId = `group:${randomUUID()}`;
+          const conv = await prisma.conversation.create({
+            data: { id: convId, type: 'GROUP', name: name.trim().slice(0, 200) },
+            include: { messages: { orderBy: { sentAt: 'desc' }, take: 1 } },
+          });
+          return Response.json(conv, { status: 201 });
+        }
+      }
+
+      if (url.pathname.startsWith('/api/conversations/')) {
+        const rest = url.pathname.slice('/api/conversations/'.length);
+
+        // GET /api/conversations/:id/messages
+        if (rest.endsWith('/messages') && req.method === 'GET') {
+          const convId = rest.slice(0, -'/messages'.length);
+          if (!convId || convId.includes('/')) {
+            return new Response('Invalid conversation id', { status: 400 });
+          }
+          const convExists = await prisma.conversation.findUnique({ where: { id: convId } });
+          if (!convExists) return new Response('Conversation not found', { status: 404 });
+          const limitParam = url.searchParams.get('limit');
+          const beforeParam = url.searchParams.get('before');
+          const limit = Math.max(1, Math.min(parseInt(limitParam ?? '50', 10) || 50, 200));
+          let beforeDate: Date | null = null;
+          if (beforeParam) {
+            beforeDate = new Date(beforeParam);
+            if (Number.isNaN(beforeDate.getTime())) {
+              return new Response('Invalid before date', { status: 400 });
+            }
+          }
+          // Fetch newest N descending, then reverse so the client receives
+          // chronological order. This ensures `limit` returns the most recent
+          // messages rather than the oldest ones.
+          const messages = await prisma.message.findMany({
+            where: {
+              conversationId: convId,
+              ...(beforeDate ? { sentAt: { lt: beforeDate } } : {}),
+            },
+            orderBy: { sentAt: 'desc' },
+            take: limit,
+          });
+          return Response.json(messages.reverse());
+        }
+
+        // POST /api/conversations/:id/messages
+        if (rest.endsWith('/messages') && req.method === 'POST') {
+          const convId = rest.slice(0, -'/messages'.length);
+          if (!convId || convId.includes('/')) {
+            return new Response('Invalid conversation id', { status: 400 });
+          }
+          const body = await req.json();
+          if (!body || typeof body !== 'object' || Array.isArray(body)) {
+            return new Response('Invalid JSON body', { status: 400 });
+          }
+          const { body: msgBody } = body as { body?: string };
+          if (typeof msgBody !== 'string' || !msgBody.trim()) {
+            return new Response('body is required', { status: 400 });
+          }
+          const text = msgBody.trim();
+          if (text.length > 10_000) {
+            return new Response('Message too long', { status: 400 });
+          }
+
+          const conv = await prisma.conversation.findUnique({ where: { id: convId } });
+          if (!conv) return new Response('Conversation not found', { status: 404 });
+
+          let dmPartnerId: string | undefined;
+          if (conv.type === 'DM') {
+            if (!convId.startsWith('dm:')) {
+              return new Response('Invalid DM conversation id', { status: 400 });
+            }
+            const parts = convId.slice(3).split(':');
+            dmPartnerId = parts.find((n) => n !== identity.nodeId);
+            if (!dmPartnerId || dmConversationId(identity.nodeId, dmPartnerId) !== convId) {
+              return new Response('Invalid DM conversation id', { status: 400 });
+            }
+            const isFriend = await prisma.friend.findFirst({
+              where: { nodeId: dmPartnerId, status: 'ACCEPTED' },
+            });
+            if (!isFriend) {
+              return new Response('DM partner is no longer an accepted friend', { status: 403 });
+            }
+          }
+
+          const messageId = randomUUID();
+          const sentAt = new Date();
+          const msg = await prisma.$transaction(async (tx) => {
+            const created = await tx.message.create({
+              data: {
+                id: messageId,
+                conversationId: convId,
+                fromNodeId: identity.nodeId,
+                body: text,
+                sentAt,
+              },
+            });
+            await tx.conversation.update({
+              where: { id: convId },
+              data: { updatedAt: sentAt },
+            });
+            return created;
+          });
+
+          // Broadcast to peers
+          const chatWireMsg = {
+            type: 'chat-message' as const,
+            messageId,
+            conversationId: convId,
+            fromNodeId: identity.nodeId,
+            body: text,
+            sentAt: sentAt.getTime(),
+            ...(conv.name ? { conversationName: conv.name } : {}),
+          };
+
+          if (dmPartnerId) {
+            const peer = getConnectedPeer(dmPartnerId);
+            if (peer) {
+              try {
+                sendToPeer(peer, chatWireMsg);
+              } catch {}
+            }
+          } else {
+            // Group chats are network-wide by design: every connected friend
+            // receives the message and auto-joins the room, mirroring the
+            // "rooms shared across the entire network" spec requirement.
+            const peers = await getAcceptedConnectedPeers(prisma);
+            for (const peer of peers) {
+              try {
+                sendToPeer(peer, chatWireMsg);
+              } catch {}
+            }
+          }
+
+          return Response.json(msg, { status: 201 });
+        }
+
+        // DELETE /api/conversations/:id
+        const convId = rest;
+        if (!convId || convId.includes('/')) {
+          return new Response('Invalid conversation id', { status: 400 });
+        }
+        if (req.method === 'DELETE') {
+          const conv = await prisma.conversation.findUnique({ where: { id: convId } });
+          if (!conv) return new Response('Conversation not found', { status: 404 });
+          await prisma.conversation.delete({ where: { id: convId } });
+          return new Response(null, { status: 204 });
+        }
       }
 
       return new Response('Not Found', { status: 404 });
