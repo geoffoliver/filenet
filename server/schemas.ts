@@ -124,7 +124,7 @@ export const ChatMessageSchema = z.object({
     .string()
     .max(500)
     .regex(
-      /^(dm:|group:)[a-zA-Z0-9:._~-]+$/,
+      /^(dm:|group:)[-a-zA-Z0-9:._~]+$/,
       'conversationId must be dm: or group: followed by URL-safe path characters',
     ),
   fromNodeId: z.string().max(200).min(1),
