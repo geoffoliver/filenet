@@ -341,19 +341,21 @@ function ScriptsSection() {
   }
 
   async function handleReorder(id: string, direction: 'up' | 'down') {
+    setError('');
     try {
       setScripts(await reorderScript(id, direction));
-    } catch {
-      // ignore transient errors
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to reorder script');
     }
   }
 
   async function handleRemove(id: string) {
+    setError('');
     try {
       await removeScript(id);
       setScripts((prev) => prev.filter((s) => s.id !== id));
-    } catch {
-      // ignore transient errors
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to remove script');
     }
   }
 
