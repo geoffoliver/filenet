@@ -396,7 +396,10 @@ export function createManagementFetch(deps: ManagementDeps): (req: Request) => P
               result.data.direction === 'up'
                 ? { order: { lt: script.order } }
                 : { order: { gt: script.order } },
-            orderBy: { order: result.data.direction === 'up' ? 'desc' : 'asc' },
+            orderBy:
+              result.data.direction === 'up'
+                ? [{ order: 'desc' }, { id: 'desc' }]
+                : [{ order: 'asc' }, { id: 'asc' }],
           });
           if (!neighbor) return new Response(null, { status: 204 });
 
