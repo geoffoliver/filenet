@@ -350,7 +350,9 @@ export function createManagementFetch(deps: ManagementDeps): (req: Request) => P
 
       if (url.pathname === '/api/scripts') {
         if (req.method === 'GET') {
-          const scripts = await prisma.postDownloadScript.findMany({ orderBy: { order: 'asc' } });
+          const scripts = await prisma.postDownloadScript.findMany({
+            orderBy: [{ order: 'asc' }, { id: 'asc' }],
+          });
           return Response.json(scripts);
         }
 
@@ -361,10 +363,10 @@ export function createManagementFetch(deps: ManagementDeps): (req: Request) => P
           }
           const { path } = result.data;
           try {
-            const agg = await prisma.postDownloadScript.aggregate({ _max: { order: true } });
-            const nextOrder = (agg._max.order ?? -1) + 1;
-            const script = await prisma.postDownloadScript.create({
-              data: { path, order: nextOrder },
+            const script = await prisma.$transaction(async (tx) => {
+              const agg = await tx.postDownloadScript.aggregate({ _max: { order: true } });
+              const nextOrder = (agg._max.order ?? -1) + 1;
+              return tx.postDownloadScript.create({ data: { path, order: nextOrder } });
             });
             return Response.json(script, { status: 201 });
           } catch (err) {
@@ -409,7 +411,9 @@ export function createManagementFetch(deps: ManagementDeps): (req: Request) => P
             }),
           ]);
 
-          const updated = await prisma.postDownloadScript.findMany({ orderBy: { order: 'asc' } });
+          const updated = await prisma.postDownloadScript.findMany({
+            orderBy: [{ order: 'asc' }, { id: 'asc' }],
+          });
           return Response.json(updated);
         }
 

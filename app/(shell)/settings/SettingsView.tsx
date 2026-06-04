@@ -319,7 +319,7 @@ function ScriptsSection() {
   useEffect(() => {
     getScripts()
       .then(setScripts)
-      .catch(() => {});
+      .catch((err) => setError(err instanceof Error ? err.message : 'Failed to load scripts'));
   }, []);
 
   async function handleAdd(e: React.FormEvent) {

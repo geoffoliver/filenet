@@ -1,3 +1,4 @@
+import { pathToFileURL } from 'node:url';
 import { resolve } from 'node:path';
 
 import type { PrismaClient } from '@prisma/client';
@@ -9,7 +10,9 @@ export async function runPostDownloadScripts(
   finalPath: string,
   stats: TransferStats,
 ): Promise<void> {
-  const scripts = await prisma.postDownloadScript.findMany({ orderBy: { order: 'asc' } });
+  const scripts = await prisma.postDownloadScript.findMany({
+    orderBy: [{ order: 'asc' }, { id: 'asc' }],
+  });
   if (scripts.length === 0) return;
 
   let file: BunFile = Bun.file(finalPath);
@@ -17,7 +20,7 @@ export async function runPostDownloadScripts(
   for (const script of scripts) {
     let result: unknown;
     try {
-      const mod = await import(resolve(script.path));
+      const mod = await import(pathToFileURL(resolve(script.path)).href);
       if (typeof mod.default !== 'function') {
         console.error(`Post-download script ${script.path}: default export is not a function`);
         continue;
