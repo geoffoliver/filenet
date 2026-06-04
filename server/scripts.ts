@@ -1,5 +1,6 @@
 import { pathToFileURL } from 'node:url';
 import { resolve } from 'node:path';
+import { statSync } from 'node:fs';
 
 import type { PrismaClient } from '@prisma/client';
 
@@ -20,7 +21,9 @@ export async function runPostDownloadScripts(
   for (const script of scripts) {
     let result: unknown;
     try {
-      const mod = await import(pathToFileURL(resolve(script.path)).href);
+      const resolvedPath = resolve(script.path);
+      const mtime = statSync(resolvedPath).mtimeMs;
+      const mod = await import(`${pathToFileURL(resolvedPath).href}?mtime=${mtime}`);
       if (typeof mod.default !== 'function') {
         console.error(`Post-download script ${script.path}: default export is not a function`);
         continue;
