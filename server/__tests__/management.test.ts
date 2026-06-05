@@ -1313,6 +1313,13 @@ describe('scripts API', () => {
       const res = await makeHandler()(jsonReq('/api/scripts', 'POST', { path: 'x'.repeat(1001) }));
       expect(res.status).toBe(400);
     });
+
+    it('returns 400 for path without .ts or .js extension', async () => {
+      for (const path of ['/my/script.py', '/my/script.sh', '/my/script', '/my/script.tsx']) {
+        const res = await makeHandler()(jsonReq('/api/scripts', 'POST', { path }));
+        expect(res.status).toBe(400);
+      }
+    });
   });
 
   describe('PATCH /api/scripts/:id (reorder)', () => {
