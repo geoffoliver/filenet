@@ -140,6 +140,19 @@ export const ChatMessageSchema = z.object({
   ),
 });
 
+export const AddScriptBodySchema = z.object({
+  path: z
+    .string()
+    .trim()
+    .min(1, 'path is required')
+    .max(1000)
+    .refine((p) => p.endsWith('.ts') || p.endsWith('.js'), 'script must be a .ts or .js file'),
+});
+
+export const ReorderScriptBodySchema = z.object({
+  direction: z.enum(['up', 'down']),
+});
+
 export const FriendResponseMessageSchema = z.object({
   type: z.literal('friend-response'),
   accepted: z.boolean(),

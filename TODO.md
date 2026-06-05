@@ -60,7 +60,7 @@
 - [x] Pause / resume / cancel download
 - [x] Serve file chunks to requesting peers (upload side)
 - [x] Transfer stats: speed, remaining time, bytes transferred, source count
-- [ ] Post-download script execution (run user scripts in order, pass `BunFile` + `TransferStats`)
+- [x] Post-download script execution (run user scripts in order, pass `BunFile` + `TransferStats`)
 
 ### Chat
 
@@ -158,7 +158,7 @@
 - [x] Auto-accept toggles + invite password
 - [x] Force rescan button
 - [ ] Listening port field + port-forwarding instructions (needs schema migration)
-- [ ] Post-download scripts: add path, reorder, remove
+- [x] Post-download scripts: add path, reorder, remove
 
 ---
 

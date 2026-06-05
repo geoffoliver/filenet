@@ -132,3 +132,17 @@ export type PubKeyResponse = {
   nodeId: string;
   publicKey: string; // base64 SPKI Ed25519
 };
+
+// Post-download script contract
+export type TransferStats = {
+  downloadId: string;
+  filename: string;
+  sha256: string;
+  size: bigint;
+  mimeType: string | null;
+  durationMs: number;
+  bytesReceived: bigint;
+  maxSources: number;
+  startedAt: Date;
+  completedAt: Date;
+};

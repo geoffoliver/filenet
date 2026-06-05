@@ -202,6 +202,57 @@ export async function dismissTransfer(id: string): Promise<void> {
   }
 }
 
+export type PostDownloadScript = {
+  id: string;
+  path: string;
+  order: number;
+  createdAt: string;
+};
+
+export async function getScripts(): Promise<PostDownloadScript[]> {
+  const res = await fetch('/api/scripts');
+  if (!res.ok) throw new Error('Failed to load scripts');
+  return res.json();
+}
+
+export async function addScript(path: string): Promise<PostDownloadScript> {
+  const res = await fetch('/api/scripts', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ path }),
+  });
+  if (!res.ok) {
+    const msg = await res.text();
+    throw new Error(msg || 'Failed to add script');
+  }
+  return res.json();
+}
+
+export async function reorderScript(
+  id: string,
+  direction: 'up' | 'down',
+): Promise<PostDownloadScript[]> {
+  const res = await fetch(`/api/scripts/${id}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ direction }),
+  });
+  if (!res.ok) {
+    const msg = await res.text();
+    throw new Error(msg || 'Failed to reorder script');
+  }
+  if (res.status === 204) return getScripts();
+  return res.json();
+}
+
+export async function removeScript(id: string): Promise<void> {
+  const res = await fetch(`/api/scripts/${id}`, { method: 'DELETE' });
+  if (!res.ok) {
+    const msg = await res.text();
+    throw new Error(msg || 'Failed to remove script');
+  }
+}
+
 export async function triggerRescan(): Promise<{ indexed: number; removed: number }> {
   const res = await fetch('/api/rescan', { method: 'POST' });
   if (!res.ok) throw new Error('Rescan failed');

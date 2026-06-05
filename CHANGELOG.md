@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Post-download scripts** — run user-defined `.ts`/`.js` scripts after each download completes; scripts receive `{ file: BunFile, stats: TransferStats }` and run sequentially in configured order; errors in one script do not block subsequent scripts
+  - Settings UI: add, remove, and reorder scripts with up/down controls
+  - REST API: `GET/POST /api/scripts`, `PATCH /api/scripts/:id` (reorder), `DELETE /api/scripts/:id`
+  - `TransferStats` type exposed for script authors: `downloadId`, `filename`, `sha256`, `size`, `mimeType`, `durationMs`, `bytesReceived`, `maxSources`, `startedAt`, `completedAt`
+  - **Schema migration required:** run `bunx prisma db push` to create the `PostDownloadScript` table
+
 - **Online presence** — friends page shows a green dot next to connected friends (polling every 5 s); chat sidebar shows a presence dot on DM conversations whose peer is currently online
 
 ## [0.1.0] — 2026-06-03
@@ -31,7 +37,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Parallel multi-source downloading; SHA-256 chunk and whole-file verification
   - Resumable downloads; pause / resume / cancel with partial-file cleanup
   - Transfers UI: upload and download panes with progress bars, speed, remaining time, source count
-  - Post-download script execution (`BunFile` + `TransferStats` passed to user scripts)
 
 - **Home dashboard** (#7) — files shared count + size, friends online/total, network size
 
