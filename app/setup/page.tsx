@@ -102,6 +102,12 @@ export default function SetupPage() {
 
   const progress = ((step - 1) / (TOTAL_STEPS - 1)) * 100;
 
+  const portPreviewParsed = parseInt(state.listenPort, 10);
+  const portPreview =
+    !isNaN(portPreviewParsed) && portPreviewParsed >= 1 && portPreviewParsed <= 65535
+      ? String(portPreviewParsed)
+      : '7734';
+
   return (
     <div className={styles.page}>
       <div className={styles.card}>
@@ -271,9 +277,9 @@ export default function SetupPage() {
                     Gaming&rdquo;).
                   </li>
                   <li>
-                    Add a rule: external port <strong>{state.listenPort || '7734'}</strong>,
-                    internal IP <em>your local IP</em>, internal port{' '}
-                    <strong>{state.listenPort || '7734'}</strong>, protocol <strong>TCP</strong>.
+                    Add a rule: external port <strong>{portPreview}</strong>, internal IP{' '}
+                    <em>your local IP</em>, internal port <strong>{portPreview}</strong>, protocol{' '}
+                    <strong>TCP</strong>.
                   </li>
                   <li>Save and apply.</li>
                 </ol>

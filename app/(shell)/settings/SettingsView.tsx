@@ -436,6 +436,12 @@ function NetworkingSection({ initial }: { initial: Settings }) {
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState('');
 
+  const parsedPort = parseInt(port, 10);
+  const displayPort =
+    !isNaN(parsedPort) && parsedPort >= 1 && parsedPort <= 65535
+      ? String(parsedPort)
+      : String(initial.listenPort);
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     const parsed = parseInt(port, 10);
@@ -495,8 +501,8 @@ function NetworkingSection({ initial }: { initial: Settings }) {
               Servers&rdquo;, &ldquo;NAT&rdquo;, or &ldquo;Applications &amp; Gaming&rdquo;).
             </li>
             <li>
-              Add a rule: external port <strong>{port || '7734'}</strong>, internal IP{' '}
-              <em>your local IP</em>, internal port <strong>{port || '7734'}</strong>, protocol{' '}
+              Add a rule: external port <strong>{displayPort}</strong>, internal IP{' '}
+              <em>your local IP</em>, internal port <strong>{displayPort}</strong>, protocol{' '}
               <strong>TCP</strong>.
             </li>
             <li>Save and apply.</li>

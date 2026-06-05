@@ -17,7 +17,11 @@ const identity = await getOrCreateIdentity(prisma);
 const startupSettings = await getOrCreateSettings(prisma);
 const PORT = parseInt(process.env.P2P_PORT ?? String(startupSettings.listenPort), 10);
 if (isNaN(PORT) || PORT < 1 || PORT > 65535)
-  throw new Error(`Invalid P2P port: ${process.env.P2P_PORT ?? startupSettings.listenPort}`);
+  throw new Error(
+    process.env.P2P_PORT !== undefined
+      ? `Invalid P2P_PORT env var: "${process.env.P2P_PORT}"`
+      : `Invalid listenPort in settings: ${startupSettings.listenPort}`,
+  );
 if (PORT === MGMT_PORT) throw new Error('P2P port and management port must be different');
 console.log(`Node ID:   ${identity.nodeId}`);
 console.log(`P2P port:  ${PORT}`);
