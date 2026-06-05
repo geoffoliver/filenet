@@ -125,6 +125,37 @@
   @apply flex gap-2;
 }
 
+/* ── Port forwarding box ──────────────────────────────────────────────────── */
+
+.forwardingBox {
+  @apply mt-5
+    flex
+    flex-col
+    gap-2
+    pl-4
+    border-l-2
+    border-[var(--border)];
+}
+
+.forwardingTitle {
+  @apply text-xs
+    font-semibold
+    uppercase
+    tracking-wide
+    text-[var(--text-muted)];
+}
+
+.forwardingSteps {
+  @apply list-decimal
+    pl-5
+    m-0
+    flex
+    flex-col
+    gap-1.5
+    text-sm
+    text-[var(--text-muted)];
+}
+
 /* ── Toggle row ───────────────────────────────────────────────────────────── */
 
 .toggleRow {

@@ -10,12 +10,13 @@ type WizardState = {
   name: string;
   sharedFolders: string[];
   downloadFolder: string;
+  listenPort: string;
   autoAcceptFromAnyone: boolean;
   autoAcceptFromFriendsOfFriends: boolean;
   invitePassword: string;
 };
 
-const TOTAL_STEPS = 5;
+const TOTAL_STEPS = 6;
 
 export default function SetupPage() {
   const router = useRouter();
@@ -28,6 +29,7 @@ export default function SetupPage() {
     name: '',
     sharedFolders: [],
     downloadFolder: '',
+    listenPort: '7734',
     autoAcceptFromAnyone: false,
     autoAcceptFromFriendsOfFriends: false,
     invitePassword: '',
@@ -53,6 +55,10 @@ export default function SetupPage() {
 
   function canAdvance(): boolean {
     if (step === 2 && !state.name.trim()) return false;
+    if (step === 5) {
+      const p = parseInt(state.listenPort, 10);
+      if (isNaN(p) || p < 1 || p > 65535) return false;
+    }
     return true;
   }
 
@@ -79,6 +85,7 @@ export default function SetupPage() {
         name: state.name.trim(),
         sharedFolders: state.sharedFolders,
         downloadFolder: state.downloadFolder.trim() || null,
+        listenPort: parseInt(state.listenPort, 10) || 7734,
         autoAcceptFromAnyone: state.autoAcceptFromAnyone,
         autoAcceptFromFriendsOfFriends: state.autoAcceptFromFriendsOfFriends,
         invitePassword: state.invitePassword.trim() || null,
@@ -219,8 +226,60 @@ export default function SetupPage() {
             </>
           )}
 
-          {/* ── Step 5: Preferences ─────────────────────────────────────── */}
+          {/* ── Step 5: Listening port ──────────────────────────────────── */}
           {step === 5 && (
+            <>
+              <h1 className={styles.title}>Which port should Filenet listen on?</h1>
+              <p className={styles.description}>
+                Filenet needs an open port to receive connections from friends. The default is{' '}
+                <strong>7734</strong>. You&rsquo;ll need to forward this port on your router for
+                friends outside your local network to reach you.
+              </p>
+              <div className="field">
+                <label className="label" htmlFor="listenPort">
+                  Listening port
+                </label>
+                <input
+                  id="listenPort"
+                  className="input"
+                  type="number"
+                  min="1"
+                  max="65535"
+                  value={state.listenPort}
+                  onChange={(e) => set('listenPort', e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && next()}
+                  style={{ width: 120 }}
+                />
+              </div>
+              <div className={styles.forwardingBox}>
+                <p className={styles.forwardingTitle}>How to forward a port on your router</p>
+                <ol className={styles.forwardingSteps}>
+                  <li>
+                    Find your local IP — run <code>hostname -I</code> (Linux/Mac) or{' '}
+                    <code>ipconfig</code> (Windows).
+                  </li>
+                  <li>
+                    Open your router&apos;s admin panel (typically <code>http://192.168.1.1</code>{' '}
+                    or <code>http://192.168.0.1</code>).
+                  </li>
+                  <li>
+                    Locate the <strong>Port Forwarding</strong> section (may appear as
+                    &ldquo;Virtual Servers&rdquo;, &ldquo;NAT&rdquo;, or &ldquo;Applications &amp;
+                    Gaming&rdquo;).
+                  </li>
+                  <li>
+                    Add a rule: external port <strong>{state.listenPort || '7734'}</strong>,
+                    internal IP <em>your local IP</em>, internal port{' '}
+                    <strong>{state.listenPort || '7734'}</strong>, protocol <strong>TCP</strong>.
+                  </li>
+                  <li>Save and apply.</li>
+                </ol>
+              </div>
+            </>
+          )}
+
+          {/* ── Step 6: Preferences ─────────────────────────────────────── */}
+          {step === 6 && (
             <>
               <h1 className={styles.title}>A few preferences</h1>
               <p className={styles.description}>

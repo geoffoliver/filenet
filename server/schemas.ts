@@ -27,6 +27,7 @@ export const PatchSettingsBodySchema = z
     sharedFolders: z.array(z.string().trim().min(1)).optional(),
     downloadFolder: z.string().trim().min(1).nullable().optional(),
     rescanIntervalMinutes: z.int().min(0).max(35791).optional(),
+    listenPort: portSchema.optional(),
   })
   .strict();
 

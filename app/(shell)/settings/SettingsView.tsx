@@ -428,6 +428,90 @@ function ScriptsSection() {
   );
 }
 
+// ── Networking section ────────────────────────────────────────────────────────
+
+function NetworkingSection({ initial }: { initial: Settings }) {
+  const [port, setPort] = useState(String(initial.listenPort));
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [error, setError] = useState('');
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    const parsed = parseInt(port, 10);
+    if (isNaN(parsed) || parsed < 1 || parsed > 65535) {
+      setError('Port must be a number between 1 and 65535.');
+      return;
+    }
+    setSaving(true);
+    setError('');
+    setSaved(false);
+    patchSettings({ listenPort: parsed })
+      .then(() => {
+        setSaved(true);
+        setTimeout(() => setSaved(false), 2000);
+      })
+      .catch((err: Error) => setError(err.message))
+      .finally(() => setSaving(false));
+  }
+
+  return (
+    <Section title="Networking">
+      <form className={styles.form} onSubmit={handleSubmit}>
+        <label className={styles.field}>
+          <span className={styles.label}>Listening port</span>
+          <div className={styles.intervalRow}>
+            <input
+              className={`input ${styles.intervalInput}`}
+              type="number"
+              min="1"
+              max="65535"
+              value={port}
+              onChange={(e) => setPort(e.target.value)}
+            />
+          </div>
+        </label>
+        <p className={styles.hint}>
+          <strong>Restart required</strong> — port changes take effect the next time the server
+          starts.
+        </p>
+
+        <div className={styles.portForwarding}>
+          <p className={styles.label}>Port forwarding</p>
+          <p className={styles.hint}>
+            For friends outside your local network to connect, forward this port on your router:
+          </p>
+          <ol className={styles.forwardingSteps}>
+            <li>
+              Find your local IP address — run <code>hostname -I</code> (Linux/Mac) or{' '}
+              <code>ipconfig</code> (Windows) and look for your network adapter&apos;s IPv4 address.
+            </li>
+            <li>
+              Open your router&apos;s admin panel (usually <code>http://192.168.1.1</code> or{' '}
+              <code>http://192.168.0.1</code>).
+            </li>
+            <li>
+              Find the <strong>Port Forwarding</strong> section (may be labeled &ldquo;Virtual
+              Servers&rdquo;, &ldquo;NAT&rdquo;, or &ldquo;Applications &amp; Gaming&rdquo;).
+            </li>
+            <li>
+              Add a rule: external port <strong>{port || '7734'}</strong>, internal IP{' '}
+              <em>your local IP</em>, internal port <strong>{port || '7734'}</strong>, protocol{' '}
+              <strong>TCP</strong>.
+            </li>
+            <li>Save and apply.</li>
+          </ol>
+        </div>
+
+        {error && <p className={styles.error}>{error}</p>}
+        <div className={styles.formFooter}>
+          <SaveButton saving={saving} saved={saved} />
+        </div>
+      </form>
+    </Section>
+  );
+}
+
 // ── Maintenance section ───────────────────────────────────────────────────────
 
 function MaintenanceSection() {
@@ -502,6 +586,7 @@ export default function SettingsView() {
       <ProfileSection initial={settings} />
       <PrivacySection initial={settings} />
       <FilesSection initial={settings} />
+      <NetworkingSection initial={settings} />
       <ScriptsSection />
       <MaintenanceSection />
     </div>

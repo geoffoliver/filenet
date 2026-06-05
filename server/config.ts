@@ -10,6 +10,7 @@ export type SettingsPatch = {
   sharedFolders?: string[];
   downloadFolder?: string | null;
   rescanIntervalMinutes?: number;
+  listenPort?: number;
 };
 
 export type SafeSettings = Omit<Settings, 'invitePassword' | 'sharedFolders'> & {

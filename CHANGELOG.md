@@ -15,6 +15,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `TransferStats` type exposed for script authors: `downloadId`, `filename`, `sha256`, `size`, `mimeType`, `durationMs`, `bytesReceived`, `maxSources`, `startedAt`, `completedAt`
   - **Schema migration required:** run `bunx prisma db push` to create the `PostDownloadScript` table
 
+- **Listening port configuration** — configure the P2P listening port from Settings; port-forwarding instructions rendered dynamically with the chosen port number; env var `P2P_PORT` still overrides the DB value at startup
+  - Setup wizard: new step 5 for port selection + port-forwarding instructions (Preferences moves to step 6)
+  - **Schema migration required:** run `bunx prisma db push` to add the `listenPort` column to `Settings`
+
 - **Online presence** — friends page shows a green dot next to connected friends (polling every 5 s); chat sidebar shows a presence dot on DM conversations whose peer is currently online
 
 ## [0.1.0] — 2026-06-03

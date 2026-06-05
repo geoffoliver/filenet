@@ -7,6 +7,7 @@ export type Settings = {
   sharedFolders: string[];
   downloadFolder: string | null;
   rescanIntervalMinutes: number;
+  listenPort: number;
 };
 
 export type SettingsPatch = {
@@ -17,6 +18,7 @@ export type SettingsPatch = {
   sharedFolders?: string[];
   downloadFolder?: string | null;
   rescanIntervalMinutes?: number;
+  listenPort?: number;
 };
 
 export async function getMyInfo(): Promise<{ nodeId: string }> {

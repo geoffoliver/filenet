@@ -9,15 +9,16 @@ import { pauseAllActiveDownloads } from './download-manager';
 import { startPeriodicRescan } from './indexer';
 
 const prisma = createPrismaClient();
-const PORT = parseInt(process.env.P2P_PORT ?? '7734', 10);
 const MGMT_PORT = parseInt(process.env.MGMT_PORT ?? '7735', 10);
-if (isNaN(PORT) || PORT < 1 || PORT > 65535)
-  throw new Error(`Invalid P2P_PORT: "${process.env.P2P_PORT ?? ''}"`);
 if (isNaN(MGMT_PORT) || MGMT_PORT < 1 || MGMT_PORT > 65535)
   throw new Error(`Invalid MGMT_PORT: "${process.env.MGMT_PORT ?? ''}"`);
-if (PORT === MGMT_PORT) throw new Error('P2P_PORT and MGMT_PORT must be different');
 
 const identity = await getOrCreateIdentity(prisma);
+const startupSettings = await getOrCreateSettings(prisma);
+const PORT = parseInt(process.env.P2P_PORT ?? String(startupSettings.listenPort), 10);
+if (isNaN(PORT) || PORT < 1 || PORT > 65535)
+  throw new Error(`Invalid P2P port: ${process.env.P2P_PORT ?? startupSettings.listenPort}`);
+if (PORT === MGMT_PORT) throw new Error('P2P port and management port must be different');
 console.log(`Node ID:   ${identity.nodeId}`);
 console.log(`P2P port:  ${PORT}`);
 console.log(`Mgmt port: ${MGMT_PORT} (localhost only)`);

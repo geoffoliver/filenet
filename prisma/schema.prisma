@@ -45,6 +45,7 @@ model Settings {
   sharedFolders                  String  @default("[]")
   downloadFolder                 String?
   rescanIntervalMinutes          Int     @default(0)
+  listenPort                     Int     @default(7734)
 }
 
 enum DownloadState {
