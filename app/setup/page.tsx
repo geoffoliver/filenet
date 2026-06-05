@@ -85,7 +85,10 @@ export default function SetupPage() {
         name: state.name.trim(),
         sharedFolders: state.sharedFolders,
         downloadFolder: state.downloadFolder.trim() || null,
-        listenPort: parseInt(state.listenPort, 10) || 7734,
+        listenPort: (() => {
+          const p = parseInt(state.listenPort, 10);
+          return !isNaN(p) && p >= 1 && p <= 65535 ? p : 7734;
+        })(),
         autoAcceptFromAnyone: state.autoAcceptFromAnyone,
         autoAcceptFromFriendsOfFriends: state.autoAcceptFromFriendsOfFriends,
         invitePassword: state.invitePassword.trim() || null,
