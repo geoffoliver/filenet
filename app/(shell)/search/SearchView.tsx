@@ -130,7 +130,7 @@ function MetaDetail({ hit }: { hit: SearchHit }) {
     if (typeof meta.duration === 'number')
       rows.push({ label: 'Duration', value: formatDuration(meta.duration) });
     if (typeof meta.bitrate === 'number')
-      rows.push({ label: 'Bitrate', value: `${Math.round(meta.bitrate / 1000)} kbps` });
+      rows.push({ label: 'Bitrate', value: `${meta.bitrate} kbps` });
     if (meta.width && meta.height)
       rows.push({ label: 'Dimensions', value: `${meta.width}×${meta.height}` });
   }

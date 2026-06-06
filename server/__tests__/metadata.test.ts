@@ -26,7 +26,7 @@ function buildMinimalPdf(info: Record<string, string> = {}): Buffer {
 
   const add = (s: string): void => {
     parts.push(s);
-    pos += s.length; // safe: all characters are ASCII (1 byte each)
+    pos += Buffer.byteLength(s);
   };
 
   add('%PDF-1.4\n');
