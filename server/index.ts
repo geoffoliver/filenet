@@ -22,7 +22,12 @@ if (isNaN(PORT) || PORT < 1 || PORT > 65535)
       ? `Invalid P2P_PORT env var: "${process.env.P2P_PORT}"`
       : `Invalid listenPort in settings: ${startupSettings.listenPort}`,
   );
-if (PORT === MGMT_PORT) throw new Error('P2P port and management port must be different');
+if (PORT === MGMT_PORT)
+  throw new Error(
+    `P2P port and management port must be different — both resolved to ${PORT}` +
+      ` (P2P from ${process.env.P2P_PORT !== undefined ? 'P2P_PORT env var' : 'listenPort in settings'},` +
+      ` management from ${process.env.MGMT_PORT !== undefined ? 'MGMT_PORT env var' : 'default 7735'})`,
+  );
 console.log(`Node ID:   ${identity.nodeId}`);
 console.log(`P2P port:  ${PORT}`);
 console.log(`Mgmt port: ${MGMT_PORT} (localhost only)`);

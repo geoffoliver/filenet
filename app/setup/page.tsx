@@ -244,6 +244,10 @@ export default function SetupPage() {
                 <strong>7734</strong>. You&rsquo;ll need to forward this port on your router for
                 friends outside your local network to reach you.
               </p>
+              <p className={styles.description} style={{ marginTop: -16 }}>
+                <strong>Restart required</strong> — Filenet reads the port once at startup, so this
+                setting takes effect the next time the server starts.
+              </p>
               <div className="field">
                 <label className="label" htmlFor="listenPort">
                   Listening port
