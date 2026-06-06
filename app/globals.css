@@ -69,11 +69,6 @@
 
 /* ── Global resets ─────────────────────────────────────────────────────────── */
 
-html,
-body {
-  @apply h-full;
-}
-
 body {
   background: var(--bg-base);
   color: var(--text-primary);
