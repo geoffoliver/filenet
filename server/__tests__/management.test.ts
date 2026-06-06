@@ -370,6 +370,28 @@ describe('PATCH /api/settings', () => {
     const body = await res.json();
     expect(body.downloadFolder).toBeNull();
   });
+
+  it('updates listenPort and returns it', async () => {
+    const res = await makeHandler()(jsonReq('/api/settings', 'PATCH', { listenPort: 8080 }));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.listenPort).toBe(8080);
+  });
+
+  it('returns 400 for listenPort below 1', async () => {
+    const res = await makeHandler()(jsonReq('/api/settings', 'PATCH', { listenPort: 0 }));
+    expect(res.status).toBe(400);
+  });
+
+  it('returns 400 for listenPort above 65535', async () => {
+    const res = await makeHandler()(jsonReq('/api/settings', 'PATCH', { listenPort: 65536 }));
+    expect(res.status).toBe(400);
+  });
+
+  it('returns 400 for non-integer listenPort', async () => {
+    const res = await makeHandler()(jsonReq('/api/settings', 'PATCH', { listenPort: 80.5 }));
+    expect(res.status).toBe(400);
+  });
 });
 
 // ---------------------------------------------------------------------------

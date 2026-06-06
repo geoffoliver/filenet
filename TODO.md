@@ -101,7 +101,7 @@
 - [x] Step 4: Download folder
 - [x] Step 5: Auto-accept preferences + invite password
 - [x] Progress bar + back/skip/next/finish navigation
-- [ ] Step: listening port + port-forwarding instructions
+- [x] Step: listening port + port-forwarding instructions
 - [ ] Extended profile fields (email, picture, bio, links) — deferred to Settings
 - [ ] Maybe: native folder-browser component (API-backed directory listing) to replace manual path input in shared folders + download folder steps
 
@@ -157,7 +157,7 @@
 - [x] Download folder picker
 - [x] Auto-accept toggles + invite password
 - [x] Force rescan button
-- [ ] Listening port field + port-forwarding instructions (needs schema migration)
+- [x] Listening port field + port-forwarding instructions
 - [x] Post-download scripts: add path, reorder, remove
 
 ---
