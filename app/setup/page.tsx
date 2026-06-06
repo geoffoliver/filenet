@@ -56,8 +56,8 @@ export default function SetupPage() {
   function canAdvance(): boolean {
     if (step === 2 && !state.name.trim()) return false;
     if (step === 5) {
-      const p = parseInt(state.listenPort, 10);
-      if (isNaN(p) || p < 1 || p > 65535) return false;
+      const p = Number(state.listenPort);
+      if (!Number.isInteger(p) || p < 1 || p > 65535) return false;
     }
     return true;
   }
@@ -86,8 +86,8 @@ export default function SetupPage() {
         sharedFolders: state.sharedFolders,
         downloadFolder: state.downloadFolder.trim() || null,
         listenPort: (() => {
-          const p = parseInt(state.listenPort, 10);
-          return !isNaN(p) && p >= 1 && p <= 65535 ? p : 7734;
+          const p = Number(state.listenPort);
+          return Number.isInteger(p) && p >= 1 && p <= 65535 ? p : 7734;
         })(),
         autoAcceptFromAnyone: state.autoAcceptFromAnyone,
         autoAcceptFromFriendsOfFriends: state.autoAcceptFromFriendsOfFriends,
@@ -102,10 +102,10 @@ export default function SetupPage() {
 
   const progress = ((step - 1) / (TOTAL_STEPS - 1)) * 100;
 
-  const portPreviewParsed = parseInt(state.listenPort, 10);
+  const portPreviewNum = Number(state.listenPort);
   const portPreview =
-    !isNaN(portPreviewParsed) && portPreviewParsed >= 1 && portPreviewParsed <= 65535
-      ? String(portPreviewParsed)
+    Number.isInteger(portPreviewNum) && portPreviewNum >= 1 && portPreviewNum <= 65535
+      ? String(portPreviewNum)
       : '7734';
 
   return (

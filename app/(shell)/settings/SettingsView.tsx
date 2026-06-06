@@ -437,16 +437,16 @@ function NetworkingSection({ initial }: { initial: Settings }) {
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState('');
 
-  const parsedPort = parseInt(port, 10);
+  const parsedPort = Number(port);
   const displayPort =
-    !isNaN(parsedPort) && parsedPort >= 1 && parsedPort <= 65535
+    Number.isInteger(parsedPort) && parsedPort >= 1 && parsedPort <= 65535
       ? String(parsedPort)
       : String(savedPort);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    const parsed = parseInt(port, 10);
-    if (isNaN(parsed) || parsed < 1 || parsed > 65535) {
+    const parsed = Number(port);
+    if (!Number.isInteger(parsed) || parsed < 1 || parsed > 65535) {
       setError('Port must be a number between 1 and 65535.');
       return;
     }
