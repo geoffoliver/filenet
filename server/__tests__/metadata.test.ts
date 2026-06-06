@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
+import { join, resolve } from 'node:path';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
 import { extractMetadata } from '../metadata';
@@ -195,6 +195,22 @@ describe('extractMetadata', () => {
       await writeFile(path, 'not real wav');
       expect(await extractMetadata(path)).toBeNull();
     });
+
+    it('extracts metadata from a valid MP3', async () => {
+      // fixtures/sample.mp3: Nick Drake — Introduction, Bryter Layter, 1970
+      const meta = await extractMetadata(resolve(__dirname, 'fixtures/sample.mp3'));
+      expect(meta).not.toBeNull();
+      expect(meta!.title).toBe('Introduction');
+      expect(meta!.artist).toBe('Nick Drake');
+      expect(meta!.album).toBe('Bryter Layter');
+      expect(meta!.year).toBe(1970);
+      expect(meta!.genre).toBe('Folk');
+      expect(meta!.trackNumber).toBe(1);
+      expect(meta!.sampleRate).toBe(44100);
+      expect(meta!.channels).toBe(2);
+      expect(meta!.bitrate).toBe(128);
+      expect(typeof meta!.duration).toBe('number');
+    });
   });
 
   // ── Video ──────────────────────────────────────────────────────────────────
@@ -217,6 +233,16 @@ describe('extractMetadata', () => {
       await writeFile(path, 'not real mov');
       expect(await extractMetadata(path)).toBeNull();
     });
+
+    it('extracts video dimensions, container, and codec from a valid MKV', async () => {
+      // fixtures/sample.mkv: 1-second H.264 clip, 320×240
+      const meta = await extractMetadata(resolve(__dirname, 'fixtures/sample.mkv'));
+      expect(meta).not.toBeNull();
+      expect(meta!.width).toBe(320);
+      expect(meta!.height).toBe(240);
+      expect(meta!.container).toBe('EBML/matroska');
+      expect(meta!.codec).toBe('MPEG4/ISO/AVC');
+    });
   });
 
   // ── Images ─────────────────────────────────────────────────────────────────
@@ -238,6 +264,19 @@ describe('extractMetadata', () => {
       const path = join(tmpDir, 'bad.webp');
       await writeFile(path, 'not real webp');
       expect(await extractMetadata(path)).toBeNull();
+    });
+
+    it('extracts EXIF metadata from a JPEG with embedded EXIF', async () => {
+      // fixtures/sample.jpg: minimal JPEG with Make=TestCam, Model=TestModel X,
+      // DateTimeOriginal=2023:01:15 12:00:00, width=100, height=75
+      const meta = await extractMetadata(resolve(__dirname, 'fixtures/sample.jpg'));
+      expect(meta).not.toBeNull();
+      expect(meta!.make).toBe('TestCam');
+      expect(meta!.model).toBe('TestModel X');
+      expect(meta!.width).toBe(100);
+      expect(meta!.height).toBe(75);
+      expect(typeof meta!.dateTime).toBe('string');
+      expect(meta!.dateTime as string).toContain('2023');
     });
   });
 

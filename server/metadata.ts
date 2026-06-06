@@ -48,9 +48,9 @@ async function extractAudioMetadata(path: string): Promise<Record<string, unknow
     if (common.album) meta.album = common.album;
     if (common.albumartist) meta.albumArtist = common.albumartist;
     if (common.year) meta.year = common.year;
-    if (common.track?.no) meta.trackNumber = common.track.no;
-    if (common.track?.of) meta.trackTotal = common.track.of;
-    if (common.disk?.no) meta.discNumber = common.disk.no;
+    if (common.track?.no != null) meta.trackNumber = common.track.no;
+    if (common.track?.of != null) meta.trackTotal = common.track.of;
+    if (common.disk?.no != null) meta.discNumber = common.disk.no;
     if (common.genre?.[0]) meta.genre = common.genre[0];
     if (format.duration) meta.duration = format.duration;
     if (format.bitrate) meta.bitrate = Math.round(format.bitrate / 1000);
@@ -71,8 +71,8 @@ async function extractVideoMetadata(path: string): Promise<Record<string, unknow
     if (format.bitrate) meta.bitrate = Math.round(format.bitrate / 1000);
     if (format.container) meta.container = format.container;
     const videoTrack = format.trackInfo?.find((t) => t.video !== undefined);
-    if (videoTrack?.video?.pixelWidth) meta.width = videoTrack.video.pixelWidth;
-    if (videoTrack?.video?.pixelHeight) meta.height = videoTrack.video.pixelHeight;
+    if (videoTrack?.video?.pixelWidth != null) meta.width = videoTrack.video.pixelWidth;
+    if (videoTrack?.video?.pixelHeight != null) meta.height = videoTrack.video.pixelHeight;
     if (videoTrack?.codecName) meta.codec = videoTrack.codecName;
     return Object.keys(meta).length > 0 ? meta : null;
   } catch {
@@ -101,12 +101,12 @@ async function extractImageMetadata(path: string): Promise<Record<string, unknow
 }
 
 async function extractPdfMetadata(path: string): Promise<Record<string, unknown> | null> {
+  let parser: { destroy(): Promise<void> } | null = null;
   try {
     const { PDFParse } = await import('pdf-parse');
     const data = await Bun.file(path).arrayBuffer();
-    const parser = new PDFParse({ data: new Uint8Array(data) });
+    parser = new PDFParse({ data: new Uint8Array(data) });
     const result = await parser.getInfo();
-    await parser.destroy();
     const meta: Record<string, unknown> = {};
     if (result.info?.Title) meta.title = result.info.Title;
     if (result.info?.Author) meta.author = result.info.Author;
@@ -116,6 +116,8 @@ async function extractPdfMetadata(path: string): Promise<Record<string, unknown>
     return Object.keys(meta).length > 0 ? meta : null;
   } catch {
     return null;
+  } finally {
+    await parser?.destroy().catch(() => {});
   }
 }
 
