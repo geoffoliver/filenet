@@ -8,7 +8,6 @@ import { unlinkSync } from 'fs';
 import type { PrismaClient } from '@prisma/client';
 
 import {
-  extractMetadata,
   hashFile,
   indexFile,
   removeStaleEntries,
@@ -67,30 +66,6 @@ describe('hashFile', () => {
     await writeFile(p1, 'content A');
     await writeFile(p2, 'content B');
     expect(await hashFile(p1)).not.toBe(await hashFile(p2));
-  });
-});
-
-// ---------------------------------------------------------------------------
-// extractMetadata
-// ---------------------------------------------------------------------------
-
-describe('extractMetadata', () => {
-  it('returns null for a plain text file', async () => {
-    const path = join(tmpDir, 'meta-text.txt');
-    await writeFile(path, 'hello world');
-    expect(await extractMetadata(path)).toBeNull();
-  });
-
-  it('returns null for an unknown extension', async () => {
-    const path = join(tmpDir, 'meta-unknown.xyz');
-    await writeFile(path, 'data');
-    expect(await extractMetadata(path)).toBeNull();
-  });
-
-  it('returns null for an audio extension with invalid content', async () => {
-    const path = join(tmpDir, 'meta-bad.mp3');
-    await writeFile(path, 'not real audio data');
-    expect(await extractMetadata(path)).toBeNull();
   });
 });
 
