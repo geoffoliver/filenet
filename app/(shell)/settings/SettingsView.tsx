@@ -432,6 +432,7 @@ function ScriptsSection() {
 
 function NetworkingSection({ initial }: { initial: Settings }) {
   const [port, setPort] = useState(String(initial.listenPort));
+  const [savedPort, setSavedPort] = useState(initial.listenPort);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState('');
@@ -440,7 +441,7 @@ function NetworkingSection({ initial }: { initial: Settings }) {
   const displayPort =
     !isNaN(parsedPort) && parsedPort >= 1 && parsedPort <= 65535
       ? String(parsedPort)
-      : String(initial.listenPort);
+      : String(savedPort);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -453,7 +454,8 @@ function NetworkingSection({ initial }: { initial: Settings }) {
     setError('');
     setSaved(false);
     patchSettings({ listenPort: parsed })
-      .then(() => {
+      .then((updated) => {
+        setSavedPort(updated.listenPort);
         setSaved(true);
         setTimeout(() => setSaved(false), 2000);
       })
