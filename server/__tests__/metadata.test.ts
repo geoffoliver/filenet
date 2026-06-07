@@ -405,6 +405,14 @@ describe('extractMetadata', () => {
       expect(meta!.author).toBeUndefined();
     });
 
+    it('truncates EPUB title longer than 500 characters', async () => {
+      const path = join(tmpDir, 'long-title.epub');
+      await writeFile(path, await buildEpub({ title: 'T'.repeat(600) }));
+      const meta = await extractMetadata(path);
+      expect(meta).not.toBeNull();
+      expect((meta!.title as string).length).toBe(500);
+    });
+
     it('truncates EPUB description longer than 500 characters', async () => {
       const longDesc = 'word '.repeat(200).trim(); // 1000 chars
       const path = join(tmpDir, 'long-desc.epub');

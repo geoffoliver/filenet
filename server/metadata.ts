@@ -5,6 +5,14 @@ import { parseFile } from 'music-metadata';
 const MAX_DOC_BYTES = 50_000_000; // 50 MB — guard against OOM on huge files
 const MAX_TEXT_FIELD = 500; // keep metadata JSON safely under the 4096-char protocol limit
 
+function clampStrings(meta: Record<string, unknown>): Record<string, unknown> {
+  for (const k of Object.keys(meta)) {
+    if (typeof meta[k] === 'string' && (meta[k] as string).length > MAX_TEXT_FIELD)
+      meta[k] = (meta[k] as string).slice(0, MAX_TEXT_FIELD);
+  }
+  return meta;
+}
+
 const AUDIO_EXTENSIONS = new Set([
   '.aac',
   '.aif',
@@ -59,7 +67,7 @@ async function extractAudioMetadata(path: string): Promise<Record<string, unknow
     if (format.bitrate) meta.bitrate = Math.round(format.bitrate / 1000);
     if (format.sampleRate) meta.sampleRate = format.sampleRate;
     if (format.numberOfChannels) meta.channels = format.numberOfChannels;
-    return Object.keys(meta).length > 0 ? meta : null;
+    return Object.keys(meta).length > 0 ? clampStrings(meta) : null;
   } catch {
     return null;
   }
@@ -77,7 +85,7 @@ async function extractVideoMetadata(path: string): Promise<Record<string, unknow
     if (videoTrack?.video?.pixelWidth != null) meta.width = videoTrack.video.pixelWidth;
     if (videoTrack?.video?.pixelHeight != null) meta.height = videoTrack.video.pixelHeight;
     if (videoTrack?.codecName) meta.codec = videoTrack.codecName;
-    return Object.keys(meta).length > 0 ? meta : null;
+    return Object.keys(meta).length > 0 ? clampStrings(meta) : null;
   } catch {
     return null;
   }
@@ -97,7 +105,7 @@ async function extractImageMetadata(path: string): Promise<Record<string, unknow
     if (exif.Model) meta.model = exif.Model;
     const dt = exif.DateTimeOriginal ?? exif.DateTime;
     if (dt != null) meta.dateTime = dt instanceof Date ? dt.toISOString() : String(dt);
-    return Object.keys(meta).length > 0 ? meta : null;
+    return Object.keys(meta).length > 0 ? clampStrings(meta) : null;
   } catch {
     return null;
   }
@@ -116,10 +124,9 @@ async function extractPdfMetadata(path: string): Promise<Record<string, unknown>
     if (result.info?.Title) meta.title = result.info.Title;
     if (result.info?.Author) meta.author = result.info.Author;
     if (result.info?.Subject) meta.subject = result.info.Subject;
-    if (result.info?.Keywords)
-      meta.keywords = String(result.info.Keywords).slice(0, MAX_TEXT_FIELD);
+    if (result.info?.Keywords) meta.keywords = String(result.info.Keywords);
     if (result.total > 0) meta.pageCount = result.total;
-    return Object.keys(meta).length > 0 ? meta : null;
+    return Object.keys(meta).length > 0 ? clampStrings(meta) : null;
   } catch {
     return null;
   } finally {
@@ -161,10 +168,10 @@ async function extractEpubMetadata(path: string): Promise<Record<string, unknown
     if (creator) meta.author = creator;
     if (language) meta.language = language;
     if (publisher) meta.publisher = publisher;
-    if (description) meta.description = description.slice(0, MAX_TEXT_FIELD);
-    if (identifier) meta.identifier = identifier.slice(0, MAX_TEXT_FIELD);
+    if (description) meta.description = description;
+    if (identifier) meta.identifier = identifier;
     if (date) meta.published = date;
-    return Object.keys(meta).length > 0 ? meta : null;
+    return Object.keys(meta).length > 0 ? clampStrings(meta) : null;
   } catch {
     return null;
   }
@@ -194,10 +201,10 @@ async function extractDocxMetadata(path: string): Promise<Record<string, unknown
     const revision = extractTag(coreXml, 'revision');
     if (title) meta.title = title;
     if (creator) meta.author = creator;
-    if (description) meta.description = description.slice(0, MAX_TEXT_FIELD);
-    if (keywords) meta.keywords = keywords.slice(0, MAX_TEXT_FIELD);
+    if (description) meta.description = description;
+    if (keywords) meta.keywords = keywords;
     if (revision) meta.revision = Number.isInteger(Number(revision)) ? Number(revision) : revision;
-    return Object.keys(meta).length > 0 ? meta : null;
+    return Object.keys(meta).length > 0 ? clampStrings(meta) : null;
   } catch {
     return null;
   }
