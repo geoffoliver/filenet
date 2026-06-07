@@ -270,7 +270,8 @@ describe('handleSearchRequest', () => {
     )!;
     expect(item.filename.length).toBeLessThanOrEqual(1000);
     expect(item.mimeType!.length).toBeLessThanOrEqual(200);
-    expect(item.metadata!.length).toBeLessThanOrEqual(4096);
+    // Oversized metadata is dropped (null) rather than sliced into invalid JSON
+    expect(item.metadata).toBeNull();
   });
 
   it('swallows sendFn error when sending results to requester', async () => {

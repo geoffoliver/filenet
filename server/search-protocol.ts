@@ -237,7 +237,7 @@ export async function handleSearchRequest(
         size: f.size.toString(),
         sha256: f.sha256,
         mimeType: f.mimeType?.slice(0, 200) ?? null,
-        metadata: f.metadata?.slice(0, 4096) ?? null,
+        metadata: f.metadata != null && f.metadata.length <= 4096 ? f.metadata : null,
       })),
     };
     try {

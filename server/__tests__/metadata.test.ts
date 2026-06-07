@@ -44,7 +44,8 @@ function buildMinimalPdf(info: Record<string, string> = {}): Buffer {
   let trailerInfoRef = '';
   if (infoEntries.length > 0) {
     objOffsets[4] = pos;
-    const dict = infoEntries.map(([k, v]) => `/${k} (${v})`).join(' ');
+    const escapePdfStr = (s: string): string => s.replace(/[\\()]/g, (c) => `\\${c}`);
+    const dict = infoEntries.map(([k, v]) => `/${k} (${escapePdfStr(v)})`).join(' ');
     add(`4 0 obj\n<<${dict}>>\nendobj\n`);
     trailerInfoRef = ' /Info 4 0 R';
   }
@@ -317,6 +318,23 @@ describe('extractMetadata', () => {
       expect(meta!.pageCount).toBe(1);
       expect(meta!.title).toBeUndefined();
     });
+
+    it('handles PDF string values containing (, ), and \\', async () => {
+      const path = join(tmpDir, 'special-chars.pdf');
+      await writeFile(path, buildMinimalPdf({ Title: 'A (test) value with \\backslash' }));
+      const meta = await extractMetadata(path);
+      expect(meta).not.toBeNull();
+      expect(meta!.title).toBe('A (test) value with \\backslash');
+    });
+
+    it('truncates PDF keywords longer than 500 characters', async () => {
+      const longKeywords = 'keyword '.repeat(100).trim(); // 800 chars
+      const path = join(tmpDir, 'long-keywords.pdf');
+      await writeFile(path, buildMinimalPdf({ Keywords: longKeywords }));
+      const meta = await extractMetadata(path);
+      expect(meta).not.toBeNull();
+      expect((meta!.keywords as string).length).toBe(500);
+    });
   });
 
   // ── EPUB ───────────────────────────────────────────────────────────────────
@@ -386,6 +404,24 @@ describe('extractMetadata', () => {
       expect(meta!.language).toBe('fr');
       expect(meta!.author).toBeUndefined();
     });
+
+    it('truncates EPUB description longer than 500 characters', async () => {
+      const longDesc = 'word '.repeat(200).trim(); // 1000 chars
+      const path = join(tmpDir, 'long-desc.epub');
+      await writeFile(path, await buildEpub({ title: 'Book', description: longDesc }));
+      const meta = await extractMetadata(path);
+      expect(meta).not.toBeNull();
+      expect((meta!.description as string).length).toBe(500);
+    });
+
+    it('truncates EPUB identifier longer than 500 characters', async () => {
+      const longId = 'x'.repeat(600);
+      const path = join(tmpDir, 'long-id.epub');
+      await writeFile(path, await buildEpub({ title: 'Book', identifier: longId }));
+      const meta = await extractMetadata(path);
+      expect(meta).not.toBeNull();
+      expect((meta!.identifier as string).length).toBe(500);
+    });
   });
 
   // ── DOCX ───────────────────────────────────────────────────────────────────
@@ -441,6 +477,24 @@ describe('extractMetadata', () => {
       expect(meta!.title).toBe('Partial Doc');
       expect(meta!.revision).toBe(5);
       expect(meta!.author).toBeUndefined();
+    });
+
+    it('truncates DOCX description longer than 500 characters', async () => {
+      const longDesc = 'word '.repeat(200).trim(); // 1000 chars
+      const path = join(tmpDir, 'long-desc.docx');
+      await writeFile(path, await buildDocx({ title: 'Doc', description: longDesc }));
+      const meta = await extractMetadata(path);
+      expect(meta).not.toBeNull();
+      expect((meta!.description as string).length).toBe(500);
+    });
+
+    it('truncates DOCX keywords longer than 500 characters', async () => {
+      const longKeywords = 'tag '.repeat(200).trim(); // 800 chars
+      const path = join(tmpDir, 'long-keywords.docx');
+      await writeFile(path, await buildDocx({ title: 'Doc', keywords: longKeywords }));
+      const meta = await extractMetadata(path);
+      expect(meta).not.toBeNull();
+      expect((meta!.keywords as string).length).toBe(500);
     });
   });
 });

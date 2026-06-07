@@ -2,6 +2,9 @@ import { extname } from 'node:path';
 
 import { parseFile } from 'music-metadata';
 
+const MAX_DOC_BYTES = 50_000_000; // 50 MB — guard against OOM on huge files
+const MAX_TEXT_FIELD = 500; // keep metadata JSON safely under the 4096-char protocol limit
+
 const AUDIO_EXTENSIONS = new Set([
   '.aac',
   '.aif',
@@ -52,7 +55,7 @@ async function extractAudioMetadata(path: string): Promise<Record<string, unknow
     if (common.track?.of != null) meta.trackTotal = common.track.of;
     if (common.disk?.no != null) meta.discNumber = common.disk.no;
     if (common.genre?.[0]) meta.genre = common.genre[0];
-    if (format.duration) meta.duration = format.duration;
+    if (format.duration != null) meta.duration = format.duration;
     if (format.bitrate) meta.bitrate = Math.round(format.bitrate / 1000);
     if (format.sampleRate) meta.sampleRate = format.sampleRate;
     if (format.numberOfChannels) meta.channels = format.numberOfChannels;
@@ -67,7 +70,7 @@ async function extractVideoMetadata(path: string): Promise<Record<string, unknow
     const { common, format } = await parseFile(path);
     const meta: Record<string, unknown> = {};
     if (common.title) meta.title = common.title;
-    if (format.duration) meta.duration = format.duration;
+    if (format.duration != null) meta.duration = format.duration;
     if (format.bitrate) meta.bitrate = Math.round(format.bitrate / 1000);
     if (format.container) meta.container = format.container;
     const videoTrack = format.trackInfo?.find((t) => t.video !== undefined);
@@ -104,14 +107,17 @@ async function extractPdfMetadata(path: string): Promise<Record<string, unknown>
   let parser: { destroy(): Promise<void> } | null = null;
   try {
     const { PDFParse } = await import('pdf-parse');
-    const data = await Bun.file(path).arrayBuffer();
+    const file = Bun.file(path);
+    if (file.size > MAX_DOC_BYTES) return null;
+    const data = await file.arrayBuffer();
     parser = new PDFParse({ data: new Uint8Array(data) });
     const result = await parser.getInfo();
     const meta: Record<string, unknown> = {};
     if (result.info?.Title) meta.title = result.info.Title;
     if (result.info?.Author) meta.author = result.info.Author;
     if (result.info?.Subject) meta.subject = result.info.Subject;
-    if (result.info?.Keywords) meta.keywords = result.info.Keywords;
+    if (result.info?.Keywords)
+      meta.keywords = String(result.info.Keywords).slice(0, MAX_TEXT_FIELD);
     if (result.total > 0) meta.pageCount = result.total;
     return Object.keys(meta).length > 0 ? meta : null;
   } catch {
@@ -124,7 +130,9 @@ async function extractPdfMetadata(path: string): Promise<Record<string, unknown>
 async function extractEpubMetadata(path: string): Promise<Record<string, unknown> | null> {
   try {
     const JSZip = (await import('jszip')).default;
-    const data = await Bun.file(path).arrayBuffer();
+    const file = Bun.file(path);
+    if (file.size > MAX_DOC_BYTES) return null;
+    const data = await file.arrayBuffer();
     const zip = await JSZip.loadAsync(data);
 
     const containerXml = await zip.file('META-INF/container.xml')?.async('text');
@@ -153,8 +161,8 @@ async function extractEpubMetadata(path: string): Promise<Record<string, unknown
     if (creator) meta.author = creator;
     if (language) meta.language = language;
     if (publisher) meta.publisher = publisher;
-    if (description) meta.description = description;
-    if (identifier) meta.identifier = identifier;
+    if (description) meta.description = description.slice(0, MAX_TEXT_FIELD);
+    if (identifier) meta.identifier = identifier.slice(0, MAX_TEXT_FIELD);
     if (date) meta.published = date;
     return Object.keys(meta).length > 0 ? meta : null;
   } catch {
@@ -165,7 +173,9 @@ async function extractEpubMetadata(path: string): Promise<Record<string, unknown
 async function extractDocxMetadata(path: string): Promise<Record<string, unknown> | null> {
   try {
     const JSZip = (await import('jszip')).default;
-    const data = await Bun.file(path).arrayBuffer();
+    const file = Bun.file(path);
+    if (file.size > MAX_DOC_BYTES) return null;
+    const data = await file.arrayBuffer();
     const zip = await JSZip.loadAsync(data);
 
     const coreXml = await zip.file('docProps/core.xml')?.async('text');
@@ -184,8 +194,8 @@ async function extractDocxMetadata(path: string): Promise<Record<string, unknown
     const revision = extractTag(coreXml, 'revision');
     if (title) meta.title = title;
     if (creator) meta.author = creator;
-    if (description) meta.description = description;
-    if (keywords) meta.keywords = keywords;
+    if (description) meta.description = description.slice(0, MAX_TEXT_FIELD);
+    if (keywords) meta.keywords = keywords.slice(0, MAX_TEXT_FIELD);
     if (revision) meta.revision = Number.isInteger(Number(revision)) ? Number(revision) : revision;
     return Object.keys(meta).length > 0 ? meta : null;
   } catch {
