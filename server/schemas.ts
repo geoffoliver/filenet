@@ -166,3 +166,16 @@ export const FriendResponseMessageSchema = z.object({
     z.string().max(200).optional(),
   ),
 });
+
+const nodeIdSchema = z.string().min(1).max(200);
+
+export const FriendVouchRequestMessageSchema = z.object({
+  type: z.literal('friend-vouch-request'),
+  nodeId: nodeIdSchema,
+});
+
+export const FriendVouchResponseMessageSchema = z.object({
+  type: z.literal('friend-vouch-response'),
+  nodeId: nodeIdSchema,
+  vouched: z.boolean(),
+});

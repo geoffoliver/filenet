@@ -1,4 +1,10 @@
-import { type PeerData, dispatchSearchMessage, handleMessage, handleOpen } from './peer';
+import {
+  type PeerData,
+  dispatchSearchMessage,
+  dispatchVouchMessage,
+  handleMessage,
+  handleOpen,
+} from './peer';
 import { connectToPeer, getConnectedPeer, unregisterPeer } from './connections';
 import { getOrCreateSettings, parseSharedFolders } from './config';
 import { createManagementFetch } from './management';
@@ -64,6 +70,7 @@ Bun.serve({
       connectToPeer(identity, prisma, address, port, PORT, friendRequest, async (nodeId, msg) => {
         await dispatchSearchMessage(msg, nodeId, prisma, identity);
         await dispatchTransferMessage(msg, nodeId, prisma);
+        await dispatchVouchMessage(msg, nodeId, prisma);
       }),
   }),
 });

@@ -1,6 +1,6 @@
 import type { PrismaClient } from '@prisma/client';
 
-import type { FriendRequestMessage, InnerMessage } from './types';
+import type { FriendRequestMessage, FriendVouchRequestMessage, InnerMessage } from './types';
 import { acceptFriendRequest, handleIncomingFriendRequest, shouldAutoAccept } from './friends';
 import {
   createHello,
@@ -93,6 +93,97 @@ export async function getAcceptedConnectedPeers(prisma: PrismaClient): Promise<C
 
 export function sendToPeer(peer: ConnectedPeer, msg: InnerMessage): void {
   peer.ws.send(encodeMessage(encryptMessage(msg, peer.sessionKey)));
+}
+
+// ---------------------------------------------------------------------------
+// Friends-of-friends vouch protocol
+// ---------------------------------------------------------------------------
+
+type PendingVouch = {
+  // The set of peers we actually sent a vouch-request to; only responses from
+  // members of this set are accepted to prevent spoofed/unsolicited vouches.
+  queriedPeerIds: Set<string>;
+  remainingPeers: number;
+  timer: ReturnType<typeof setTimeout>;
+  promiseResolve: (vouched: boolean) => void;
+};
+
+const pendingVouches = new Map<string, PendingVouch>();
+
+export function resetVouchesForTesting(): void {
+  for (const [, vouch] of pendingVouches) {
+    clearTimeout(vouch.timer);
+    vouch.promiseResolve(false);
+  }
+  pendingVouches.clear();
+}
+
+export async function queryVouch(
+  candidateNodeId: string,
+  peers: ConnectedPeer[],
+  sendFn: (peer: ConnectedPeer, msg: InnerMessage) => void = sendToPeer,
+  timeoutMs = 3_000,
+): Promise<boolean> {
+  if (peers.length === 0) return false;
+
+  return new Promise<boolean>((promiseResolve) => {
+    const queriedPeerIds = new Set<string>();
+    const timer = setTimeout(() => {
+      pendingVouches.delete(candidateNodeId);
+      promiseResolve(false);
+    }, timeoutMs);
+
+    pendingVouches.set(candidateNodeId, {
+      queriedPeerIds,
+      remainingPeers: 0,
+      timer,
+      promiseResolve,
+    });
+
+    const msg: FriendVouchRequestMessage = {
+      type: 'friend-vouch-request',
+      nodeId: candidateNodeId,
+    };
+    let sent = 0;
+    for (const peer of peers) {
+      try {
+        sendFn(peer, msg);
+        queriedPeerIds.add(peer.peerNodeId);
+        sent++;
+      } catch {
+        // peer disconnected — skip
+      }
+    }
+
+    const pending = pendingVouches.get(candidateNodeId);
+    if (pending) pending.remainingPeers = sent;
+
+    if (sent === 0) {
+      clearTimeout(timer);
+      pendingVouches.delete(candidateNodeId);
+      promiseResolve(false);
+    }
+  });
+}
+
+export function resolveVouch(fromNodeId: string, candidateNodeId: string, vouched: boolean): void {
+  const pending = pendingVouches.get(candidateNodeId);
+  if (!pending) return;
+  if (!pending.queriedPeerIds.has(fromNodeId)) return; // unsolicited — ignore
+
+  if (vouched) {
+    clearTimeout(pending.timer);
+    pendingVouches.delete(candidateNodeId);
+    pending.promiseResolve(true);
+    return;
+  }
+
+  pending.remainingPeers--;
+  if (pending.remainingPeers <= 0) {
+    clearTimeout(pending.timer);
+    pendingVouches.delete(candidateNodeId);
+    pending.promiseResolve(false);
+  }
 }
 
 export async function connectToPeer(
@@ -243,9 +334,10 @@ export async function handleInboundFriendRequest(
   msg: FriendRequestMessage,
   peer: { nodeId: string; publicKey: Buffer; address: string; port: number },
   sendResponse: (msg: InnerMessage) => void,
+  vouchTimeoutMs = 3_000,
 ): Promise<void> {
   const settings = await getOrCreateSettings(prisma);
-  const autoAccept = shouldAutoAccept(settings, msg.password);
+  let autoAccept = shouldAutoAccept(settings, msg.password);
 
   const friend = await handleIncomingFriendRequest(prisma, {
     nodeId: peer.nodeId,
@@ -256,6 +348,15 @@ export async function handleInboundFriendRequest(
   });
 
   if (friend.status === 'BLOCKED') return;
+
+  if (!autoAccept && settings.autoAcceptFromFriendsOfFriends) {
+    const allAccepted = await getAcceptedConnectedPeers(prisma);
+    // Exclude the requesting peer itself — it can't vouch for itself
+    const vouchPeers = allAccepted.filter((p) => p.peerNodeId !== peer.nodeId);
+    if (vouchPeers.length > 0) {
+      autoAccept = await queryVouch(peer.nodeId, vouchPeers, sendToPeer, vouchTimeoutMs);
+    }
+  }
 
   if (autoAccept) {
     await acceptFriendRequest(prisma, friend.id);

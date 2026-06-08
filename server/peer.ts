@@ -5,6 +5,8 @@ import {
   ChatMessageSchema,
   FriendRequestMessageSchema,
   FriendResponseMessageSchema,
+  FriendVouchRequestMessageSchema,
+  FriendVouchResponseMessageSchema,
   SearchRequestMessageSchema,
   SearchResultMessageSchema,
 } from './schemas';
@@ -15,6 +17,8 @@ import {
   getConnectedPeer,
   handleInboundFriendRequest,
   registerPeer,
+  resolveVouch,
+  sendToPeer,
   updatePeerPort,
 } from './connections';
 import {
@@ -198,6 +202,11 @@ export async function dispatchMessage(
     await handleChatMessage(result.data, state.peerNodeId, ws.data.prisma, ws.data.identity.nodeId);
     return;
   }
+
+  if (msg.type === 'friend-vouch-request' || msg.type === 'friend-vouch-response') {
+    await dispatchVouchMessage(msg, state.peerNodeId, ws.data.prisma);
+    return;
+  }
 }
 
 /**
@@ -241,4 +250,44 @@ export function sendEncrypted(ws: ServerWebSocket<PeerData>, msg: InnerMessage):
   const state = ws.data.state;
   if (state.phase !== 'authenticated') throw new Error('Not authenticated');
   ws.send(encodeMessage(encryptMessage(msg, state.sessionKey)));
+}
+
+/**
+ * Handle friend-vouch-request and friend-vouch-response for any authenticated
+ * connection (both inbound ServerWebSocket and outbound native WebSocket).
+ * Exported so index.ts can wire it into the outbound onMessage callback.
+ */
+export async function dispatchVouchMessage(
+  msg: InnerMessage,
+  senderNodeId: string,
+  prisma: PrismaClient,
+): Promise<void> {
+  if (msg.type === 'friend-vouch-request') {
+    const result = FriendVouchRequestMessageSchema.safeParse(msg);
+    if (!result.success) return;
+    // Only accepted friends may request vouches — limits enumeration attack surface
+    const isFriend = await prisma.friend.findFirst({
+      where: { nodeId: senderNodeId, status: 'ACCEPTED' },
+    });
+    if (!isFriend) return;
+    const isVouched = await prisma.friend.findFirst({
+      where: { nodeId: result.data.nodeId, status: 'ACCEPTED' },
+    });
+    const senderPeer = getConnectedPeer(senderNodeId);
+    if (!senderPeer) return;
+    sendToPeer(senderPeer, {
+      type: 'friend-vouch-response',
+      nodeId: result.data.nodeId,
+      vouched: !!isVouched,
+    });
+  } else if (msg.type === 'friend-vouch-response') {
+    const result = FriendVouchResponseMessageSchema.safeParse(msg);
+    if (!result.success) return;
+    // Only accept vouch responses from accepted friends
+    const isFriend = await prisma.friend.findFirst({
+      where: { nodeId: senderNodeId, status: 'ACCEPTED' },
+    });
+    if (!isFriend) return;
+    resolveVouch(senderNodeId, result.data.nodeId, result.data.vouched);
+  }
 }

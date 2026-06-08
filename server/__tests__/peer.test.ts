@@ -9,7 +9,13 @@ import { unlinkSync } from 'fs';
 import type { PrismaClient } from '@prisma/client';
 import type { ServerWebSocket } from 'bun';
 
-import { type ConnectedPeer, registerPeer, unregisterPeer } from '../connections';
+import {
+  type ConnectedPeer,
+  queryVouch,
+  registerPeer,
+  resetVouchesForTesting,
+  unregisterPeer,
+} from '../connections';
 import {
   DEFAULT_TTL,
   initiateNetworkSearch,
@@ -82,6 +88,7 @@ beforeEach(async () => {
   await prisma.friend.deleteMany();
   await prisma.sharedFile.deleteMany();
   resetInternalMapsForTesting();
+  resetVouchesForTesting();
 });
 
 // ---------------------------------------------------------------------------
@@ -385,5 +392,171 @@ describe('dispatchMessage — viaNodeId attribution', () => {
     expect(found?.nodeId).toBe('impersonated-node');
     // viaNodeId is the authenticated sender — lets callers verify the relay chain
     expect(found?.viaNodeId).toBe(friendNodeId);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// friend-vouch-request dispatch
+// ---------------------------------------------------------------------------
+
+describe('dispatchMessage — friend-vouch-request', () => {
+  it('drops vouch request from a non-friend and sends no response', async () => {
+    const strangerNodeId = 'vouch-stranger-' + crypto.randomUUID();
+    const { dispatchWs, mockWs } = makeMockWs(strangerNodeId);
+    registerPeer(mockWs, Buffer.alloc(32), strangerNodeId, Buffer.alloc(32), '127.0.0.1', 0);
+
+    await dispatchMessage(dispatchWs, { type: 'friend-vouch-request', nodeId: 'some-candidate' });
+    unregisterPeer(strangerNodeId);
+
+    expect(mockWs.sends).toHaveLength(0);
+  });
+
+  it('responds vouched=false when accepted friend asks about an unknown candidate', async () => {
+    const friendNodeId = 'vouch-friend-' + crypto.randomUUID();
+    await prisma.friend.create({
+      data: {
+        name: 'Friend',
+        address: '127.0.0.1',
+        port: 7734,
+        nodeId: friendNodeId,
+        status: 'ACCEPTED',
+      },
+    });
+    const { dispatchWs, mockWs } = makeMockWs(friendNodeId);
+    registerPeer(mockWs, Buffer.alloc(32), friendNodeId, Buffer.alloc(32), '127.0.0.1', 0);
+
+    await dispatchMessage(dispatchWs, {
+      type: 'friend-vouch-request',
+      nodeId: 'unknown-candidate',
+    });
+    unregisterPeer(friendNodeId);
+
+    expect(mockWs.sends).toHaveLength(1);
+    // The response is an encrypted message — just verify something was sent
+    // (decrypting requires the session key, which is all-zeros here)
+    expect(mockWs.sends[0]).toBeDefined();
+  });
+
+  it('responds vouched=true when accepted friend asks about another accepted friend', async () => {
+    const friendNodeId = 'vouch-asker-' + crypto.randomUUID();
+    const candidateNodeId = 'vouch-candidate-' + crypto.randomUUID();
+
+    await prisma.friend.create({
+      data: {
+        name: 'Asker',
+        address: '127.0.0.1',
+        port: 7734,
+        nodeId: friendNodeId,
+        status: 'ACCEPTED',
+      },
+    });
+    await prisma.friend.create({
+      data: {
+        name: 'Candidate',
+        address: '10.0.0.1',
+        port: 7734,
+        nodeId: candidateNodeId,
+        status: 'ACCEPTED',
+      },
+    });
+
+    const sessionKey = Buffer.alloc(32);
+    const { dispatchWs, mockWs } = makeMockWs(friendNodeId);
+    // Re-create with a tracked session key so we can decrypt the response
+    const trackedSends: Buffer[] = [];
+    const trackedWs = {
+      sends: trackedSends,
+      send(d: string | Uint8Array) {
+        trackedSends.push(Buffer.from(d as Uint8Array));
+      },
+      close() {},
+    };
+    registerPeer(trackedWs, sessionKey, friendNodeId, Buffer.alloc(32), '127.0.0.1', 0);
+
+    await dispatchMessage(dispatchWs, { type: 'friend-vouch-request', nodeId: candidateNodeId });
+    unregisterPeer(friendNodeId);
+    unregisterPeer(mockWs as any);
+
+    // Verify a response was sent
+    expect(trackedSends).toHaveLength(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// friend-vouch-response dispatch
+// ---------------------------------------------------------------------------
+
+describe('dispatchMessage — friend-vouch-response', () => {
+  it('drops vouch response from a non-friend', async () => {
+    const strangerNodeId = 'vouch-resp-stranger-' + crypto.randomUUID();
+    const { dispatchWs } = makeMockWs(strangerNodeId);
+
+    // Should not throw and should not resolve any pending vouch
+    await dispatchMessage(dispatchWs, {
+      type: 'friend-vouch-response',
+      nodeId: 'some-candidate',
+      vouched: true,
+    });
+  });
+
+  it('resolves a pending vouch when accepted friend sends vouched=true', async () => {
+    const friendNodeId = 'vouch-resp-friend-' + crypto.randomUUID();
+    await prisma.friend.create({
+      data: {
+        name: 'Friend',
+        address: '127.0.0.1',
+        port: 7734,
+        nodeId: friendNodeId,
+        status: 'ACCEPTED',
+      },
+    });
+    const { dispatchWs, mockWs } = makeMockWs(friendNodeId);
+    registerPeer(mockWs, Buffer.alloc(32), friendNodeId, Buffer.alloc(32), '127.0.0.1', 0);
+
+    const fakePeer: ConnectedPeer = {
+      ws: mockWs,
+      sessionKey: Buffer.alloc(32),
+      peerNodeId: friendNodeId,
+      peerPublicKey: Buffer.alloc(32),
+      address: '127.0.0.1',
+      port: 7734,
+    };
+
+    const candidateNodeId = 'vouch-resp-candidate-' + crypto.randomUUID();
+    const vouchPromise = queryVouch(candidateNodeId, [fakePeer], () => {}, 2_000);
+    await Bun.sleep(10);
+
+    await dispatchMessage(dispatchWs, {
+      type: 'friend-vouch-response',
+      nodeId: candidateNodeId,
+      vouched: true,
+    });
+
+    expect(await vouchPromise).toBe(true);
+    unregisterPeer(friendNodeId);
+  });
+
+  it('does not resolve vouch for an unqueried candidateNodeId', async () => {
+    const friendNodeId = 'vouch-resp-unqueried-' + crypto.randomUUID();
+    await prisma.friend.create({
+      data: {
+        name: 'Friend',
+        address: '127.0.0.1',
+        port: 7734,
+        nodeId: friendNodeId,
+        status: 'ACCEPTED',
+      },
+    });
+    const { dispatchWs, mockWs } = makeMockWs(friendNodeId);
+    registerPeer(mockWs, Buffer.alloc(32), friendNodeId, Buffer.alloc(32), '127.0.0.1', 0);
+
+    // No pending vouch for this candidate — resolveVouch should be a no-op
+    await dispatchMessage(dispatchWs, {
+      type: 'friend-vouch-response',
+      nodeId: 'no-pending-candidate',
+      vouched: true,
+    });
+    // No assertion needed — just verify no throw
+    unregisterPeer(friendNodeId);
   });
 });

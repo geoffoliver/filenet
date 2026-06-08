@@ -27,7 +27,7 @@
 - [x] Persist friend's node ID and public key once connected
 - [x] Remove a friend
 - [x] Management HTTP API: `GET/POST /api/friends`, `PUT /api/friends/:id`, `DELETE /api/friends/:id`, `GET/PATCH /api/settings`
-- [ ] Auto-accept from friends-of-friends (requires routing layer)
+- [x] Auto-accept from friends-of-friends — `friend-vouch-request` / `friend-vouch-response` protocol; first positive vouch from any accepted connected peer triggers auto-accept
 - [ ] Fetch peer's public key on first contact (`GET /pubkey`) — currently skipped (key exchanged in handshake)
 
 ### File Indexing
