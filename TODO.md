@@ -36,7 +36,7 @@
 - [x] Configurable shared folder(s) stored in DB / config
 - [x] Directory scanner: walk folders, hash files, upsert index
 - [x] Metadata extraction — audio/video (artist, album, track, duration, bitrate, dimensions, container, codec) via music-metadata
-- [x] Metadata extraction — images (EXIF: dimensions, make, model, date) via exifr; PDFs (title, author, pages) via pdf-parse; EPUB/DOCX (title, author, publisher, etc.) via jszip
+- [x] Metadata extraction — images (EXIF), PDFs (title/author/pages), EPUBs, and DOCX files via `exifr`, `pdf-parse`, and `jszip`
 - [x] Detect changed files (mtime / size delta before re-hashing)
 - [x] Periodic background rescan (configurable interval)
 - [x] Manual rescan trigger (API endpoint)
@@ -102,7 +102,6 @@
 - [x] Step 5: Auto-accept preferences + invite password
 - [x] Progress bar + back/skip/next/finish navigation
 - [x] Step: listening port + port-forwarding instructions
-- [ ] Extended profile fields (email, picture, bio, links) — deferred to Settings
 - [ ] Maybe: native folder-browser component (API-backed directory listing) to replace manual path input in shared folders + download folder steps
 
 ### Home (Dashboard)
@@ -152,7 +151,7 @@
 
 ### Settings
 
-- [x] Profile details form (name only for now; email, picture, bio, links deferred)
+- [x] Profile details form (name only)
 - [x] Shared folders: add / remove paths
 - [x] Download folder picker
 - [x] Auto-accept toggles + invite password
