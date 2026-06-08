@@ -3,7 +3,14 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import type { AddFriendParams, Friend } from '../../lib/api';
-import { acceptFriend, addFriend, getFriends, rejectFriend, removeFriend } from '../../lib/api';
+import {
+  acceptFriend,
+  addFriend,
+  formatBytes,
+  getFriends,
+  rejectFriend,
+  removeFriend,
+} from '../../lib/api';
 
 import styles from './friends.module.css';
 
@@ -333,6 +340,8 @@ export default function FriendsPage() {
                   <div className={styles.meta}>
                     {f.address}:{f.port}
                     {f.acceptedAt && ` · friends since ${timeAgo(f.acceptedAt)}`}
+                    {f.downloads.count > 0 &&
+                      ` · ${f.downloads.count} file${f.downloads.count !== 1 ? 's' : ''} downloaded (${formatBytes(f.downloads.totalSize)})`}
                   </div>
                 </div>
                 <div className={styles.actions}>

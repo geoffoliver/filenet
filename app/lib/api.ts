@@ -1,3 +1,12 @@
+export function formatBytes(s: string): string {
+  const n = parseInt(s, 10);
+  if (isNaN(n) || n === 0) return '0 B';
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 ** 2) return `${(n / 1024).toFixed(1)} KB`;
+  if (n < 1024 ** 3) return `${(n / 1024 ** 2).toFixed(1)} MB`;
+  return `${(n / 1024 ** 3).toFixed(2)} GB`;
+}
+
 export type Settings = {
   id: string;
   name: string;
@@ -59,6 +68,7 @@ export type Friend = {
   acceptedAt: string | null;
   updatedAt: string;
   online: boolean;
+  downloads: { count: number; totalSize: string };
 };
 
 export type AddFriendParams = {
@@ -123,6 +133,7 @@ export async function removeFriend(id: string): Promise<void> {
 export type Stats = {
   sharedFiles: { count: number; totalSize: string };
   friends: { total: number; online: number };
+  downloads: { count: number; totalSize: string };
 };
 
 export async function getStats(): Promise<Stats> {

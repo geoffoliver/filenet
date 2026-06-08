@@ -94,11 +94,44 @@ export function createManagementFetch(deps: ManagementDeps): (req: Request) => P
 
       if (url.pathname === '/api/friends') {
         if (req.method === 'GET') {
-          const friends = await getFriends(prisma);
-          const enriched = friends.map((f) => ({
-            ...f,
-            online: f.nodeId ? !!getConnectedPeer(f.nodeId) : false,
-          }));
+          const [friends, completedDownloads] = await Promise.all([
+            getFriends(prisma),
+            prisma.download.findMany({
+              where: { state: 'COMPLETED' },
+              select: { sources: true, size: true },
+            }),
+          ]);
+
+          const downloadsByNode = new Map<string, { count: number; totalSize: bigint }>();
+          for (const dl of completedDownloads) {
+            let sources: unknown;
+            try {
+              sources = JSON.parse(dl.sources);
+            } catch {
+              continue;
+            }
+            if (!Array.isArray(sources)) continue;
+            for (const nodeId of sources) {
+              if (typeof nodeId !== 'string') continue;
+              const existing = downloadsByNode.get(nodeId) ?? { count: 0, totalSize: 0n };
+              downloadsByNode.set(nodeId, {
+                count: existing.count + 1,
+                totalSize: existing.totalSize + dl.size,
+              });
+            }
+          }
+
+          const enriched = friends.map((f) => {
+            const dlStats = f.nodeId ? downloadsByNode.get(f.nodeId) : undefined;
+            return {
+              ...f,
+              online: f.nodeId ? !!getConnectedPeer(f.nodeId) : false,
+              downloads: {
+                count: dlStats?.count ?? 0,
+                totalSize: String(dlStats?.totalSize ?? 0n),
+              },
+            };
+          });
           return Response.json(enriched);
         }
 
@@ -232,10 +265,15 @@ export function createManagementFetch(deps: ManagementDeps): (req: Request) => P
       }
 
       if (url.pathname === '/api/stats' && req.method === 'GET') {
-        const [fileAgg, friendTotal, onlineFriends] = await Promise.all([
+        const [fileAgg, friendTotal, onlineFriends, downloadAgg] = await Promise.all([
           prisma.sharedFile.aggregate({ _count: true, _sum: { size: true } }),
           prisma.friend.count({ where: { status: 'ACCEPTED' } }),
           getAcceptedConnectedPeers(prisma),
+          prisma.download.aggregate({
+            _count: true,
+            _sum: { size: true },
+            where: { state: 'COMPLETED' },
+          }),
         ]);
         return Response.json({
           sharedFiles: {
@@ -245,6 +283,10 @@ export function createManagementFetch(deps: ManagementDeps): (req: Request) => P
           friends: {
             total: friendTotal,
             online: onlineFriends.length,
+          },
+          downloads: {
+            count: downloadAgg._count,
+            totalSize: String(downloadAgg._sum.size ?? 0n),
           },
         });
       }

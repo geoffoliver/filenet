@@ -104,6 +104,75 @@ describe('GET /api/friends', () => {
     expect(typeof body[0].online).toBe('boolean');
     expect(body[0].online).toBe(false); // no peers connected in tests
   });
+
+  it('includes zero download stats for a friend with no completed downloads', async () => {
+    await prisma.friend.create({
+      data: {
+        name: 'Carol',
+        nodeId: 'node-carol',
+        address: '10.0.0.3',
+        port: 7734,
+        status: 'ACCEPTED',
+      },
+    });
+    const res = await makeHandler()(req('/api/friends'));
+    const body = await res.json();
+    expect(body[0].downloads.count).toBe(0);
+    expect(body[0].downloads.totalSize).toBe('0');
+  });
+
+  it('counts completed downloads where the friend appears in sources', async () => {
+    await prisma.download.deleteMany();
+    await prisma.friend.create({
+      data: {
+        name: 'Dave',
+        nodeId: 'node-dave',
+        address: '10.0.0.4',
+        port: 7734,
+        status: 'ACCEPTED',
+      },
+    });
+    await prisma.download.createMany({
+      data: [
+        // Dave is a source — counts
+        {
+          sha256: 'a'.repeat(64),
+          filename: 'a.mp3',
+          size: 1000n,
+          state: 'COMPLETED',
+          sources: JSON.stringify(['node-dave']),
+        },
+        // Dave is one of multiple sources — still counts
+        {
+          sha256: 'b'.repeat(64),
+          filename: 'b.mp3',
+          size: 2000n,
+          state: 'COMPLETED',
+          sources: JSON.stringify(['node-dave', 'node-other']),
+        },
+        // Different source — should not count for Dave
+        {
+          sha256: 'c'.repeat(64),
+          filename: 'c.mp3',
+          size: 3000n,
+          state: 'COMPLETED',
+          sources: JSON.stringify(['node-other']),
+        },
+        // Dave is source but not COMPLETED — should not count
+        {
+          sha256: 'd'.repeat(64),
+          filename: 'd.mp3',
+          size: 4000n,
+          state: 'FAILED',
+          sources: JSON.stringify(['node-dave']),
+        },
+      ],
+    });
+    const res = await makeHandler()(req('/api/friends'));
+    const body = await res.json();
+    expect(body[0].downloads.count).toBe(2);
+    expect(body[0].downloads.totalSize).toBe('3000');
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -441,6 +510,7 @@ describe('POST /api/rescan', () => {
 
 describe('GET /api/stats', () => {
   beforeEach(async () => {
+    await prisma.download.deleteMany();
     await prisma.sharedFile.deleteMany();
     await prisma.friend.deleteMany();
   });
@@ -453,6 +523,8 @@ describe('GET /api/stats', () => {
     expect(body.sharedFiles.totalSize).toBe('0');
     expect(body.friends.total).toBe(0);
     expect(body.friends.online).toBe(0);
+    expect(body.downloads.count).toBe(0);
+    expect(body.downloads.totalSize).toBe('0');
   });
 
   it('counts indexed files and sums their sizes', async () => {
@@ -483,6 +555,63 @@ describe('GET /api/stats', () => {
     const body = await res.json();
     expect(body.friends.total).toBe(2);
     expect(body.friends.online).toBe(0);
+  });
+
+  it('counts only COMPLETED downloads', async () => {
+    await prisma.download.createMany({
+      data: [
+        {
+          sha256: 'a'.repeat(64),
+          filename: 'done.mp3',
+          size: 1000n,
+          state: 'COMPLETED',
+          sources: '[]',
+        },
+        {
+          sha256: 'b'.repeat(64),
+          filename: 'fail.mp3',
+          size: 2000n,
+          state: 'FAILED',
+          sources: '[]',
+        },
+        {
+          sha256: 'c'.repeat(64),
+          filename: 'dl.mp3',
+          size: 3000n,
+          state: 'DOWNLOADING',
+          sources: '[]',
+        },
+      ],
+    });
+    const res = await makeHandler()(req('/api/stats'));
+    const body = await res.json();
+    expect(body.downloads.count).toBe(1);
+    expect(body.downloads.totalSize).toBe('1000');
+  });
+
+  it('sums sizes across multiple completed downloads', async () => {
+    await prisma.download.createMany({
+      data: [
+        {
+          sha256: 'a'.repeat(64),
+          filename: 'a.mp3',
+          size: 500n,
+          state: 'COMPLETED',
+          sources: '[]',
+        },
+        {
+          sha256: 'b'.repeat(64),
+          filename: 'b.mp3',
+          size: 1500n,
+          state: 'COMPLETED',
+          sources: '[]',
+        },
+      ],
+    });
+    const res = await makeHandler()(req('/api/stats'));
+    const body = await res.json();
+    expect(body.downloads.count).toBe(2);
+    expect(body.downloads.totalSize).toBe('2000');
   });
 });
 
