@@ -2,8 +2,8 @@
 
 .shell {
   @apply flex
-    flex-col;
-  min-height: 100vh;
+    flex-col
+    grow;
 }
 
 .main {

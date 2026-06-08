@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Metadata extraction — images, PDFs, EPUBs, and DOCX files** — extended metadata extraction to cover more file types; video metadata extraction fixed to include pixel dimensions, container format, and codec
+  - Images (JPEG, PNG, WebP, HEIC, AVIF, TIFF): width, height, camera make/model, date/time via `exifr`; GPS coordinates excluded for privacy
+  - PDFs: title, author, subject, keywords, page count via `pdf-parse` v2
+  - EPUB ebooks: title, author, language, publisher, description, identifier, published date via `jszip` + OPF XML parsing
+  - DOCX documents: title, author, description, keywords, revision via `jszip` + `docProps/core.xml` parsing
+  - Video (AVI, MKV, MOV, MP4, etc.): now correctly extracts pixel width/height, container, and codec from track info (previously these were never read)
+  - All extractors consolidated in `server/metadata.ts`; `server/indexer.ts` delegates to it
+  - PDF, EPUB, and DOCX extractors skip files larger than 50 MB to prevent OOM during indexing
+  - All string metadata fields are clamped to 500 characters; search-protocol drops oversized metadata JSON (> 4096 chars) rather than sending a corrupt truncated string
+
 - **Post-download scripts** — run user-defined `.ts`/`.js` scripts after each download completes; scripts receive `{ file: BunFile, stats: TransferStats }` and run sequentially in configured order; errors in one script do not block subsequent scripts
   - Settings UI: add, remove, and reorder scripts with up/down controls
   - REST API: `GET/POST /api/scripts`, `PATCH /api/scripts/:id` (reorder), `DELETE /api/scripts/:id`

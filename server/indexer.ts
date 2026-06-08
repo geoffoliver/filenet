@@ -1,25 +1,11 @@
-import { basename, extname, join, sep } from 'node:path';
+import { basename, join, sep } from 'node:path';
 import { lstat, readdir } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 
 import type { PrismaClient, SharedFile } from '@prisma/client';
-import { parseFile } from 'music-metadata';
 
-const AUDIO_EXTENSIONS = new Set([
-  '.aac',
-  '.aif',
-  '.aiff',
-  '.flac',
-  '.m4a',
-  '.mp3',
-  '.ogg',
-  '.opus',
-  '.wav',
-  '.wma',
-]);
-
-const VIDEO_EXTENSIONS = new Set(['.avi', '.m4v', '.mkv', '.mov', '.mp4', '.webm', '.wmv']);
+import { extractMetadata } from './metadata';
 
 export async function hashFile(path: string): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -29,32 +15,6 @@ export async function hashFile(path: string): Promise<string> {
     stream.on('end', () => resolve(hash.digest('hex')));
     stream.on('error', reject);
   });
-}
-
-export async function extractMetadata(path: string): Promise<Record<string, unknown> | null> {
-  const ext = extname(path).toLowerCase();
-  if (!AUDIO_EXTENSIONS.has(ext) && !VIDEO_EXTENSIONS.has(ext)) return null;
-
-  try {
-    const { common, format } = await parseFile(path);
-    const meta: Record<string, unknown> = {};
-    if (common.title) meta.title = common.title;
-    if (common.artist) meta.artist = common.artist;
-    if (common.album) meta.album = common.album;
-    if (common.albumartist) meta.albumArtist = common.albumartist;
-    if (common.year) meta.year = common.year;
-    if (common.track?.no) meta.trackNumber = common.track.no;
-    if (common.track?.of) meta.trackTotal = common.track.of;
-    if (common.disk?.no) meta.discNumber = common.disk.no;
-    if (common.genre?.[0]) meta.genre = common.genre[0];
-    if (format.duration) meta.duration = format.duration;
-    if (format.bitrate) meta.bitrate = Math.round(format.bitrate / 1000);
-    if (format.sampleRate) meta.sampleRate = format.sampleRate;
-    if (format.numberOfChannels) meta.channels = format.numberOfChannels;
-    return Object.keys(meta).length > 0 ? meta : null;
-  } catch {
-    return null;
-  }
 }
 
 export async function* scanDirectory(
