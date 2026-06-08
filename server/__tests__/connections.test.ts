@@ -510,6 +510,80 @@ describe('queryVouch', () => {
     // should not throw
     resolveVouch('some-peer', 'no-pending-candidate', true);
   });
+
+  it('ignores a second false response from the same peer (double-response attack)', async () => {
+    // A malicious queried peer could send vouched=false twice to drain remainingPeers
+    // to 0 and force an early false before other honest queried peers respond true.
+    const peer1 = makeFakePeer('voucher6a');
+    const peer2 = makeFakePeer('voucher6b');
+    const sent: { peer: ConnectedPeer; msg: InnerMessage }[] = [];
+    const queryPromise = queryVouch(
+      'candidate',
+      [peer1, peer2],
+      (p, m) => sent.push({ peer: p, msg: m }),
+      2_000,
+    );
+    await Bun.sleep(10);
+    resolveVouch('voucher6a', 'candidate', false);
+    resolveVouch('voucher6a', 'candidate', false); // duplicate — must not decrement again
+    resolveVouch('voucher6b', 'candidate', true); // honest peer responds — must still resolve true
+    expect(await queryPromise).toBe(true);
+  });
+
+  it('returns false when all peers respond false exactly once each', async () => {
+    const peer1 = makeFakePeer('voucher7a');
+    const peer2 = makeFakePeer('voucher7b');
+    const sent: { peer: ConnectedPeer; msg: InnerMessage }[] = [];
+    const queryPromise = queryVouch(
+      'candidate',
+      [peer1, peer2],
+      (p, m) => sent.push({ peer: p, msg: m }),
+      2_000,
+    );
+    await Bun.sleep(10);
+    resolveVouch('voucher7a', 'candidate', false);
+    resolveVouch('voucher7b', 'candidate', false);
+    expect(await queryPromise).toBe(false);
+  });
+
+  it('returns false immediately when MAX_PENDING_VOUCHES is reached', async () => {
+    const { MAX_PENDING_VOUCHES: cap } = await import('../connections');
+    // Fill up to the cap — use a sendFn that does nothing and long timeouts
+    for (let i = 0; i < cap; i++) {
+      void queryVouch(`flood-candidate-${i}`, [makeFakePeer(`flood-peer-${i}`)], () => {}, 60_000);
+    }
+    const result = await queryVouch(
+      'overflow-candidate',
+      [makeFakePeer('overflow-peer')],
+      () => {},
+      50,
+    );
+    expect(result).toBe(false);
+  });
+
+  it('returns false immediately for a duplicate candidateNodeId already in flight', async () => {
+    const peer1 = makeFakePeer('collision-peer-1');
+    const peer2 = makeFakePeer('collision-peer-2');
+    const sent: { peer: ConnectedPeer; msg: InnerMessage }[] = [];
+    const firstPromise = queryVouch(
+      'collision-candidate',
+      [peer1],
+      (p, m) => sent.push({ peer: p, msg: m }),
+      2_000,
+    );
+    // Second call for the same candidateNodeId must return false immediately
+    const secondResult = await queryVouch(
+      'collision-candidate',
+      [peer2],
+      (p, m) => sent.push({ peer: p, msg: m }),
+      2_000,
+    );
+    expect(secondResult).toBe(false);
+    // First query is still pending — resolve it to clean up
+    resolveVouch('collision-peer-1', 'collision-candidate', false);
+    expect(await firstPromise).toBe(false);
+    expect(sent).toHaveLength(1); // only peer1 was queried; peer2 was never asked
+  });
 });
 
 describe('handleInboundFriendRequest — friends-of-friends auto-accept', () => {

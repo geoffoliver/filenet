@@ -99,10 +99,17 @@ export function sendToPeer(peer: ConnectedPeer, msg: InnerMessage): void {
 // Friends-of-friends vouch protocol
 // ---------------------------------------------------------------------------
 
+// Hard cap: prevents a flood of inbound friend-requests from exhausting memory
+// via unbounded pendingVouches entries + timers.
+export const MAX_PENDING_VOUCHES = 500;
+
 type PendingVouch = {
-  // The set of peers we actually sent a vouch-request to; only responses from
-  // members of this set are accepted to prevent spoofed/unsolicited vouches.
+  // Peers we actually sent a vouch-request to; only responses from members of
+  // this set are accepted, preventing unsolicited/spoofed vouches.
   queriedPeerIds: Set<string>;
+  // Tracks which queried peers have already responded, so a single malicious
+  // peer cannot decrement remainingPeers multiple times and force an early false.
+  respondedPeerIds: Set<string>;
   remainingPeers: number;
   timer: ReturnType<typeof setTimeout>;
   promiseResolve: (vouched: boolean) => void;
@@ -126,8 +133,17 @@ export async function queryVouch(
 ): Promise<boolean> {
   if (peers.length === 0) return false;
 
+  // Guard: a concurrent vouch query for the same candidateNodeId is already in
+  // flight (e.g., rapid duplicate friend-requests). Let it finish rather than
+  // overwriting the map entry and corrupting both queries' state.
+  if (pendingVouches.has(candidateNodeId)) return false;
+
+  // Guard: prevent memory exhaustion from a flood of simultaneous friend-requests.
+  if (pendingVouches.size >= MAX_PENDING_VOUCHES) return false;
+
   return new Promise<boolean>((promiseResolve) => {
     const queriedPeerIds = new Set<string>();
+    const respondedPeerIds = new Set<string>();
     const timer = setTimeout(() => {
       pendingVouches.delete(candidateNodeId);
       promiseResolve(false);
@@ -135,6 +151,7 @@ export async function queryVouch(
 
     pendingVouches.set(candidateNodeId, {
       queriedPeerIds,
+      respondedPeerIds,
       remainingPeers: 0,
       timer,
       promiseResolve,
@@ -170,6 +187,10 @@ export function resolveVouch(fromNodeId: string, candidateNodeId: string, vouche
   const pending = pendingVouches.get(candidateNodeId);
   if (!pending) return;
   if (!pending.queriedPeerIds.has(fromNodeId)) return; // unsolicited — ignore
+  // Deduplicate responses: a single peer sending vouched=false multiple times
+  // must not drain remainingPeers and force an early false before honest peers respond.
+  if (pending.respondedPeerIds.has(fromNodeId)) return;
+  pending.respondedPeerIds.add(fromNodeId);
 
   if (vouched) {
     clearTimeout(pending.timer);

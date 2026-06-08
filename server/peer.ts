@@ -275,11 +275,15 @@ export async function dispatchVouchMessage(
     });
     const senderPeer = getConnectedPeer(senderNodeId);
     if (!senderPeer) return;
-    sendToPeer(senderPeer, {
-      type: 'friend-vouch-response',
-      nodeId: result.data.nodeId,
-      vouched: !!isVouched,
-    });
+    try {
+      sendToPeer(senderPeer, {
+        type: 'friend-vouch-response',
+        nodeId: result.data.nodeId,
+        vouched: !!isVouched,
+      });
+    } catch {
+      // peer disconnected between lookup and send — response is lost, nothing to do
+    }
   } else if (msg.type === 'friend-vouch-response') {
     const result = FriendVouchResponseMessageSchema.safeParse(msg);
     if (!result.success) return;
