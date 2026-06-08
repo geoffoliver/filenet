@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Friends-of-friends auto-accept** — when `autoAcceptFromFriendsOfFriends` is enabled in settings, incoming friend requests from unknown nodes are automatically accepted if any accepted connected peer vouches for them
+  - New `friend-vouch-request` / `friend-vouch-response` wire protocol; queries are sent to all currently connected accepted peers with a 3-second timeout
+  - Only responses from peers that were explicitly queried are accepted, preventing unsolicited vouch injections
+  - Only accepted friends may request or respond to vouches, limiting enumeration attack surface
+  - Handled symmetrically on both inbound (server WebSocket) and outbound (client WebSocket) connections
+
 - **Metadata extraction — images, PDFs, EPUBs, and DOCX files** — extended metadata extraction to cover more file types; video metadata extraction fixed to include pixel dimensions, container format, and codec
   - Images (JPEG, PNG, WebP, HEIC, AVIF, TIFF): width, height, camera make/model, date/time via `exifr`; GPS coordinates excluded for privacy
   - PDFs: title, author, subject, keywords, page count via `pdf-parse` v2

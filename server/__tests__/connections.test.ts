@@ -1,15 +1,19 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'bun:test';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'bun:test';
 import type { PrismaClient } from '@prisma/client';
 import { execSync } from 'child_process';
 import { unlinkSync } from 'fs';
 
 import {
+  type ConnectedPeer,
   closeAndUnregisterPeer,
   getConnectedPeer,
   handleInboundFriendRequest,
   notifyFriendAccepted,
   notifyFriendRejected,
+  queryVouch,
   registerPeer,
+  resetVouchesForTesting,
+  resolveVouch,
   unregisterPeer,
   updatePeerPort,
 } from '../connections';
@@ -25,6 +29,7 @@ import {
 } from '../handshake';
 import { dispatchMessage, handleMessage } from '../peer';
 import { getOrCreateSettings, updateSettings } from '../config';
+import type { InnerMessage } from '../types';
 import { createPrismaClient } from '../db';
 import { generateIdentity } from '../identity';
 
@@ -413,8 +418,424 @@ describe('peer.ts handleMessage — onAuthenticated ordering', () => {
 });
 
 // ---------------------------------------------------------------------------
+// queryVouch / resolveVouch
+// ---------------------------------------------------------------------------
+
+describe('queryVouch', () => {
+  afterEach(() => {
+    resetVouchesForTesting();
+  });
+
+  it('returns false immediately when peers list is empty', async () => {
+    const result = await queryVouch('candidate', []);
+    expect(result).toBe(false);
+  });
+
+  it('returns false after timeout when no peer responds', async () => {
+    const fakePeer = makeFakePeer('voucher1');
+    const sent: { peer: ConnectedPeer; msg: InnerMessage }[] = [];
+    const result = await queryVouch(
+      'candidate',
+      [fakePeer],
+      (p, m) => sent.push({ peer: p, msg: m }),
+      50,
+    );
+    expect(result).toBe(false);
+    expect(sent.length).toBe(1);
+    expect(sent[0].msg.type).toBe('friend-vouch-request');
+  });
+
+  it('returns true when resolveVouch is called with vouched=true before timeout', async () => {
+    const fakePeer = makeFakePeer('voucher2');
+    const sent: { peer: ConnectedPeer; msg: InnerMessage }[] = [];
+    const queryPromise = queryVouch(
+      'candidate',
+      [fakePeer],
+      (p, m) => sent.push({ peer: p, msg: m }),
+      2_000,
+    );
+    await Bun.sleep(10);
+    resolveVouch('voucher2', 'candidate', true);
+    expect(await queryPromise).toBe(true);
+  });
+
+  it('returns false once all queried peers respond with vouched=false', async () => {
+    const peer1 = makeFakePeer('voucher3a');
+    const peer2 = makeFakePeer('voucher3b');
+    const sent: { peer: ConnectedPeer; msg: InnerMessage }[] = [];
+    const queryPromise = queryVouch(
+      'candidate',
+      [peer1, peer2],
+      (p, m) => sent.push({ peer: p, msg: m }),
+      2_000,
+    );
+    await Bun.sleep(10);
+    resolveVouch('voucher3a', 'candidate', false);
+    resolveVouch('voucher3b', 'candidate', false);
+    expect(await queryPromise).toBe(false);
+  });
+
+  it('resolves true as soon as the first peer vouches, before others respond', async () => {
+    const peer1 = makeFakePeer('voucher4a');
+    const peer2 = makeFakePeer('voucher4b');
+    const sent: { peer: ConnectedPeer; msg: InnerMessage }[] = [];
+    const queryPromise = queryVouch(
+      'candidate',
+      [peer1, peer2],
+      (p, m) => sent.push({ peer: p, msg: m }),
+      2_000,
+    );
+    await Bun.sleep(10);
+    resolveVouch('voucher4a', 'candidate', true);
+    expect(await queryPromise).toBe(true);
+    // voucher4b never responds — no hang
+  });
+
+  it('ignores vouch responses from peers that were not queried', async () => {
+    const fakePeer = makeFakePeer('voucher5');
+    const sent: { peer: ConnectedPeer; msg: InnerMessage }[] = [];
+    const queryPromise = queryVouch(
+      'candidate',
+      [fakePeer],
+      (p, m) => sent.push({ peer: p, msg: m }),
+      2_000,
+    );
+    await Bun.sleep(10);
+    resolveVouch('stranger-not-queried', 'candidate', true); // should be ignored
+    resolveVouch('voucher5', 'candidate', false); // the real peer responds false
+    expect(await queryPromise).toBe(false);
+  });
+
+  it('ignores responses for a candidateNodeId that has no pending vouch', () => {
+    // should not throw
+    resolveVouch('some-peer', 'no-pending-candidate', true);
+  });
+
+  it('ignores a second false response from the same peer (double-response attack)', async () => {
+    // A malicious queried peer could send vouched=false twice to drain remainingPeers
+    // to 0 and force an early false before other honest queried peers respond true.
+    const peer1 = makeFakePeer('voucher6a');
+    const peer2 = makeFakePeer('voucher6b');
+    const sent: { peer: ConnectedPeer; msg: InnerMessage }[] = [];
+    const queryPromise = queryVouch(
+      'candidate',
+      [peer1, peer2],
+      (p, m) => sent.push({ peer: p, msg: m }),
+      2_000,
+    );
+    await Bun.sleep(10);
+    resolveVouch('voucher6a', 'candidate', false);
+    resolveVouch('voucher6a', 'candidate', false); // duplicate — must not decrement again
+    resolveVouch('voucher6b', 'candidate', true); // honest peer responds — must still resolve true
+    expect(await queryPromise).toBe(true);
+  });
+
+  it('returns false when all peers respond false exactly once each', async () => {
+    const peer1 = makeFakePeer('voucher7a');
+    const peer2 = makeFakePeer('voucher7b');
+    const sent: { peer: ConnectedPeer; msg: InnerMessage }[] = [];
+    const queryPromise = queryVouch(
+      'candidate',
+      [peer1, peer2],
+      (p, m) => sent.push({ peer: p, msg: m }),
+      2_000,
+    );
+    await Bun.sleep(10);
+    resolveVouch('voucher7a', 'candidate', false);
+    resolveVouch('voucher7b', 'candidate', false);
+    expect(await queryPromise).toBe(false);
+  });
+
+  it('returns false immediately when MAX_PENDING_VOUCHES is reached', async () => {
+    const { MAX_PENDING_VOUCHES: cap } = await import('../connections');
+    // Fill up to the cap — use a sendFn that does nothing and long timeouts
+    for (let i = 0; i < cap; i++) {
+      void queryVouch(`flood-candidate-${i}`, [makeFakePeer(`flood-peer-${i}`)], () => {}, 60_000);
+    }
+    const result = await queryVouch(
+      'overflow-candidate',
+      [makeFakePeer('overflow-peer')],
+      () => {},
+      50,
+    );
+    expect(result).toBe(false);
+  });
+
+  it('returns false immediately for a duplicate candidateNodeId already in flight', async () => {
+    const peer1 = makeFakePeer('collision-peer-1');
+    const peer2 = makeFakePeer('collision-peer-2');
+    const sent: { peer: ConnectedPeer; msg: InnerMessage }[] = [];
+    const firstPromise = queryVouch(
+      'collision-candidate',
+      [peer1],
+      (p, m) => sent.push({ peer: p, msg: m }),
+      2_000,
+    );
+    // Second call for the same candidateNodeId must return false immediately
+    const secondResult = await queryVouch(
+      'collision-candidate',
+      [peer2],
+      (p, m) => sent.push({ peer: p, msg: m }),
+      2_000,
+    );
+    expect(secondResult).toBe(false);
+    // First query is still pending — resolve it to clean up
+    resolveVouch('collision-peer-1', 'collision-candidate', false);
+    expect(await firstPromise).toBe(false);
+    expect(sent).toHaveLength(1); // only peer1 was queried; peer2 was never asked
+  });
+});
+
+describe('handleInboundFriendRequest — friends-of-friends auto-accept', () => {
+  const identity = generateIdentity();
+
+  afterEach(async () => {
+    resetVouchesForTesting();
+    await prisma.friend.deleteMany();
+  });
+
+  it('auto-accepts when an accepted connected peer vouches the candidate', async () => {
+    await updateSettings(prisma, { autoAcceptFromFriendsOfFriends: true });
+
+    const voucherPeer = makeFakePeer('fof-voucher-1');
+    registerPeer(
+      voucherPeer.ws,
+      voucherPeer.sessionKey,
+      'fof-voucher-1',
+      voucherPeer.peerPublicKey,
+      '127.0.0.1',
+      7734,
+    );
+    await prisma.friend.create({
+      data: {
+        name: 'Voucher',
+        nodeId: 'fof-voucher-1',
+        publicKey: 'fakekey',
+        address: '127.0.0.1',
+        port: 7734,
+        status: 'ACCEPTED',
+      },
+    });
+
+    const candidatePeer = {
+      nodeId: 'fof-candidate-1',
+      publicKey: Buffer.from('fakekey'),
+      address: '10.0.0.1',
+      port: 7734,
+    };
+    const responses: unknown[] = [];
+
+    const requestPromise = handleInboundFriendRequest(
+      identity,
+      prisma,
+      { type: 'friend-request', name: 'Candidate', port: 7734 },
+      candidatePeer,
+      (r) => responses.push(r),
+      2_000,
+    );
+
+    await Bun.sleep(20);
+    resolveVouch('fof-voucher-1', 'fof-candidate-1', true);
+    await requestPromise;
+
+    expect(responses).toHaveLength(1);
+    expect((responses[0] as any).type).toBe('friend-response');
+    expect((responses[0] as any).accepted).toBe(true);
+    const friend = await prisma.friend.findFirst({ where: { nodeId: 'fof-candidate-1' } });
+    expect(friend?.status).toBe('ACCEPTED');
+
+    unregisterPeer('fof-voucher-1');
+  });
+
+  it('leaves as INCOMING_PENDING when no peer vouches within timeout', async () => {
+    await updateSettings(prisma, { autoAcceptFromFriendsOfFriends: true });
+
+    const voucherPeer = makeFakePeer('fof-voucher-2');
+    registerPeer(
+      voucherPeer.ws,
+      voucherPeer.sessionKey,
+      'fof-voucher-2',
+      voucherPeer.peerPublicKey,
+      '127.0.0.1',
+      7734,
+    );
+    await prisma.friend.create({
+      data: {
+        name: 'Voucher2',
+        nodeId: 'fof-voucher-2',
+        publicKey: 'fakekey2',
+        address: '127.0.0.1',
+        port: 7734,
+        status: 'ACCEPTED',
+      },
+    });
+
+    const candidatePeer = {
+      nodeId: 'fof-candidate-2',
+      publicKey: Buffer.from('fakekey'),
+      address: '10.0.0.2',
+      port: 7734,
+    };
+    const responses: unknown[] = [];
+
+    await handleInboundFriendRequest(
+      identity,
+      prisma,
+      { type: 'friend-request', name: 'Candidate2', port: 7734 },
+      candidatePeer,
+      (r) => responses.push(r),
+      50, // very short timeout — no vouching occurs
+    );
+
+    expect(responses).toHaveLength(0);
+    const friend = await prisma.friend.findFirst({ where: { nodeId: 'fof-candidate-2' } });
+    expect(friend?.status).toBe('INCOMING_PENDING');
+
+    unregisterPeer('fof-voucher-2');
+  });
+
+  it('leaves as INCOMING_PENDING when no accepted peers are connected', async () => {
+    await updateSettings(prisma, { autoAcceptFromFriendsOfFriends: true });
+    // no peers registered
+
+    const candidatePeer = {
+      nodeId: 'fof-candidate-3',
+      publicKey: Buffer.from('fakekey'),
+      address: '10.0.0.3',
+      port: 7734,
+    };
+    const responses: unknown[] = [];
+
+    await handleInboundFriendRequest(
+      identity,
+      prisma,
+      { type: 'friend-request', name: 'Candidate3', port: 7734 },
+      candidatePeer,
+      (r) => responses.push(r),
+    );
+
+    expect(responses).toHaveLength(0);
+    const friend = await prisma.friend.findFirst({ where: { nodeId: 'fof-candidate-3' } });
+    expect(friend?.status).toBe('INCOMING_PENDING');
+  });
+
+  it('skips vouch query when autoAcceptFromAnyone already triggers auto-accept', async () => {
+    await updateSettings(prisma, {
+      autoAcceptFromAnyone: true,
+      autoAcceptFromFriendsOfFriends: true,
+    });
+    // Register a peer — it should NOT receive a vouch request
+    const voucherPeer = makeFakePeer('fof-voucher-4');
+    const sent: InnerMessage[] = [];
+    const sentWs = {
+      send: (m: string | Uint8Array) => {
+        sent.push(m as any);
+      },
+      close: () => {},
+    };
+    registerPeer(
+      sentWs,
+      voucherPeer.sessionKey,
+      'fof-voucher-4',
+      voucherPeer.peerPublicKey,
+      '127.0.0.1',
+      7734,
+    );
+    await prisma.friend.create({
+      data: {
+        name: 'Voucher4',
+        nodeId: 'fof-voucher-4',
+        publicKey: 'fakekey4',
+        address: '127.0.0.1',
+        port: 7734,
+        status: 'ACCEPTED',
+      },
+    });
+
+    const responses: unknown[] = [];
+    await handleInboundFriendRequest(
+      identity,
+      prisma,
+      { type: 'friend-request', name: 'Candidate4', port: 7734 },
+      {
+        nodeId: 'fof-candidate-4',
+        publicKey: Buffer.from('fakekey'),
+        address: '10.0.0.4',
+        port: 7734,
+      },
+      (r) => responses.push(r),
+    );
+
+    expect(responses).toHaveLength(1);
+    expect((responses[0] as any).accepted).toBe(true);
+    // No vouch-request should have been sent since autoAcceptFromAnyone triggered first
+    expect(sent).toHaveLength(0);
+
+    unregisterPeer('fof-voucher-4');
+  });
+
+  it('excludes the requesting peer itself from vouch candidates', async () => {
+    await updateSettings(prisma, { autoAcceptFromFriendsOfFriends: true });
+
+    // Register the CANDIDATE as a connected peer (edge case: they are also a connected peer)
+    const candidateNodeId = 'fof-candidate-5';
+    const candidatePeerObj = makeFakePeer(candidateNodeId);
+    registerPeer(
+      candidatePeerObj.ws,
+      candidatePeerObj.sessionKey,
+      candidateNodeId,
+      candidatePeerObj.peerPublicKey,
+      '10.0.0.5',
+      7734,
+    );
+    // If candidate were in the DB as ACCEPTED (some edge case), we'd still not ask them
+    await prisma.friend.create({
+      data: {
+        name: 'Self-Voucher',
+        nodeId: candidateNodeId,
+        publicKey: 'fakekey5',
+        address: '10.0.0.5',
+        port: 7734,
+        status: 'ACCEPTED',
+      },
+    });
+
+    const responses: unknown[] = [];
+    // With only the candidate as a connected accepted peer, no vouch can happen → INCOMING_PENDING
+    await handleInboundFriendRequest(
+      identity,
+      prisma,
+      { type: 'friend-request', name: 'Candidate5', port: 7734 },
+      {
+        nodeId: candidateNodeId,
+        publicKey: Buffer.from('fakekey'),
+        address: '10.0.0.5',
+        port: 7734,
+      },
+      (r) => responses.push(r),
+      50,
+    );
+
+    expect(responses).toHaveLength(0);
+    unregisterPeer(candidateNodeId);
+    await prisma.friend.delete({ where: { nodeId: candidateNodeId } });
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+function makeFakePeer(nodeId: string): ConnectedPeer {
+  return {
+    ws: { send: () => {}, close: () => {} },
+    sessionKey: Buffer.alloc(32),
+    peerNodeId: nodeId,
+    peerPublicKey: Buffer.alloc(32),
+    address: '127.0.0.1',
+    port: 7734,
+  };
+}
 
 function makeFakeWs(identity: ReturnType<typeof generateIdentity>, sent: string[]) {
   return {

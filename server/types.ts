@@ -112,12 +112,25 @@ export type ChunkErrorMessage = {
   reason: string;
 };
 
+export type FriendVouchRequestMessage = {
+  type: 'friend-vouch-request';
+  nodeId: string;
+};
+
+export type FriendVouchResponseMessage = {
+  type: 'friend-vouch-response';
+  nodeId: string;
+  vouched: boolean;
+};
+
 export type InnerMessage =
   | ReadyMessage
   | PingMessage
   | PongMessage
   | FriendRequestMessage
   | FriendResponseMessage
+  | FriendVouchRequestMessage
+  | FriendVouchResponseMessage
   | SearchRequestMessage
   | SearchResultMessage
   | ChunkRequestMessage
