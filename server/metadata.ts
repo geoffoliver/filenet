@@ -112,13 +112,14 @@ async function extractImageMetadata(path: string): Promise<Record<string, unknow
 }
 
 async function extractPdfMetadata(path: string): Promise<Record<string, unknown> | null> {
-  let parser: { destroy(): Promise<void> } | null = null;
+  let destroy: (() => Promise<void>) | null = null;
   try {
     const { PDFParse } = await import('pdf-parse');
     const file = Bun.file(path);
     if (file.size > MAX_DOC_BYTES) return null;
     const data = await file.arrayBuffer();
-    parser = new PDFParse({ data: new Uint8Array(data) });
+    const parser = new PDFParse({ data: new Uint8Array(data) });
+    destroy = () => parser.destroy();
     const result = await parser.getInfo();
     const meta: Record<string, unknown> = {};
     if (result.info?.Title) meta.title = result.info.Title;
@@ -130,7 +131,7 @@ async function extractPdfMetadata(path: string): Promise<Record<string, unknown>
   } catch {
     return null;
   } finally {
-    await parser?.destroy().catch(() => {});
+    await destroy?.().catch(() => {});
   }
 }
 
