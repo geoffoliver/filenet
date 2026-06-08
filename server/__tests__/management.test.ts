@@ -190,6 +190,15 @@ describe('POST /api/friends', () => {
     expect(body.status).toBe('OUTGOING_PENDING');
   });
 
+  it('response includes downloads zero stats so UI does not crash on optimistic insert', async () => {
+    const res = await makeHandler()(
+      jsonReq('/api/friends', 'POST', { name: 'Bob', address: '10.0.0.2', port: 7734 }),
+    );
+    const body = await res.json();
+    expect(body.downloads.count).toBe(0);
+    expect(body.downloads.totalSize).toBe('0');
+  });
+
   it('defaults port to 7734 when omitted', async () => {
     const res = await makeHandler()(
       jsonReq('/api/friends', 'POST', { name: 'Carol', address: '10.0.0.3' }),
@@ -249,6 +258,16 @@ describe('PUT /api/friends/:id — accept', () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.status).toBe('ACCEPTED');
+  });
+
+  it('response includes downloads zero stats so UI does not crash on optimistic update', async () => {
+    const f = await prisma.friend.create({
+      data: { name: 'Grace2', address: '10.0.0.16', port: 7734, status: 'INCOMING_PENDING' },
+    });
+    const res = await makeHandler()(jsonReq(`/api/friends/${f.id}`, 'PUT', { action: 'accept' }));
+    const body = await res.json();
+    expect(body.downloads.count).toBe(0);
+    expect(body.downloads.totalSize).toBe('0');
   });
 
   it('returns 409 when accepting a non-INCOMING_PENDING friend', async () => {
@@ -825,6 +844,30 @@ describe('POST /api/transfers', () => {
   it('returns 400 for missing/invalid fields', async () => {
     const res = await makeHandler()(
       jsonReq('/api/transfers', 'POST', { sha256: 'bad', filename: '', size: 'x', sources: [] }),
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it('returns 400 when sources array exceeds 100 entries', async () => {
+    const res = await makeHandler()(
+      jsonReq('/api/transfers', 'POST', {
+        sha256: 'a'.repeat(64),
+        filename: 'big.mp3',
+        size: '1000',
+        sources: Array.from({ length: 101 }, (_, i) => `node${i}`),
+      }),
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it('returns 400 when a source entry exceeds 200 characters', async () => {
+    const res = await makeHandler()(
+      jsonReq('/api/transfers', 'POST', {
+        sha256: 'a'.repeat(64),
+        filename: 'big.mp3',
+        size: '1000',
+        sources: ['x'.repeat(201)],
+      }),
     );
     expect(res.status).toBe(400);
   });

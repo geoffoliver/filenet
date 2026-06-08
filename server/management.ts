@@ -148,7 +148,10 @@ export function createManagementFetch(deps: ManagementDeps): (req: Request) => P
               console.error(`Failed to connect to ${address}:${port}:`, err);
             },
           );
-          return Response.json(friend, { status: 201 });
+          return Response.json(
+            { ...friend, downloads: { count: 0, totalSize: '0' } },
+            { status: 201 },
+          );
         }
       }
 
@@ -194,7 +197,7 @@ export function createManagementFetch(deps: ManagementDeps): (req: Request) => P
                   });
               }
             }
-            return Response.json(updated);
+            return Response.json({ ...updated, downloads: { count: 0, totalSize: '0' } });
           }
 
           if (action === 'reject') {
@@ -319,7 +322,8 @@ export function createManagementFetch(deps: ManagementDeps): (req: Request) => P
             !/^\d+$/.test(size) ||
             !Array.isArray(sources) ||
             sources.length === 0 ||
-            sources.some((s) => typeof s !== 'string' || !s.trim()) ||
+            sources.length > 100 ||
+            sources.some((s) => typeof s !== 'string' || !s.trim() || s.length > 200) ||
             (mimeType !== null && mimeType !== undefined && typeof mimeType !== 'string')
           ) {
             return new Response('Invalid transfer request', { status: 400 });
