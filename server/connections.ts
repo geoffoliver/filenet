@@ -133,9 +133,10 @@ export async function queryVouch(
 ): Promise<boolean> {
   if (peers.length === 0) return false;
 
-  // Guard: a concurrent vouch query for the same candidateNodeId is already in
-  // flight (e.g., rapid duplicate friend-requests). Let it finish rather than
-  // overwriting the map entry and corrupting both queries' state.
+  // Guard: reject concurrent queries for the same candidateNodeId. Overwriting
+  // the map entry would corrupt the first query's state (its timer would later
+  // delete the second entry and strand the second promise). The first query will
+  // determine the outcome; the duplicate is left for manual review.
   if (pendingVouches.has(candidateNodeId)) return false;
 
   // Guard: prevent memory exhaustion from a flood of simultaneous friend-requests.

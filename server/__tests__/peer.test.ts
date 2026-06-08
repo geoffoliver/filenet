@@ -461,7 +461,7 @@ describe('dispatchMessage — friend-vouch-request', () => {
     });
 
     const sessionKey = Buffer.alloc(32);
-    const { dispatchWs, mockWs } = makeMockWs(friendNodeId);
+    const { dispatchWs } = makeMockWs(friendNodeId);
     // Re-create with a tracked session key so we can decrypt the response
     const trackedSends: Buffer[] = [];
     const trackedWs = {
@@ -475,7 +475,6 @@ describe('dispatchMessage — friend-vouch-request', () => {
 
     await dispatchMessage(dispatchWs, { type: 'friend-vouch-request', nodeId: candidateNodeId });
     unregisterPeer(friendNodeId);
-    unregisterPeer(mockWs as any);
 
     // Verify a response was sent
     expect(trackedSends).toHaveLength(1);
