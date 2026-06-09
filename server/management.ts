@@ -321,7 +321,7 @@ export function createManagementFetch(deps: ManagementDeps): (req: Request) => P
             filename: filename.trim(),
             size: BigInt(size),
             mimeType: mimeType ?? null,
-            sources,
+            sources: sources.map((s: string) => s.trim()),
             downloadFolder,
           });
           return Response.json({ id }, { status: 201 });

@@ -321,14 +321,16 @@ async function finalizeDownload(prisma: PrismaClient, dl: ActiveDownload): Promi
   activeDownloads.delete(dl.id);
   activeDownloadFolders.delete(dl.id);
 
-  // Increment per-friend download counters. Deduplicate sources so a nodeId
-  // appearing twice in one download credits the friend only once.
+  // Increment per-friend download counters. Failures here are non-fatal —
+  // a transient DB error must not prevent post-download scripts from running.
   const uniqueSources = [...new Set(dl.sources)];
   if (uniqueSources.length > 0) {
-    await prisma.friend.updateMany({
-      where: { nodeId: { in: uniqueSources }, status: 'ACCEPTED' },
-      data: { downloadCount: { increment: 1 }, downloadTotalBytes: { increment: dl.size } },
-    });
+    await prisma.friend
+      .updateMany({
+        where: { nodeId: { in: uniqueSources }, status: 'ACCEPTED' },
+        data: { downloadCount: { increment: 1 }, downloadTotalBytes: { increment: dl.size } },
+      })
+      .catch((err: unknown) => console.error('Failed to update friend download counters:', err));
   }
 
   runPostDownloadScripts(prisma, finalPath, {

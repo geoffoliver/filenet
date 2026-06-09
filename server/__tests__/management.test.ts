@@ -930,6 +930,21 @@ describe('POST /api/transfers', () => {
     expect(res.status).toBe(400);
   });
 
+  it('trims whitespace from source nodeIds so they match stored Friend.nodeId values', async () => {
+    const res = await makeHandler()(
+      jsonReq('/api/transfers', 'POST', {
+        sha256: 'b'.repeat(64),
+        filename: 'trim.mp3',
+        size: '500',
+        sources: ['  node-a  ', 'node-b  '],
+      }),
+    );
+    expect(res.status).toBe(201);
+    const { id } = await res.json();
+    const dl = await prisma.download.findUniqueOrThrow({ where: { id } });
+    expect(JSON.parse(dl.sources)).toEqual(['node-a', 'node-b']);
+  });
+
   it('creates a download and returns 201 with the id', async () => {
     const res = await makeHandler()(
       jsonReq('/api/transfers', 'POST', {
