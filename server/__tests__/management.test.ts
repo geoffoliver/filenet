@@ -166,6 +166,25 @@ describe('GET /api/friends', () => {
     expect(frank.downloads.count).toBe(0);
     expect(grace.downloads.count).toBe(0);
   });
+
+  it('zeroes out download stats when a previously-ACCEPTED friend is later blocked', async () => {
+    const f = await prisma.friend.create({
+      data: {
+        name: 'Eve',
+        nodeId: 'node-eve',
+        address: '10.0.0.8',
+        port: 7734,
+        status: 'BLOCKED',
+        downloadCount: 5,
+        downloadTotalBytes: 9000n,
+      },
+    });
+    const res = await makeHandler()(req('/api/friends'));
+    const body = await res.json();
+    const eve = body.find((fr: { name: string }) => fr.name === f.name);
+    expect(eve.downloads.count).toBe(0);
+    expect(eve.downloads.totalSize).toBe('0');
+  });
 });
 
 // ---------------------------------------------------------------------------

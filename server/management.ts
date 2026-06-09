@@ -98,10 +98,13 @@ export function createManagementFetch(deps: ManagementDeps): (req: Request) => P
           const enriched = friends.map(({ downloadCount, downloadTotalBytes, ...f }) => ({
             ...f,
             online: f.nodeId ? !!getConnectedPeer(f.nodeId) : false,
-            downloads: {
-              count: downloadCount,
-              totalSize: String(downloadTotalBytes),
-            },
+            // Only surface counters for ACCEPTED friends. If a friend was ACCEPTED
+            // (accumulating download credit) and later blocked, the historical counter
+            // persists in the DB but must not be exposed for non-ACCEPTED statuses.
+            downloads:
+              f.status === 'ACCEPTED'
+                ? { count: downloadCount, totalSize: String(downloadTotalBytes) }
+                : { count: 0, totalSize: '0' },
           }));
           return Response.json(enriched);
         }
