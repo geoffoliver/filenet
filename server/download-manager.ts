@@ -321,6 +321,16 @@ async function finalizeDownload(prisma: PrismaClient, dl: ActiveDownload): Promi
   activeDownloads.delete(dl.id);
   activeDownloadFolders.delete(dl.id);
 
+  // Increment per-friend download counters. Deduplicate sources so a nodeId
+  // appearing twice in one download credits the friend only once.
+  const uniqueSources = [...new Set(dl.sources)];
+  if (uniqueSources.length > 0) {
+    await prisma.friend.updateMany({
+      where: { nodeId: { in: uniqueSources }, status: 'ACCEPTED' },
+      data: { downloadCount: { increment: 1 }, downloadTotalBytes: { increment: dl.size } },
+    });
+  }
+
   runPostDownloadScripts(prisma, finalPath, {
     downloadId: dl.id,
     filename: record.filename,

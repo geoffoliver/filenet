@@ -94,58 +94,15 @@ export function createManagementFetch(deps: ManagementDeps): (req: Request) => P
 
       if (url.pathname === '/api/friends') {
         if (req.method === 'GET') {
-          const [friends, completedDownloads] = await Promise.all([
-            getFriends(prisma),
-            prisma.download.findMany({
-              where: { state: 'COMPLETED' },
-              select: { sources: true, size: true },
-            }),
-          ]);
-
-          // Only aggregate downloads for ACCEPTED friends. Pending/blocked peers must not
-          // receive download credit — they haven't been vetted yet (pending) or were
-          // explicitly excluded (blocked). Also keeps the set bounded to trusted peers only.
-          const friendNodeIds = new Set(
-            friends
-              .filter((f) => f.status === 'ACCEPTED' && f.nodeId)
-              .map((f) => f.nodeId as string),
-          );
-
-          const downloadsByNode = new Map<string, { count: number; totalSize: bigint }>();
-          for (const dl of completedDownloads) {
-            let sources: unknown;
-            try {
-              sources = JSON.parse(dl.sources);
-            } catch {
-              continue;
-            }
-            if (!Array.isArray(sources)) continue;
-            // Dedupe within this download: each peer is credited at most once per file.
-            const seen = new Set<string>();
-            for (const nodeId of sources) {
-              if (typeof nodeId !== 'string') continue;
-              if (!friendNodeIds.has(nodeId)) continue; // skip non-friends
-              if (seen.has(nodeId)) continue; // skip duplicates within this download
-              seen.add(nodeId);
-              const existing = downloadsByNode.get(nodeId) ?? { count: 0, totalSize: 0n };
-              downloadsByNode.set(nodeId, {
-                count: existing.count + 1,
-                totalSize: existing.totalSize + dl.size,
-              });
-            }
-          }
-
-          const enriched = friends.map((f) => {
-            const dlStats = f.nodeId ? downloadsByNode.get(f.nodeId) : undefined;
-            return {
-              ...f,
-              online: f.nodeId ? !!getConnectedPeer(f.nodeId) : false,
-              downloads: {
-                count: dlStats?.count ?? 0,
-                totalSize: String(dlStats?.totalSize ?? 0n),
-              },
-            };
-          });
+          const friends = await getFriends(prisma);
+          const enriched = friends.map(({ downloadCount, downloadTotalBytes, ...f }) => ({
+            ...f,
+            online: f.nodeId ? !!getConnectedPeer(f.nodeId) : false,
+            downloads: {
+              count: downloadCount,
+              totalSize: String(downloadTotalBytes),
+            },
+          }));
           return Response.json(enriched);
         }
 
@@ -162,8 +119,9 @@ export function createManagementFetch(deps: ManagementDeps): (req: Request) => P
               console.error(`Failed to connect to ${address}:${port}:`, err);
             },
           );
+          const { downloadCount: _dc, downloadTotalBytes: _dtb, ...friendData } = friend;
           return Response.json(
-            { ...friend, online: false, downloads: { count: 0, totalSize: '0' } },
+            { ...friendData, online: false, downloads: { count: 0, totalSize: '0' } },
             { status: 201 },
           );
         }
@@ -211,8 +169,9 @@ export function createManagementFetch(deps: ManagementDeps): (req: Request) => P
                   });
               }
             }
+            const { downloadCount: _dc2, downloadTotalBytes: _dtb2, ...updatedData } = updated;
             return Response.json({
-              ...updated,
+              ...updatedData,
               online: updated.nodeId ? !!getConnectedPeer(updated.nodeId) : false,
               downloads: { count: 0, totalSize: '0' },
             });

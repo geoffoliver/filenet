@@ -106,7 +106,7 @@ describe('GET /api/friends', () => {
     expect(body[0].online).toBe(false); // no peers connected in tests
   });
 
-  it('includes zero download stats for a friend with no completed downloads', async () => {
+  it('includes zero download stats for a friend with no downloads', async () => {
     await prisma.friend.create({
       data: {
         name: 'Carol',
@@ -122,8 +122,7 @@ describe('GET /api/friends', () => {
     expect(body[0].downloads.totalSize).toBe('0');
   });
 
-  it('counts completed downloads where the friend appears in sources', async () => {
-    await prisma.download.deleteMany();
+  it('maps downloadCount and downloadTotalBytes to the downloads response shape', async () => {
     await prisma.friend.create({
       data: {
         name: 'Dave',
@@ -131,43 +130,9 @@ describe('GET /api/friends', () => {
         address: '10.0.0.4',
         port: 7734,
         status: 'ACCEPTED',
+        downloadCount: 2,
+        downloadTotalBytes: 3000n,
       },
-    });
-    await prisma.download.createMany({
-      data: [
-        // Dave is a source — counts
-        {
-          sha256: 'a'.repeat(64),
-          filename: 'a.mp3',
-          size: 1000n,
-          state: 'COMPLETED',
-          sources: JSON.stringify(['node-dave']),
-        },
-        // Dave is one of multiple sources — still counts
-        {
-          sha256: 'b'.repeat(64),
-          filename: 'b.mp3',
-          size: 2000n,
-          state: 'COMPLETED',
-          sources: JSON.stringify(['node-dave', 'node-other']),
-        },
-        // Different source — should not count for Dave
-        {
-          sha256: 'c'.repeat(64),
-          filename: 'c.mp3',
-          size: 3000n,
-          state: 'COMPLETED',
-          sources: JSON.stringify(['node-other']),
-        },
-        // Dave is source but not COMPLETED — should not count
-        {
-          sha256: 'd'.repeat(64),
-          filename: 'd.mp3',
-          size: 4000n,
-          state: 'FAILED',
-          sources: JSON.stringify(['node-dave']),
-        },
-      ],
     });
     const res = await makeHandler()(req('/api/friends'));
     const body = await res.json();
@@ -175,34 +140,7 @@ describe('GET /api/friends', () => {
     expect(body[0].downloads.totalSize).toBe('3000');
   });
 
-  it('does not inflate count when the same nodeId appears twice in one sources list', async () => {
-    await prisma.download.deleteMany();
-    await prisma.friend.create({
-      data: {
-        name: 'Eve',
-        nodeId: 'node-eve',
-        address: '10.0.0.5',
-        port: 7734,
-        status: 'ACCEPTED',
-      },
-    });
-    await prisma.download.create({
-      data: {
-        sha256: 'a'.repeat(64),
-        filename: 'dup.mp3',
-        size: 1000n,
-        state: 'COMPLETED',
-        sources: JSON.stringify(['node-eve', 'node-eve']), // duplicate
-      },
-    });
-    const res = await makeHandler()(req('/api/friends'));
-    const body = await res.json();
-    expect(body[0].downloads.count).toBe(1);
-    expect(body[0].downloads.totalSize).toBe('1000');
-  });
-
-  it('does not attribute downloads to non-ACCEPTED friends', async () => {
-    await prisma.download.deleteMany();
+  it('pending and blocked friends always show zero download stats', async () => {
     await prisma.friend.createMany({
       data: [
         {
@@ -218,24 +156,6 @@ describe('GET /api/friends', () => {
           address: '10.0.0.7',
           port: 7734,
           status: 'BLOCKED',
-        },
-      ],
-    });
-    await prisma.download.createMany({
-      data: [
-        {
-          sha256: 'a'.repeat(64),
-          filename: 'a.mp3',
-          size: 1000n,
-          state: 'COMPLETED',
-          sources: JSON.stringify(['node-frank']),
-        },
-        {
-          sha256: 'b'.repeat(64),
-          filename: 'b.mp3',
-          size: 2000n,
-          state: 'COMPLETED',
-          sources: JSON.stringify(['node-grace']),
         },
       ],
     });

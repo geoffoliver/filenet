@@ -1,10 +1,22 @@
 export function formatBytes(s: string): string {
-  const n = parseInt(s, 10);
-  if (isNaN(n) || n === 0) return '0 B';
-  if (n < 1024) return `${n} B`;
-  if (n < 1024 ** 2) return `${(n / 1024).toFixed(1)} KB`;
-  if (n < 1024 ** 3) return `${(n / 1024 ** 2).toFixed(1)} MB`;
-  return `${(n / 1024 ** 3).toFixed(2)} GB`;
+  let n: bigint;
+  try {
+    n = BigInt(s);
+  } catch {
+    return '0 B';
+  }
+  if (n === 0n) return '0 B';
+  const KB = 1024n;
+  const MB = KB * 1024n;
+  const GB = MB * 1024n;
+  const TB = GB * 1024n;
+  // For KB–GB, n is small enough that Number() is exact (all < 2^40 < MAX_SAFE_INTEGER).
+  // For TB+, divide BigInt first so the Number() operand stays in safe-integer range.
+  if (n < KB) return `${n} B`;
+  if (n < MB) return `${(Number(n) / Number(KB)).toFixed(1)} KB`;
+  if (n < GB) return `${(Number(n) / Number(MB)).toFixed(1)} MB`;
+  if (n < TB) return `${(Number(n) / Number(GB)).toFixed(2)} GB`;
+  return `${(Number(n / GB) / 1024).toFixed(2)} TB`;
 }
 
 export type Settings = {
