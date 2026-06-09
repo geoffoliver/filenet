@@ -102,9 +102,14 @@ export function createManagementFetch(deps: ManagementDeps): (req: Request) => P
             }),
           ]);
 
-          // Build a set of accepted friend nodeIds so we only aggregate known peers and
-          // keep the map bounded — unknown nodeIds from stale/spoofed sources are ignored.
-          const friendNodeIds = new Set(friends.map((f) => f.nodeId).filter(Boolean) as string[]);
+          // Only aggregate downloads for ACCEPTED friends. Pending/blocked peers must not
+          // receive download credit — they haven't been vetted yet (pending) or were
+          // explicitly excluded (blocked). Also keeps the set bounded to trusted peers only.
+          const friendNodeIds = new Set(
+            friends
+              .filter((f) => f.status === 'ACCEPTED' && f.nodeId)
+              .map((f) => f.nodeId as string),
+          );
 
           const downloadsByNode = new Map<string, { count: number; totalSize: bigint }>();
           for (const dl of completedDownloads) {
@@ -208,7 +213,7 @@ export function createManagementFetch(deps: ManagementDeps): (req: Request) => P
             }
             return Response.json({
               ...updated,
-              online: false,
+              online: updated.nodeId ? !!getConnectedPeer(updated.nodeId) : false,
               downloads: { count: 0, totalSize: '0' },
             });
           }

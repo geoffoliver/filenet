@@ -8,6 +8,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { unlinkSync } from 'fs';
 
+import { registerPeer, unregisterPeer } from '../connections';
 import { createManagementFetch } from '../management';
 import { createPrismaClient } from '../db';
 import { generateIdentity } from '../identity';
@@ -199,6 +200,52 @@ describe('GET /api/friends', () => {
     expect(body[0].downloads.count).toBe(1);
     expect(body[0].downloads.totalSize).toBe('1000');
   });
+
+  it('does not attribute downloads to non-ACCEPTED friends', async () => {
+    await prisma.download.deleteMany();
+    await prisma.friend.createMany({
+      data: [
+        {
+          name: 'Incoming Frank',
+          nodeId: 'node-frank',
+          address: '10.0.0.6',
+          port: 7734,
+          status: 'INCOMING_PENDING',
+        },
+        {
+          name: 'Blocked Grace',
+          nodeId: 'node-grace',
+          address: '10.0.0.7',
+          port: 7734,
+          status: 'BLOCKED',
+        },
+      ],
+    });
+    await prisma.download.createMany({
+      data: [
+        {
+          sha256: 'a'.repeat(64),
+          filename: 'a.mp3',
+          size: 1000n,
+          state: 'COMPLETED',
+          sources: JSON.stringify(['node-frank']),
+        },
+        {
+          sha256: 'b'.repeat(64),
+          filename: 'b.mp3',
+          size: 2000n,
+          state: 'COMPLETED',
+          sources: JSON.stringify(['node-grace']),
+        },
+      ],
+    });
+    const res = await makeHandler()(req('/api/friends'));
+    const body = await res.json();
+    const frank = body.find((f: { name: string }) => f.name === 'Incoming Frank');
+    const grace = body.find((f: { name: string }) => f.name === 'Blocked Grace');
+    expect(frank.downloads.count).toBe(0);
+    expect(grace.downloads.count).toBe(0);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -311,6 +358,35 @@ describe('PUT /api/friends/:id — accept', () => {
     const res = await makeHandler()(jsonReq(`/api/friends/${f.id}`, 'PUT', { action: 'accept' }));
     const body = await res.json();
     expect(body.online).toBe(false);
+  });
+
+  it('response reflects actual connection state: online true when peer is connected', async () => {
+    const nodeId = 'node-connected-test';
+    const f = await prisma.friend.create({
+      data: {
+        name: 'Connected',
+        nodeId,
+        address: '10.0.0.18',
+        port: 7734,
+        status: 'INCOMING_PENDING',
+      },
+    });
+    const fakePeer = registerPeer(
+      { send: () => {}, close: () => {} },
+      Buffer.alloc(32),
+      nodeId,
+      Buffer.alloc(32),
+      '10.0.0.18',
+      7734,
+    );
+    try {
+      const res = await makeHandler()(jsonReq(`/api/friends/${f.id}`, 'PUT', { action: 'accept' }));
+      const body = await res.json();
+      expect(body.online).toBe(true);
+    } finally {
+      unregisterPeer(nodeId);
+      void fakePeer; // keep linter happy
+    }
   });
 
   it('returns 409 when accepting a non-INCOMING_PENDING friend', async () => {
