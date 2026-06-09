@@ -2,23 +2,12 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-import { controlTransfer, dismissTransfer, getTransfers } from '../../lib/api';
+import { controlTransfer, dismissTransfer, formatBytes, getTransfers } from '../../lib/api';
 import type { Transfer } from '../../lib/api';
 
 import styles from './transfers.module.css';
 
 const POLL_MS = 1500;
-
-// ── formatting helpers ────────────────────────────────────────────────────────
-
-function formatBytes(s: string | number): string {
-  const n = typeof s === 'string' ? parseInt(s, 10) : s;
-  if (isNaN(n) || n === 0) return '0 B';
-  if (n < 1024) return `${n} B`;
-  if (n < 1024 ** 2) return `${(n / 1024).toFixed(1)} KB`;
-  if (n < 1024 ** 3) return `${(n / 1024 ** 2).toFixed(1)} MB`;
-  return `${(n / 1024 ** 3).toFixed(2)} GB`;
-}
 
 function formatSpeed(bps: number): string {
   if (bps === 0) return '–';

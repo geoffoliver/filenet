@@ -1,7 +1,7 @@
-export function formatBytes(s: string): string {
+export function formatBytes(s: string | number): string {
   let n: bigint;
   try {
-    n = BigInt(s);
+    n = BigInt(typeof s === 'number' ? Math.trunc(s) : s);
   } catch {
     return '0 B';
   }
