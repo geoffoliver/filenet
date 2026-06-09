@@ -304,7 +304,8 @@ export function createManagementFetch(deps: ManagementDeps): (req: Request) => P
             sources.length === 0 ||
             sources.length > 100 ||
             sources.some((s) => typeof s !== 'string' || !s.trim() || s.length > 200) ||
-            (mimeType !== null && mimeType !== undefined && typeof mimeType !== 'string')
+            (mimeType !== null && mimeType !== undefined && typeof mimeType !== 'string') ||
+            (typeof mimeType === 'string' && mimeType.length > 200)
           ) {
             return new Response('Invalid transfer request', { status: 400 });
           }
@@ -629,11 +630,16 @@ export function createManagementFetch(deps: ManagementDeps): (req: Request) => P
             // Group chats are network-wide by design: every connected friend
             // receives the message and auto-joins the room, mirroring the
             // "rooms shared across the entire network" spec requirement.
-            const peers = await getAcceptedConnectedPeers(prisma);
-            for (const peer of peers) {
-              try {
-                sendToPeer(peer, chatWireMsg);
-              } catch {}
+            // Broadcast errors are non-fatal — the message is already committed.
+            try {
+              const peers = await getAcceptedConnectedPeers(prisma);
+              for (const peer of peers) {
+                try {
+                  sendToPeer(peer, chatWireMsg);
+                } catch {}
+              }
+            } catch (broadcastErr) {
+              console.error('Failed to broadcast group message:', broadcastErr);
             }
           }
 

@@ -33,7 +33,7 @@ function DownloadRow({ transfer, onAction }: { transfer: Transfer; onAction: () 
   const [working, setWorking] = useState(false);
   const [error, setError] = useState('');
 
-  async function doAction(action: 'pause' | 'resume' | 'cancel') {
+  function doAction(action: 'pause' | 'resume' | 'cancel') {
     setWorking(true);
     setError('');
     setConfirming(false);
@@ -43,7 +43,7 @@ function DownloadRow({ transfer, onAction }: { transfer: Transfer; onAction: () 
       .finally(() => setWorking(false));
   }
 
-  async function doDismiss() {
+  function doDismiss() {
     setWorking(true);
     setError('');
     dismissTransfer(transfer.id)

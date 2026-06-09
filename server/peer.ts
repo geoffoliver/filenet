@@ -168,13 +168,12 @@ export async function dispatchMessage(
     if (!friend) return;
 
     if (accepted) {
-      await acceptFriendRequest(ws.data.prisma, friend.id);
-      if (name) {
-        await ws.data.prisma.friend.update({
-          where: { id: friend.id },
-          data: { name },
-        });
-      }
+      await ws.data.prisma.$transaction(async (tx) => {
+        await acceptFriendRequest(tx as PrismaClient, friend.id);
+        if (name) {
+          await tx.friend.update({ where: { id: friend.id }, data: { name } });
+        }
+      });
     } else {
       await ws.data.prisma.friend.delete({ where: { id: friend.id } });
       closeAndUnregisterPeer(state.peerNodeId);
