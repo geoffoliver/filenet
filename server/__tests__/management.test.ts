@@ -173,6 +173,32 @@ describe('GET /api/friends', () => {
     expect(body[0].downloads.count).toBe(2);
     expect(body[0].downloads.totalSize).toBe('3000');
   });
+
+  it('does not inflate count when the same nodeId appears twice in one sources list', async () => {
+    await prisma.download.deleteMany();
+    await prisma.friend.create({
+      data: {
+        name: 'Eve',
+        nodeId: 'node-eve',
+        address: '10.0.0.5',
+        port: 7734,
+        status: 'ACCEPTED',
+      },
+    });
+    await prisma.download.create({
+      data: {
+        sha256: 'a'.repeat(64),
+        filename: 'dup.mp3',
+        size: 1000n,
+        state: 'COMPLETED',
+        sources: JSON.stringify(['node-eve', 'node-eve']), // duplicate
+      },
+    });
+    const res = await makeHandler()(req('/api/friends'));
+    const body = await res.json();
+    expect(body[0].downloads.count).toBe(1);
+    expect(body[0].downloads.totalSize).toBe('1000');
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -197,6 +223,14 @@ describe('POST /api/friends', () => {
     const body = await res.json();
     expect(body.downloads.count).toBe(0);
     expect(body.downloads.totalSize).toBe('0');
+  });
+
+  it('response includes online boolean to match GET /api/friends shape', async () => {
+    const res = await makeHandler()(
+      jsonReq('/api/friends', 'POST', { name: 'Bob', address: '10.0.0.2', port: 7734 }),
+    );
+    const body = await res.json();
+    expect(body.online).toBe(false);
   });
 
   it('defaults port to 7734 when omitted', async () => {
@@ -268,6 +302,15 @@ describe('PUT /api/friends/:id — accept', () => {
     const body = await res.json();
     expect(body.downloads.count).toBe(0);
     expect(body.downloads.totalSize).toBe('0');
+  });
+
+  it('response includes online boolean to match GET /api/friends shape', async () => {
+    const f = await prisma.friend.create({
+      data: { name: 'Grace3', address: '10.0.0.17', port: 7734, status: 'INCOMING_PENDING' },
+    });
+    const res = await makeHandler()(jsonReq(`/api/friends/${f.id}`, 'PUT', { action: 'accept' }));
+    const body = await res.json();
+    expect(body.online).toBe(false);
   });
 
   it('returns 409 when accepting a non-INCOMING_PENDING friend', async () => {

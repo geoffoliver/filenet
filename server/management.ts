@@ -102,6 +102,10 @@ export function createManagementFetch(deps: ManagementDeps): (req: Request) => P
             }),
           ]);
 
+          // Build a set of accepted friend nodeIds so we only aggregate known peers and
+          // keep the map bounded — unknown nodeIds from stale/spoofed sources are ignored.
+          const friendNodeIds = new Set(friends.map((f) => f.nodeId).filter(Boolean) as string[]);
+
           const downloadsByNode = new Map<string, { count: number; totalSize: bigint }>();
           for (const dl of completedDownloads) {
             let sources: unknown;
@@ -111,8 +115,13 @@ export function createManagementFetch(deps: ManagementDeps): (req: Request) => P
               continue;
             }
             if (!Array.isArray(sources)) continue;
+            // Dedupe within this download: each peer is credited at most once per file.
+            const seen = new Set<string>();
             for (const nodeId of sources) {
               if (typeof nodeId !== 'string') continue;
+              if (!friendNodeIds.has(nodeId)) continue; // skip non-friends
+              if (seen.has(nodeId)) continue; // skip duplicates within this download
+              seen.add(nodeId);
               const existing = downloadsByNode.get(nodeId) ?? { count: 0, totalSize: 0n };
               downloadsByNode.set(nodeId, {
                 count: existing.count + 1,
@@ -149,7 +158,7 @@ export function createManagementFetch(deps: ManagementDeps): (req: Request) => P
             },
           );
           return Response.json(
-            { ...friend, downloads: { count: 0, totalSize: '0' } },
+            { ...friend, online: false, downloads: { count: 0, totalSize: '0' } },
             { status: 201 },
           );
         }
@@ -197,7 +206,11 @@ export function createManagementFetch(deps: ManagementDeps): (req: Request) => P
                   });
               }
             }
-            return Response.json({ ...updated, downloads: { count: 0, totalSize: '0' } });
+            return Response.json({
+              ...updated,
+              online: false,
+              downloads: { count: 0, totalSize: '0' },
+            });
           }
 
           if (action === 'reject') {
