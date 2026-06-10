@@ -1,6 +1,6 @@
 import { timingSafeEqual } from 'node:crypto';
 
-import type { Friend, FriendStatus, PrismaClient, Settings } from '@prisma/client';
+import type { Friend, FriendStatus, Prisma, PrismaClient, Settings } from '@prisma/client';
 
 import { ConflictError, NotFoundError } from './errors';
 
@@ -91,7 +91,10 @@ export async function handleIncomingFriendRequest(
   });
 }
 
-export async function acceptFriendRequest(prisma: PrismaClient, friendId: string): Promise<Friend> {
+export async function acceptFriendRequest(
+  prisma: PrismaClient | Prisma.TransactionClient,
+  friendId: string,
+): Promise<Friend> {
   const friend = await prisma.friend.findUnique({ where: { id: friendId } });
   if (!friend) throw new NotFoundError(`Friend ${friendId} not found`);
   if (friend.status === 'ACCEPTED') return friend;

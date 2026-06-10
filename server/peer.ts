@@ -169,7 +169,7 @@ export async function dispatchMessage(
 
     if (accepted) {
       await ws.data.prisma.$transaction(async (tx) => {
-        await acceptFriendRequest(tx as PrismaClient, friend.id);
+        await acceptFriendRequest(tx, friend.id);
         if (name) {
           await tx.friend.update({ where: { id: friend.id }, data: { name } });
         }
