@@ -304,7 +304,7 @@ export function createManagementFetch(deps: ManagementDeps): (req: Request) => P
             sources.length === 0 ||
             sources.length > 100 ||
             sources.some(
-              (s) => typeof s !== 'string' || !s.trim() || !/^[0-9a-f]{64}$/.test(s.trim()),
+              (s) => typeof s !== 'string' || !s.trim() || !/^[0-9a-f]{32}$/.test(s.trim()),
             ) ||
             (mimeType !== null && mimeType !== undefined && typeof mimeType !== 'string') ||
             (typeof mimeType === 'string' && mimeType.length > 200)

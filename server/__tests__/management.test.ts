@@ -893,7 +893,7 @@ describe('POST /api/transfers', () => {
         sha256: 'b'.repeat(64),
         filename: 'file.txt',
         size: '100',
-        sources: ['a'.repeat(64)],
+        sources: ['a'.repeat(32)],
       }),
     );
     expect(res.status).toBe(422);
@@ -912,7 +912,7 @@ describe('POST /api/transfers', () => {
         sha256: 'a'.repeat(64),
         filename: 'big.mp3',
         size: '1000',
-        sources: Array.from({ length: 101 }, (_, i) => i.toString(16).padStart(64, '0')),
+        sources: Array.from({ length: 101 }, (_, i) => i.toString(16).padStart(32, '0')),
       }),
     );
     expect(res.status).toBe(400);
@@ -930,13 +930,13 @@ describe('POST /api/transfers', () => {
     expect(res.status).toBe(400);
   });
 
-  it('returns 400 when a source nodeId is not a 64-character lowercase hex string', async () => {
+  it('returns 400 when a source nodeId is not a 32-character lowercase hex string', async () => {
     for (const badId of [
       'not-a-node-id',
-      'A'.repeat(64), // uppercase hex
-      'a'.repeat(63), // too short
-      'a'.repeat(65), // too long
-      'a'.repeat(63) + 'Z', // invalid char
+      'A'.repeat(32), // uppercase hex
+      'a'.repeat(31), // too short
+      'a'.repeat(33), // too long
+      'a'.repeat(31) + 'Z', // invalid char
     ]) {
       const res = await makeHandler()(
         jsonReq('/api/transfers', 'POST', {
@@ -957,7 +957,7 @@ describe('POST /api/transfers', () => {
         sha256: 'd'.repeat(64),
         filename: longFilename,
         size: '100',
-        sources: ['a'.repeat(64)],
+        sources: ['a'.repeat(32)],
       }),
     );
     expect(res.status).toBe(201);
@@ -967,8 +967,8 @@ describe('POST /api/transfers', () => {
   });
 
   it('trims whitespace from source nodeIds so they match stored Friend.nodeId values', async () => {
-    const nodeA = 'a'.repeat(64);
-    const nodeB = 'b'.repeat(64);
+    const nodeA = 'a'.repeat(32);
+    const nodeB = 'b'.repeat(32);
     const res = await makeHandler()(
       jsonReq('/api/transfers', 'POST', {
         sha256: 'b'.repeat(64),
@@ -990,7 +990,7 @@ describe('POST /api/transfers', () => {
         filename: 'song.mp3',
         size: '12345',
         mimeType: 'audio/mpeg',
-        sources: ['c'.repeat(64)],
+        sources: ['c'.repeat(32)],
       }),
     );
     expect(res.status).toBe(201);

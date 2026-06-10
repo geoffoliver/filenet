@@ -83,7 +83,6 @@ export default function HomeView() {
   const [stats, setStats] = useState<Stats | null>(null);
   const [statsError, setStatsError] = useState('');
   const [activeTransfers, setActiveTransfers] = useState<Transfer[]>([]);
-  const pollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const mountedRef = useRef(true);
 
   useEffect(() => {
@@ -118,17 +117,17 @@ export default function HomeView() {
       while (mountedRef.current) {
         await loadTransfers();
         if (!mountedRef.current) break;
-        await new Promise<void>((resolve) => {
-          pollRef.current = setTimeout(resolve, TRANSFERS_POLL_MS);
-        });
+        await new Promise<void>((resolve) => setTimeout(resolve, TRANSFERS_POLL_MS));
       }
     }
 
     runPoll();
 
+    // Only flip the flag — do NOT cancel the pending setTimeout so the
+    // Promise inside runPoll() resolves normally and the while-loop exits
+    // cleanly rather than being stuck awaiting a cancelled timer forever.
     return () => {
       mountedRef.current = false;
-      if (pollRef.current !== null) clearTimeout(pollRef.current);
     };
   }, [loadTransfers]);
 

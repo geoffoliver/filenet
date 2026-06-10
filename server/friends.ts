@@ -146,7 +146,10 @@ export function shouldAutoAccept(
     const paddedB = Buffer.alloc(len);
     a.copy(paddedA);
     b.copy(paddedB);
-    if (a.length === b.length && timingSafeEqual(paddedA, paddedB)) return true;
+    // Always run timingSafeEqual before checking length equality so the crypto
+    // executes in constant time regardless of whether lengths match. The length
+    // check is a non-secret integer comparison and does not leak password content.
+    if (timingSafeEqual(paddedA, paddedB) && a.length === b.length) return true;
   }
   return false;
 }

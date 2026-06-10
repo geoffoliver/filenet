@@ -525,23 +525,30 @@ export async function resumeDownload(
     activeDownloads.set(id, dl);
   }
 
-  // Conditional update: if a concurrent cancel changed the state between our
-  // initial findUnique check and here, updateMany will match 0 rows and we must
-  // clean up the in-memory state we just reconstructed rather than starting a
-  // pump that writes to a possibly-deleted temp file.
+  // Conditional update: only flip to DOWNLOADING if the record is still PAUSED.
+  // This guards against two races:
+  //   1. A concurrent cancel changed state to CANCELLED — temp file may be gone.
+  //   2. A concurrent resumeDownload already flipped state to DOWNLOADING — the
+  //      pump is already running and we must not tear it down.
   const updated = await prisma.download.updateMany({
     where: { id, state: 'PAUSED' },
     data: { state: 'DOWNLOADING', tmpPath: dl.tmpPath },
   });
   if (updated.count === 0) {
-    dl.stopped = true;
-    if (dl.fileHandle) {
-      try {
-        await dl.fileHandle.close();
-      } catch {}
+    // Only clean up the in-memory state we just rebuilt when the record is
+    // truly gone or in a terminal state (CANCELLED/FAILED). If another resume
+    // already started the pump (state=DOWNLOADING), leave that pump running.
+    const current = await prisma.download.findUnique({ where: { id } });
+    if (!current || current.state === 'CANCELLED' || current.state === 'FAILED') {
+      dl.stopped = true;
+      if (dl.fileHandle) {
+        try {
+          await dl.fileHandle.close();
+        } catch {}
+      }
+      activeDownloads.delete(id);
+      activeDownloadFolders.delete(id);
     }
-    activeDownloads.delete(id);
-    activeDownloadFolders.delete(id);
     return false;
   }
   dl.paused = false;
