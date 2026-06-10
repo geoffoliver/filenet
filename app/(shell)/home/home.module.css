@@ -62,3 +62,33 @@
   @apply text-sm
     text-[var(--text-muted)];
 }
+
+/* ── Active transfers ─────────────────────────────────────────────────────── */
+
+.transfersSection {
+  @apply mt-10;
+}
+
+.transfersHeader {
+  @apply flex
+    items-center
+    justify-between
+    mb-3;
+}
+
+.transfersTitle {
+  @apply text-base
+    font-semibold
+    text-[var(--text-primary)];
+}
+
+.transfersLink {
+  @apply text-sm
+    text-[var(--color-primary)]
+    hover:underline;
+}
+
+.transfersEmpty {
+  @apply text-sm
+    text-[var(--text-muted)];
+}
