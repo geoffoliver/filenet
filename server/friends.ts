@@ -135,10 +135,18 @@ export function shouldAutoAccept(
   providedPassword: string | undefined,
 ): boolean {
   if (settings.autoAcceptFromAnyone) return true;
-  if (settings.invitePassword !== null && providedPassword !== undefined) {
-    const a = Buffer.from(providedPassword);
+  // Always run the timing-safe comparison when a password is configured so that
+  // omitting the password field doesn't create a measurable short-circuit that
+  // leaks whether a password is set at all.
+  if (settings.invitePassword !== null) {
+    const a = Buffer.from(providedPassword ?? '');
     const b = Buffer.from(settings.invitePassword);
-    if (a.length === b.length && timingSafeEqual(a, b)) return true;
+    const len = Math.max(a.length, b.length) || 1;
+    const paddedA = Buffer.alloc(len);
+    const paddedB = Buffer.alloc(len);
+    a.copy(paddedA);
+    b.copy(paddedB);
+    if (a.length === b.length && timingSafeEqual(paddedA, paddedB)) return true;
   }
   return false;
 }

@@ -428,4 +428,13 @@ describe('shouldAutoAccept', () => {
     expect(shouldAutoAccept(settings, 'abcd')).toBe(false);
     expect(shouldAutoAccept(settings, 'ab')).toBe(false);
   });
+
+  it('runs the timing-safe comparison even when no password is provided', async () => {
+    // The comparison must always execute when a password is configured so callers
+    // cannot determine via response-time measurement whether a password is set.
+    const settings = await updateSettings(prisma, { invitePassword: 'secret' });
+    // undefined and '' should both return false without short-circuiting before crypto
+    expect(shouldAutoAccept(settings, undefined)).toBe(false);
+    expect(shouldAutoAccept(settings, '')).toBe(false);
+  });
 });

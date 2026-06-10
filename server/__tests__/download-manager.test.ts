@@ -238,6 +238,43 @@ describe('cancelDownload', () => {
 // ---------------------------------------------------------------------------
 
 describe('pauseDownload / resumeDownload', () => {
+  it('returns false when trying to resume a cancelled download (TOCTOU guard)', async () => {
+    // Simulate: download is PAUSED in DB but a concurrent cancel just flipped it to CANCELLED.
+    // resumeDownload must not re-open the download in that case.
+    const content = Buffer.from('toctou test content here for resume cancel race');
+    const hash = sha256(content);
+    const folder = join(tmpDir, 'dl-toctou');
+    await mkdir(folder, { recursive: true });
+
+    const id = await startDownload(
+      prisma,
+      {
+        sha256: hash,
+        filename: 'toctou.txt',
+        size: BigInt(content.length),
+        mimeType: null,
+        sources: ['fake-node'],
+        downloadFolder: folder,
+      },
+      makeChunkServer(content),
+    );
+
+    // Pause and verify state
+    await pauseDownload(prisma, id);
+    const afterPause = await prisma.download.findUniqueOrThrow({ where: { id } });
+    if (afterPause.state !== 'PAUSED') return; // already completed — skip
+
+    // Manually flip to CANCELLED in the DB to simulate a concurrent cancel
+    await prisma.download.update({ where: { id }, data: { state: 'CANCELLED' } });
+
+    const result = await resumeDownload(prisma, id);
+    expect(result).toBe(false);
+
+    // Confirm state stays CANCELLED
+    const record = await prisma.download.findUniqueOrThrow({ where: { id } });
+    expect(record.state).toBe('CANCELLED');
+  });
+
   it('can pause and then resume to completion', async () => {
     const content = Buffer.from('pause and resume content here');
     const hash = sha256(content);

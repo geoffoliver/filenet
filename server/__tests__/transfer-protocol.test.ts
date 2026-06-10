@@ -151,6 +151,38 @@ describe('handleChunkRequest', () => {
     }
   });
 
+  it('returns chunk-error when offset+length exceeds file size', async () => {
+    const content = Buffer.from('short'); // 5 bytes
+    const filePath = join(tmpDir, 'bounds-test.bin');
+    await writeFile(filePath, content);
+    await indexFile(prisma, filePath);
+    const file = await prisma.sharedFile.findFirstOrThrow({ where: { path: filePath } });
+
+    await prisma.friend.create({
+      data: {
+        name: 'Peer',
+        address: '5.5.5.5',
+        port: 7734,
+        nodeId: 'peer-bounds',
+        status: 'ACCEPTED',
+      },
+    });
+
+    const received: InnerMessage[] = [];
+    await handleChunkRequest(
+      { type: 'chunk-request', transferId: 'tid-oob', sha256: file.sha256, offset: 3, length: 10 },
+      'peer-bounds',
+      prisma,
+      (msg) => received.push(msg),
+    );
+
+    expect(received).toHaveLength(1);
+    expect(received[0].type).toBe('chunk-error');
+    if (received[0].type === 'chunk-error') {
+      expect(received[0].reason).toMatch(/out of bounds/i);
+    }
+  });
+
   it('silently drops request from non-friend', async () => {
     const received: InnerMessage[] = [];
     await handleChunkRequest(

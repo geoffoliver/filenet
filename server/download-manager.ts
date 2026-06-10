@@ -525,10 +525,25 @@ export async function resumeDownload(
     activeDownloads.set(id, dl);
   }
 
-  await prisma.download.update({
-    where: { id },
+  // Conditional update: if a concurrent cancel changed the state between our
+  // initial findUnique check and here, updateMany will match 0 rows and we must
+  // clean up the in-memory state we just reconstructed rather than starting a
+  // pump that writes to a possibly-deleted temp file.
+  const updated = await prisma.download.updateMany({
+    where: { id, state: 'PAUSED' },
     data: { state: 'DOWNLOADING', tmpPath: dl.tmpPath },
   });
+  if (updated.count === 0) {
+    dl.stopped = true;
+    if (dl.fileHandle) {
+      try {
+        await dl.fileHandle.close();
+      } catch {}
+    }
+    activeDownloads.delete(id);
+    activeDownloadFolders.delete(id);
+    return false;
+  }
   dl.paused = false;
 
   pump(prisma, dl, requestChunkFn).catch((err: unknown) =>

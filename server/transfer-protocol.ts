@@ -56,6 +56,17 @@ export async function handleChunkRequest(
     return;
   }
 
+  if (BigInt(msg.offset) + BigInt(msg.length) > file.size) {
+    sendResponse({
+      type: 'chunk-error',
+      transferId: msg.transferId,
+      sha256: msg.sha256,
+      offset: msg.offset,
+      reason: 'Chunk out of bounds',
+    });
+    return;
+  }
+
   try {
     const fh = await open(file.path, 'r');
     try {

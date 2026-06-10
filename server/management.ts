@@ -303,7 +303,9 @@ export function createManagementFetch(deps: ManagementDeps): (req: Request) => P
             !Array.isArray(sources) ||
             sources.length === 0 ||
             sources.length > 100 ||
-            sources.some((s) => typeof s !== 'string' || !s.trim() || s.length > 200) ||
+            sources.some(
+              (s) => typeof s !== 'string' || !s.trim() || !/^[0-9a-f]{64}$/.test(s.trim()),
+            ) ||
             (mimeType !== null && mimeType !== undefined && typeof mimeType !== 'string') ||
             (typeof mimeType === 'string' && mimeType.length > 200)
           ) {
@@ -319,9 +321,9 @@ export function createManagementFetch(deps: ManagementDeps): (req: Request) => P
           }
           const id = await startDownload(prisma, {
             sha256,
-            filename: filename.trim(),
+            filename: filename.trim().slice(0, 200),
             size: BigInt(size),
-            mimeType: mimeType ?? null,
+            mimeType: mimeType ? mimeType.trim() : null,
             sources: sources.map((s: string) => s.trim()),
             downloadFolder,
           });
