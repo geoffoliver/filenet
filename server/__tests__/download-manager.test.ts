@@ -32,6 +32,14 @@ function makeChunkServer(content: Buffer): RequestChunkFn {
   };
 }
 
+// Build a mock requestChunkFn that introduces a per-chunk delay
+function makeSlowChunkServer(content: Buffer, delayMs: number): RequestChunkFn {
+  return async (_nodeId, _sha256, offset, length) => {
+    await new Promise<void>((resolve) => setTimeout(resolve, delayMs));
+    return content.subarray(offset, offset + length);
+  };
+}
+
 // Build a mock requestChunkFn that always fails
 function makeFailingChunkServer(reason = 'peer error'): RequestChunkFn {
   return async () => {
@@ -241,6 +249,8 @@ describe('pauseDownload / resumeDownload', () => {
   it('returns false when trying to resume a cancelled download (TOCTOU guard)', async () => {
     // Simulate: download is PAUSED in DB but a concurrent cancel just flipped it to CANCELLED.
     // resumeDownload must not re-open the download in that case.
+    // Use a slow chunk server (200ms delay) so the pump is guaranteed to still be
+    // in-flight when pauseDownload runs, making the PAUSED state deterministic.
     const content = Buffer.from('toctou test content here for resume cancel race');
     const hash = sha256(content);
     const folder = join(tmpDir, 'dl-toctou');
@@ -256,13 +266,13 @@ describe('pauseDownload / resumeDownload', () => {
         sources: ['fake-node'],
         downloadFolder: folder,
       },
-      makeChunkServer(content),
+      makeSlowChunkServer(content, 200),
     );
 
-    // Pause and verify state
+    // Pause while the pump is blocked waiting for the slow chunk server
     await pauseDownload(prisma, id);
     const afterPause = await prisma.download.findUniqueOrThrow({ where: { id } });
-    if (afterPause.state !== 'PAUSED') return; // already completed — skip
+    expect(afterPause.state).toBe('PAUSED');
 
     // Manually flip to CANCELLED in the DB to simulate a concurrent cancel
     await prisma.download.update({ where: { id }, data: { state: 'CANCELLED' } });

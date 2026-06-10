@@ -38,7 +38,7 @@ function StatCard({ label, value, sub, dim }: StatCardProps) {
 }
 
 function ActiveTransferRow({ transfer }: { transfer: Transfer }) {
-  const pct = Math.round(transfer.progress * 100);
+  const pct = Math.min(100, Math.max(0, Math.round(transfer.progress * 100)));
   return (
     <li className={transferStyles.row}>
       <div className={transferStyles.rowTop}>

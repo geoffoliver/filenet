@@ -323,7 +323,7 @@ export function createManagementFetch(deps: ManagementDeps): (req: Request) => P
             sha256,
             filename: filename.trim().slice(0, 200),
             size: BigInt(size),
-            mimeType: mimeType ? mimeType.trim() : null,
+            mimeType: mimeType ? mimeType.trim() || null : null,
             sources: sources.map((s: string) => s.trim()),
             downloadFolder,
           });

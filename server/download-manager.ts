@@ -539,7 +539,12 @@ export async function resumeDownload(
     // truly gone or in a terminal state (CANCELLED/FAILED). If another resume
     // already started the pump (state=DOWNLOADING), leave that pump running.
     const current = await prisma.download.findUnique({ where: { id } });
-    if (!current || current.state === 'CANCELLED' || current.state === 'FAILED') {
+    if (
+      !current ||
+      current.state === 'CANCELLED' ||
+      current.state === 'FAILED' ||
+      current.state === 'COMPLETED'
+    ) {
       dl.stopped = true;
       if (dl.fileHandle) {
         try {
