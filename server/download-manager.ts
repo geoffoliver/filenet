@@ -506,23 +506,35 @@ export async function resumeDownload(
       activeDownloadFolders.set(id, record.downloadFolder);
     }
 
-    dl = {
-      id,
-      sha256: record.sha256,
-      size: record.size,
-      chunkSize,
-      totalChunks,
-      completedChunks: new Set(completedChunks),
-      inFlight: new Set(),
-      sources,
-      fileHandle,
-      tmpPath,
-      paused: false,
-      stopped: false,
-      speedSamples: [],
-      startedAt: record.createdAt,
-    };
-    activeDownloads.set(id, dl);
+    // A concurrent resumeDownload call may have rebuilt and set the entry while
+    // we were awaiting I/O above. JS is single-threaded so this check-then-set
+    // is atomic — no await between here and activeDownloads.set below.
+    const concurrent = activeDownloads.get(id);
+    if (concurrent) {
+      // Discard our duplicate; close the file handle we just opened.
+      try {
+        await fileHandle.close();
+      } catch {}
+      dl = concurrent;
+    } else {
+      dl = {
+        id,
+        sha256: record.sha256,
+        size: record.size,
+        chunkSize,
+        totalChunks,
+        completedChunks: new Set(completedChunks),
+        inFlight: new Set(),
+        sources,
+        fileHandle,
+        tmpPath,
+        paused: false,
+        stopped: false,
+        speedSamples: [],
+        startedAt: record.createdAt,
+      };
+      activeDownloads.set(id, dl);
+    }
   }
 
   // Conditional update: only flip to DOWNLOADING if the record is still PAUSED.
