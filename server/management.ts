@@ -95,9 +95,16 @@ export function createManagementFetch(deps: ManagementDeps): (req: Request) => P
       if (url.pathname === '/api/friends') {
         if (req.method === 'GET') {
           const friends = await getFriends(prisma);
-          const enriched = friends.map((f) => ({
+          const enriched = friends.map(({ downloadCount, downloadTotalBytes, ...f }) => ({
             ...f,
             online: f.nodeId ? !!getConnectedPeer(f.nodeId) : false,
+            // Only surface counters for ACCEPTED friends. If a friend was ACCEPTED
+            // (accumulating download credit) and later blocked, the historical counter
+            // persists in the DB but must not be exposed for non-ACCEPTED statuses.
+            downloads:
+              f.status === 'ACCEPTED'
+                ? { count: downloadCount, totalSize: String(downloadTotalBytes) }
+                : { count: 0, totalSize: '0' },
           }));
           return Response.json(enriched);
         }
@@ -115,7 +122,11 @@ export function createManagementFetch(deps: ManagementDeps): (req: Request) => P
               console.error(`Failed to connect to ${address}:${port}:`, err);
             },
           );
-          return Response.json(friend, { status: 201 });
+          const { downloadCount: _dc, downloadTotalBytes: _dtb, ...friendData } = friend;
+          return Response.json(
+            { ...friendData, online: false, downloads: { count: 0, totalSize: '0' } },
+            { status: 201 },
+          );
         }
       }
 
@@ -161,7 +172,12 @@ export function createManagementFetch(deps: ManagementDeps): (req: Request) => P
                   });
               }
             }
-            return Response.json(updated);
+            const { downloadCount: _dc2, downloadTotalBytes: _dtb2, ...updatedData } = updated;
+            return Response.json({
+              ...updatedData,
+              online: updated.nodeId ? !!getConnectedPeer(updated.nodeId) : false,
+              downloads: { count: 0, totalSize: '0' },
+            });
           }
 
           if (action === 'reject') {
@@ -232,10 +248,15 @@ export function createManagementFetch(deps: ManagementDeps): (req: Request) => P
       }
 
       if (url.pathname === '/api/stats' && req.method === 'GET') {
-        const [fileAgg, friendTotal, onlineFriends] = await Promise.all([
+        const [fileAgg, friendTotal, onlineFriends, downloadAgg] = await Promise.all([
           prisma.sharedFile.aggregate({ _count: true, _sum: { size: true } }),
           prisma.friend.count({ where: { status: 'ACCEPTED' } }),
           getAcceptedConnectedPeers(prisma),
+          prisma.download.aggregate({
+            _count: true,
+            _sum: { size: true },
+            where: { state: 'COMPLETED' },
+          }),
         ]);
         return Response.json({
           sharedFiles: {
@@ -245,6 +266,10 @@ export function createManagementFetch(deps: ManagementDeps): (req: Request) => P
           friends: {
             total: friendTotal,
             online: onlineFriends.length,
+          },
+          downloads: {
+            count: downloadAgg._count,
+            totalSize: String(downloadAgg._sum.size ?? 0n),
           },
         });
       }
@@ -277,8 +302,10 @@ export function createManagementFetch(deps: ManagementDeps): (req: Request) => P
             !/^\d+$/.test(size) ||
             !Array.isArray(sources) ||
             sources.length === 0 ||
-            sources.some((s) => typeof s !== 'string' || !s.trim()) ||
-            (mimeType !== null && mimeType !== undefined && typeof mimeType !== 'string')
+            sources.length > 100 ||
+            sources.some((s) => typeof s !== 'string' || !s.trim() || s.length > 200) ||
+            (mimeType !== null && mimeType !== undefined && typeof mimeType !== 'string') ||
+            (typeof mimeType === 'string' && mimeType.length > 200)
           ) {
             return new Response('Invalid transfer request', { status: 400 });
           }
@@ -295,7 +322,7 @@ export function createManagementFetch(deps: ManagementDeps): (req: Request) => P
             filename: filename.trim(),
             size: BigInt(size),
             mimeType: mimeType ?? null,
-            sources,
+            sources: sources.map((s: string) => s.trim()),
             downloadFolder,
           });
           return Response.json({ id }, { status: 201 });
@@ -603,11 +630,16 @@ export function createManagementFetch(deps: ManagementDeps): (req: Request) => P
             // Group chats are network-wide by design: every connected friend
             // receives the message and auto-joins the room, mirroring the
             // "rooms shared across the entire network" spec requirement.
-            const peers = await getAcceptedConnectedPeers(prisma);
-            for (const peer of peers) {
-              try {
-                sendToPeer(peer, chatWireMsg);
-              } catch {}
+            // Broadcast errors are non-fatal — the message is already committed.
+            try {
+              const peers = await getAcceptedConnectedPeers(prisma);
+              for (const peer of peers) {
+                try {
+                  sendToPeer(peer, chatWireMsg);
+                } catch {}
+              }
+            } catch (broadcastErr) {
+              console.error('Failed to broadcast group message:', broadcastErr);
             }
           }
 

@@ -26,6 +26,9 @@ model Friend {
   acceptedAt DateTime?
   updatedAt  DateTime     @updatedAt
 
+  downloadCount      Int    @default(0)
+  downloadTotalBytes BigInt @default(0)
+
   @@unique([address, port])
 }
 

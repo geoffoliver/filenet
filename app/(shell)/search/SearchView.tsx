@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 
 import type { FileType, LocalFile, NetworkFile } from '../../lib/api';
-import { searchFiles, startDownload } from '../../lib/api';
+import { formatBytes, searchFiles, startDownload } from '../../lib/api';
 
 import styles from './search.module.css';
 
@@ -70,15 +70,6 @@ function mergeResults(local: LocalFile[], network: NetworkFile[]): SearchHit[] {
     }
   }
   return Array.from(map.values());
-}
-
-function formatBytes(s: string): string {
-  const n = parseInt(s, 10);
-  if (isNaN(n)) return s;
-  if (n < 1024) return `${n} B`;
-  if (n < 1024 ** 2) return `${(n / 1024).toFixed(1)} KB`;
-  if (n < 1024 ** 3) return `${(n / 1024 ** 2).toFixed(1)} MB`;
-  return `${(n / 1024 ** 3).toFixed(2)} GB`;
 }
 
 function formatDuration(seconds: number): string {

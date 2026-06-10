@@ -130,7 +130,8 @@ async function uniqueFilePath(folder: string, filename: string): Promise<string>
     if (await tryReserve(next)) return next;
   }
   const fallback = join(folder, `${base}-${randomUUID()}${ext}`);
-  await (await open(fallback, 'wx')).close();
+  const fh = await open(fallback, 'wx');
+  await fh.close();
   return fallback;
 }
 
@@ -321,6 +322,18 @@ async function finalizeDownload(prisma: PrismaClient, dl: ActiveDownload): Promi
   activeDownloads.delete(dl.id);
   activeDownloadFolders.delete(dl.id);
 
+  // Increment per-friend download counters. Failures here are non-fatal —
+  // a transient DB error must not prevent post-download scripts from running.
+  const uniqueSources = [...new Set(dl.sources)];
+  if (uniqueSources.length > 0) {
+    await prisma.friend
+      .updateMany({
+        where: { nodeId: { in: uniqueSources }, status: 'ACCEPTED' },
+        data: { downloadCount: { increment: 1 }, downloadTotalBytes: { increment: dl.size } },
+      })
+      .catch((err: unknown) => console.error('Failed to update friend download counters:', err));
+  }
+
   runPostDownloadScripts(prisma, finalPath, {
     downloadId: dl.id,
     filename: record.filename,
@@ -447,8 +460,8 @@ export async function startDownload(
 export async function pauseDownload(prisma: PrismaClient, id: string): Promise<boolean> {
   const dl = activeDownloads.get(id);
   if (!dl || dl.stopped) return false;
-  dl.paused = true;
   await prisma.download.update({ where: { id }, data: { state: 'PAUSED' } });
+  dl.paused = true;
   return true;
 }
 
@@ -512,11 +525,11 @@ export async function resumeDownload(
     activeDownloads.set(id, dl);
   }
 
-  dl.paused = false;
   await prisma.download.update({
     where: { id },
     data: { state: 'DOWNLOADING', tmpPath: dl.tmpPath },
   });
+  dl.paused = false;
 
   pump(prisma, dl, requestChunkFn).catch((err: unknown) =>
     console.error('Resume pump error:', err),

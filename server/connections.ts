@@ -259,8 +259,11 @@ export async function connectToPeer(
           // if the socket closes while we're doing the DB write below.
           handshakeDone = true;
 
+          // Match any OUTGOING_PENDING at this address regardless of whether nodeId
+          // was already set — a peer that reinstalled has a new nodeId and the old
+          // value must be replaced so getConnectedPeer() resolves correctly.
           await prisma.friend.updateMany({
-            where: { address, port, nodeId: null, status: 'OUTGOING_PENDING' },
+            where: { address, port, status: 'OUTGOING_PENDING' },
             data: { nodeId: wire.nodeId, publicKey: wire.publicKey },
           });
 

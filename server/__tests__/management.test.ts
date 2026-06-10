@@ -8,6 +8,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { unlinkSync } from 'fs';
 
+import { registerPeer, unregisterPeer } from '../connections';
 import { createManagementFetch } from '../management';
 import { createPrismaClient } from '../db';
 import { generateIdentity } from '../identity';
@@ -104,6 +105,86 @@ describe('GET /api/friends', () => {
     expect(typeof body[0].online).toBe('boolean');
     expect(body[0].online).toBe(false); // no peers connected in tests
   });
+
+  it('includes zero download stats for a friend with no downloads', async () => {
+    await prisma.friend.create({
+      data: {
+        name: 'Carol',
+        nodeId: 'node-carol',
+        address: '10.0.0.3',
+        port: 7734,
+        status: 'ACCEPTED',
+      },
+    });
+    const res = await makeHandler()(req('/api/friends'));
+    const body = await res.json();
+    expect(body[0].downloads.count).toBe(0);
+    expect(body[0].downloads.totalSize).toBe('0');
+  });
+
+  it('maps downloadCount and downloadTotalBytes to the downloads response shape', async () => {
+    await prisma.friend.create({
+      data: {
+        name: 'Dave',
+        nodeId: 'node-dave',
+        address: '10.0.0.4',
+        port: 7734,
+        status: 'ACCEPTED',
+        downloadCount: 2,
+        downloadTotalBytes: 3000n,
+      },
+    });
+    const res = await makeHandler()(req('/api/friends'));
+    const body = await res.json();
+    expect(body[0].downloads.count).toBe(2);
+    expect(body[0].downloads.totalSize).toBe('3000');
+  });
+
+  it('pending and blocked friends always show zero download stats', async () => {
+    await prisma.friend.createMany({
+      data: [
+        {
+          name: 'Incoming Frank',
+          nodeId: 'node-frank',
+          address: '10.0.0.6',
+          port: 7734,
+          status: 'INCOMING_PENDING',
+        },
+        {
+          name: 'Blocked Grace',
+          nodeId: 'node-grace',
+          address: '10.0.0.7',
+          port: 7734,
+          status: 'BLOCKED',
+        },
+      ],
+    });
+    const res = await makeHandler()(req('/api/friends'));
+    const body = await res.json();
+    const frank = body.find((f: { name: string }) => f.name === 'Incoming Frank');
+    const grace = body.find((f: { name: string }) => f.name === 'Blocked Grace');
+    expect(frank.downloads.count).toBe(0);
+    expect(grace.downloads.count).toBe(0);
+  });
+
+  it('zeroes out download stats when a previously-ACCEPTED friend is later blocked', async () => {
+    const f = await prisma.friend.create({
+      data: {
+        name: 'Eve',
+        nodeId: 'node-eve',
+        address: '10.0.0.8',
+        port: 7734,
+        status: 'BLOCKED',
+        downloadCount: 5,
+        downloadTotalBytes: 9000n,
+      },
+    });
+    const res = await makeHandler()(req('/api/friends'));
+    const body = await res.json();
+    const eve = body.find((fr: { name: string }) => fr.name === f.name);
+    expect(eve.downloads.count).toBe(0);
+    expect(eve.downloads.totalSize).toBe('0');
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -119,6 +200,23 @@ describe('POST /api/friends', () => {
     const body = await res.json();
     expect(body.name).toBe('Bob');
     expect(body.status).toBe('OUTGOING_PENDING');
+  });
+
+  it('response includes downloads zero stats so UI does not crash on optimistic insert', async () => {
+    const res = await makeHandler()(
+      jsonReq('/api/friends', 'POST', { name: 'Bob', address: '10.0.0.2', port: 7734 }),
+    );
+    const body = await res.json();
+    expect(body.downloads.count).toBe(0);
+    expect(body.downloads.totalSize).toBe('0');
+  });
+
+  it('response includes online boolean to match GET /api/friends shape', async () => {
+    const res = await makeHandler()(
+      jsonReq('/api/friends', 'POST', { name: 'Bob', address: '10.0.0.2', port: 7734 }),
+    );
+    const body = await res.json();
+    expect(body.online).toBe(false);
   });
 
   it('defaults port to 7734 when omitted', async () => {
@@ -180,6 +278,54 @@ describe('PUT /api/friends/:id — accept', () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.status).toBe('ACCEPTED');
+  });
+
+  it('response includes downloads zero stats so UI does not crash on optimistic update', async () => {
+    const f = await prisma.friend.create({
+      data: { name: 'Grace2', address: '10.0.0.16', port: 7734, status: 'INCOMING_PENDING' },
+    });
+    const res = await makeHandler()(jsonReq(`/api/friends/${f.id}`, 'PUT', { action: 'accept' }));
+    const body = await res.json();
+    expect(body.downloads.count).toBe(0);
+    expect(body.downloads.totalSize).toBe('0');
+  });
+
+  it('response includes online boolean to match GET /api/friends shape', async () => {
+    const f = await prisma.friend.create({
+      data: { name: 'Grace3', address: '10.0.0.17', port: 7734, status: 'INCOMING_PENDING' },
+    });
+    const res = await makeHandler()(jsonReq(`/api/friends/${f.id}`, 'PUT', { action: 'accept' }));
+    const body = await res.json();
+    expect(body.online).toBe(false);
+  });
+
+  it('response reflects actual connection state: online true when peer is connected', async () => {
+    const nodeId = 'node-connected-test';
+    const f = await prisma.friend.create({
+      data: {
+        name: 'Connected',
+        nodeId,
+        address: '10.0.0.18',
+        port: 7734,
+        status: 'INCOMING_PENDING',
+      },
+    });
+    const fakePeer = registerPeer(
+      { send: () => {}, close: () => {} },
+      Buffer.alloc(32),
+      nodeId,
+      Buffer.alloc(32),
+      '10.0.0.18',
+      7734,
+    );
+    try {
+      const res = await makeHandler()(jsonReq(`/api/friends/${f.id}`, 'PUT', { action: 'accept' }));
+      const body = await res.json();
+      expect(body.online).toBe(true);
+    } finally {
+      unregisterPeer(nodeId);
+      void fakePeer; // keep linter happy
+    }
   });
 
   it('returns 409 when accepting a non-INCOMING_PENDING friend', async () => {
@@ -441,6 +587,7 @@ describe('POST /api/rescan', () => {
 
 describe('GET /api/stats', () => {
   beforeEach(async () => {
+    await prisma.download.deleteMany();
     await prisma.sharedFile.deleteMany();
     await prisma.friend.deleteMany();
   });
@@ -453,6 +600,8 @@ describe('GET /api/stats', () => {
     expect(body.sharedFiles.totalSize).toBe('0');
     expect(body.friends.total).toBe(0);
     expect(body.friends.online).toBe(0);
+    expect(body.downloads.count).toBe(0);
+    expect(body.downloads.totalSize).toBe('0');
   });
 
   it('counts indexed files and sums their sizes', async () => {
@@ -483,6 +632,63 @@ describe('GET /api/stats', () => {
     const body = await res.json();
     expect(body.friends.total).toBe(2);
     expect(body.friends.online).toBe(0);
+  });
+
+  it('counts only COMPLETED downloads', async () => {
+    await prisma.download.createMany({
+      data: [
+        {
+          sha256: 'a'.repeat(64),
+          filename: 'done.mp3',
+          size: 1000n,
+          state: 'COMPLETED',
+          sources: '[]',
+        },
+        {
+          sha256: 'b'.repeat(64),
+          filename: 'fail.mp3',
+          size: 2000n,
+          state: 'FAILED',
+          sources: '[]',
+        },
+        {
+          sha256: 'c'.repeat(64),
+          filename: 'dl.mp3',
+          size: 3000n,
+          state: 'DOWNLOADING',
+          sources: '[]',
+        },
+      ],
+    });
+    const res = await makeHandler()(req('/api/stats'));
+    const body = await res.json();
+    expect(body.downloads.count).toBe(1);
+    expect(body.downloads.totalSize).toBe('1000');
+  });
+
+  it('sums sizes across multiple completed downloads', async () => {
+    await prisma.download.createMany({
+      data: [
+        {
+          sha256: 'a'.repeat(64),
+          filename: 'a.mp3',
+          size: 500n,
+          state: 'COMPLETED',
+          sources: '[]',
+        },
+        {
+          sha256: 'b'.repeat(64),
+          filename: 'b.mp3',
+          size: 1500n,
+          state: 'COMPLETED',
+          sources: '[]',
+        },
+      ],
+    });
+    const res = await makeHandler()(req('/api/stats'));
+    const body = await res.json();
+    expect(body.downloads.count).toBe(2);
+    expect(body.downloads.totalSize).toBe('2000');
   });
 });
 
@@ -698,6 +904,45 @@ describe('POST /api/transfers', () => {
       jsonReq('/api/transfers', 'POST', { sha256: 'bad', filename: '', size: 'x', sources: [] }),
     );
     expect(res.status).toBe(400);
+  });
+
+  it('returns 400 when sources array exceeds 100 entries', async () => {
+    const res = await makeHandler()(
+      jsonReq('/api/transfers', 'POST', {
+        sha256: 'a'.repeat(64),
+        filename: 'big.mp3',
+        size: '1000',
+        sources: Array.from({ length: 101 }, (_, i) => `node${i}`),
+      }),
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it('returns 400 when a source entry exceeds 200 characters', async () => {
+    const res = await makeHandler()(
+      jsonReq('/api/transfers', 'POST', {
+        sha256: 'a'.repeat(64),
+        filename: 'big.mp3',
+        size: '1000',
+        sources: ['x'.repeat(201)],
+      }),
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it('trims whitespace from source nodeIds so they match stored Friend.nodeId values', async () => {
+    const res = await makeHandler()(
+      jsonReq('/api/transfers', 'POST', {
+        sha256: 'b'.repeat(64),
+        filename: 'trim.mp3',
+        size: '500',
+        sources: ['  node-a  ', 'node-b  '],
+      }),
+    );
+    expect(res.status).toBe(201);
+    const { id } = await res.json();
+    const dl = await prisma.download.findUniqueOrThrow({ where: { id } });
+    expect(JSON.parse(dl.sources)).toEqual(['node-a', 'node-b']);
   });
 
   it('creates a download and returns 201 with the id', async () => {

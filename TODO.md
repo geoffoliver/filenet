@@ -28,7 +28,7 @@
 - [x] Remove a friend
 - [x] Management HTTP API: `GET/POST /api/friends`, `PUT /api/friends/:id`, `DELETE /api/friends/:id`, `GET/PATCH /api/settings`
 - [x] Auto-accept from friends-of-friends — `friend-vouch-request` / `friend-vouch-response` protocol; first positive vouch from any accepted connected peer triggers auto-accept
-- [ ] Fetch peer's public key on first contact (`GET /pubkey`) — currently skipped (key exchanged in handshake)
+- [x] Fetch peer's public key on first contact — not needed; the handshake already delivers and cryptographically proves the key via Ed25519 signature, making a separate HTTP fetch redundant and weaker
 
 ### File Indexing
 
@@ -108,8 +108,8 @@
 
 - [x] Files shared count + total size
 - [x] Friends online / total
-- [ ] Files downloaded count + total size (deferred — needs transfer tracking)
-- [ ] Total bytes uploaded/downloaded (deferred — needs transfer tracking)
+- [x] Files downloaded count + total size
+- [x] Total bytes downloaded (uploads not tracked — no per-peer upload accounting in current schema)
 - [ ] Active transfers overview (deferred — needs transfer system)
 
 ### Search
@@ -137,7 +137,7 @@
 - [x] Pending incoming requests with accept / reject actions
 - [x] Add Friend form: name, address, port, optional password
 - [x] Remove friend action (with inline confirmation)
-- [ ] Friend list: shared file count, download/upload totals (deferred — needs transfer tracking)
+- [x] Friend list: download count and total size from each friend (uploads not tracked)
 
 ### Transfers
 
@@ -170,3 +170,4 @@
 - [ ] Improve backend test coverage as features are added
 - [x] CHANGELOG (start and maintain)
 - [x] README: installation, configuration, running, scripting API docs
+- [ ] Create necessary files to spin the app up in a Docker container (full `next start`, not a static export or anything dumb)

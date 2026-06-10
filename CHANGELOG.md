@@ -37,6 +37,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Online presence** — friends page shows a green dot next to connected friends (polling every 5 s); chat sidebar shows a presence dot on DM conversations whose peer is currently online
 
+- **Dashboard download stats** — Home dashboard now shows real "Files downloaded" count and total bytes downloaded from completed transfers; Friends list shows per-friend download count and total size
+  - Download counters (`downloadCount`, `downloadTotalBytes`) are denormalized onto the `Friend` row and incremented atomically when a download completes, keeping `GET /api/friends` O(friends) rather than O(completed downloads)
+  - Only ACCEPTED friends receive credit; credits are deduplicated per download (a nodeId listed twice in one transfer's sources is counted only once); counters are hidden for non-ACCEPTED friends even if historical data exists (e.g. a friend later blocked)
+  - **Schema migration required:** run `bunx prisma db push` to add the `downloadCount` and `downloadTotalBytes` columns to the `Friend` table
+
 ## [0.1.0] — 2026-06-03
 
 ### Added

@@ -2,19 +2,9 @@
 
 import { useEffect, useState } from 'react';
 
-import type { Stats } from '../../lib/api';
-import { getStats } from '../../lib/api';
+import { type Stats, formatBytes, getStats } from '../../lib/api';
 
 import styles from './home.module.css';
-
-function formatBytes(s: string): string {
-  const n = parseInt(s, 10);
-  if (isNaN(n) || n === 0) return '0 B';
-  if (n < 1024) return `${n} B`;
-  if (n < 1024 ** 2) return `${(n / 1024).toFixed(1)} KB`;
-  if (n < 1024 ** 3) return `${(n / 1024 ** 2).toFixed(1)} MB`;
-  return `${(n / 1024 ** 3).toFixed(2)} GB`;
-}
 
 type StatCardProps = {
   label: string;
@@ -68,8 +58,15 @@ export default function HomeView() {
           value={stats ? `${stats.friends.online} / ${stats.friends.total}` : '–'}
           sub={stats && stats.friends.total === 0 ? 'No friends yet' : undefined}
         />
-        <StatCard label="Files downloaded" value="–" sub="Coming soon" dim />
-        <StatCard label="Data transferred" value="–" sub="Coming soon" dim />
+        <StatCard
+          label="Files downloaded"
+          value={stats ? String(stats.downloads.count) : '–'}
+          sub={stats ? formatBytes(stats.downloads.totalSize) : undefined}
+        />
+        <StatCard
+          label="Data downloaded"
+          value={stats ? formatBytes(stats.downloads.totalSize) : '–'}
+        />
       </div>
     </div>
   );
