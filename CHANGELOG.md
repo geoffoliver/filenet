@@ -25,6 +25,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - PDF, EPUB, and DOCX extractors skip files larger than 50 MB to prevent OOM during indexing
   - All string metadata fields are clamped to 500 characters; search-protocol drops oversized metadata JSON (> 4096 chars) rather than sending a corrupt truncated string
 
+- **Active Downloads on Home dashboard** — the Home view now shows a live "Active Downloads" panel that polls every 3 s and renders compact rows (filename, progress bar, state badge, speed, ETA, source count) for any `PENDING`, `DOWNLOADING`, or `PAUSED` transfers, with a "View all" link to the Transfers page; `formatSpeed` and `formatEta` consolidated into `app/lib/api.ts` and shared between Home and Transfers views
+
 - **Post-download scripts** — run user-defined `.ts`/`.js` scripts after each download completes; scripts receive `{ file: BunFile, stats: TransferStats }` and run sequentially in configured order; errors in one script do not block subsequent scripts
   - Settings UI: add, remove, and reorder scripts with up/down controls
   - REST API: `GET/POST /api/scripts`, `PATCH /api/scripts/:id` (reorder), `DELETE /api/scripts/:id`
