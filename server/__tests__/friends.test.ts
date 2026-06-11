@@ -412,6 +412,12 @@ describe('shouldAutoAccept', () => {
     expect(shouldAutoAccept(settings, '')).toBe(true);
   });
 
+  it('returns false when invitePassword is empty string but password is omitted', async () => {
+    // Regression: undefined ?? '' produced '' which matched a configured '' password.
+    const settings = await updateSettings(prisma, { invitePassword: '' });
+    expect(shouldAutoAccept(settings, undefined)).toBe(false);
+  });
+
   it('returns false when wrong invite password provided', async () => {
     const settings = await updateSettings(prisma, { invitePassword: 'open-sesame' });
     const result = await shouldAutoAccept(settings, 'wrong-password');
@@ -427,5 +433,14 @@ describe('shouldAutoAccept', () => {
     const settings = await updateSettings(prisma, { invitePassword: 'abc' });
     expect(shouldAutoAccept(settings, 'abcd')).toBe(false);
     expect(shouldAutoAccept(settings, 'ab')).toBe(false);
+  });
+
+  it('runs the timing-safe comparison even when no password is provided', async () => {
+    // The comparison must always execute when a password is configured so callers
+    // cannot determine via response-time measurement whether a password is set.
+    const settings = await updateSettings(prisma, { invitePassword: 'secret' });
+    // undefined and '' should both return false without short-circuiting before crypto
+    expect(shouldAutoAccept(settings, undefined)).toBe(false);
+    expect(shouldAutoAccept(settings, '')).toBe(false);
   });
 });

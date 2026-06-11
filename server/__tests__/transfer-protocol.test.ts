@@ -67,7 +67,13 @@ describe('handleChunkRequest', () => {
     const file = await prisma.sharedFile.findFirstOrThrow({ where: { path: filePath } });
 
     await prisma.friend.create({
-      data: { name: 'Peer', address: '1.1.1.1', port: 7734, nodeId: 'peer-1', status: 'ACCEPTED' },
+      data: {
+        name: 'Peer',
+        address: '1.1.1.1',
+        port: 7734,
+        nodeId: 'a'.repeat(32),
+        status: 'ACCEPTED',
+      },
     });
 
     const received: InnerMessage[] = [];
@@ -79,7 +85,7 @@ describe('handleChunkRequest', () => {
         offset: 0,
         length: content.length,
       },
-      'peer-1',
+      'a'.repeat(32),
       prisma,
       (msg) => received.push(msg),
     );
@@ -105,7 +111,7 @@ describe('handleChunkRequest', () => {
         name: 'Peer',
         address: '2.2.2.2',
         port: 7734,
-        nodeId: 'peer-range',
+        nodeId: 'b'.repeat(32),
         status: 'ACCEPTED',
       },
     });
@@ -113,7 +119,7 @@ describe('handleChunkRequest', () => {
     const received: InnerMessage[] = [];
     await handleChunkRequest(
       { type: 'chunk-request', transferId: 'tid-range', sha256: file.sha256, offset: 3, length: 4 },
-      'peer-range',
+      'b'.repeat(32),
       prisma,
       (msg) => received.push(msg),
     );
@@ -126,7 +132,13 @@ describe('handleChunkRequest', () => {
 
   it('sends chunk-error for unknown sha256', async () => {
     await prisma.friend.create({
-      data: { name: 'Peer', address: '3.3.3.3', port: 7734, nodeId: 'peer-2', status: 'ACCEPTED' },
+      data: {
+        name: 'Peer',
+        address: '3.3.3.3',
+        port: 7734,
+        nodeId: 'c'.repeat(32),
+        status: 'ACCEPTED',
+      },
     });
 
     const received: InnerMessage[] = [];
@@ -138,7 +150,7 @@ describe('handleChunkRequest', () => {
         offset: 0,
         length: 100,
       },
-      'peer-2',
+      'c'.repeat(32),
       prisma,
       (msg) => received.push(msg),
     );
@@ -148,6 +160,38 @@ describe('handleChunkRequest', () => {
     if (received[0].type === 'chunk-error') {
       expect(received[0].transferId).toBe('tid-2');
       expect(received[0].reason).toMatch(/not found/i);
+    }
+  });
+
+  it('returns chunk-error when offset+length exceeds file size', async () => {
+    const content = Buffer.from('short'); // 5 bytes
+    const filePath = join(tmpDir, 'bounds-test.bin');
+    await writeFile(filePath, content);
+    await indexFile(prisma, filePath);
+    const file = await prisma.sharedFile.findFirstOrThrow({ where: { path: filePath } });
+
+    await prisma.friend.create({
+      data: {
+        name: 'Peer',
+        address: '5.5.5.5',
+        port: 7734,
+        nodeId: 'd'.repeat(32),
+        status: 'ACCEPTED',
+      },
+    });
+
+    const received: InnerMessage[] = [];
+    await handleChunkRequest(
+      { type: 'chunk-request', transferId: 'tid-oob', sha256: file.sha256, offset: 3, length: 10 },
+      'd'.repeat(32),
+      prisma,
+      (msg) => received.push(msg),
+    );
+
+    expect(received).toHaveLength(1);
+    expect(received[0].type).toBe('chunk-error');
+    if (received[0].type === 'chunk-error') {
+      expect(received[0].reason).toMatch(/out of bounds/i);
     }
   });
 

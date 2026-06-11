@@ -32,6 +32,14 @@ function makeChunkServer(content: Buffer): RequestChunkFn {
   };
 }
 
+// Build a mock requestChunkFn that introduces a per-chunk delay
+function makeSlowChunkServer(content: Buffer, delayMs: number): RequestChunkFn {
+  return async (_nodeId, _sha256, offset, length) => {
+    await new Promise<void>((resolve) => setTimeout(resolve, delayMs));
+    return content.subarray(offset, offset + length);
+  };
+}
+
 // Build a mock requestChunkFn that always fails
 function makeFailingChunkServer(reason = 'peer error'): RequestChunkFn {
   return async () => {
@@ -238,6 +246,40 @@ describe('cancelDownload', () => {
 // ---------------------------------------------------------------------------
 
 describe('pauseDownload / resumeDownload', () => {
+  it('returns false without modifying state when record is already CANCELLED', async () => {
+    // Covers the initial guard: resumeDownload rejects outright if the DB record
+    // is not in PAUSED state when the call begins.
+    const content = Buffer.from('toctou test content here for resume cancel race');
+    const hash = sha256(content);
+    const folder = join(tmpDir, 'dl-toctou');
+    await mkdir(folder, { recursive: true });
+
+    const id = await startDownload(
+      prisma,
+      {
+        sha256: hash,
+        filename: 'toctou.txt',
+        size: BigInt(content.length),
+        mimeType: null,
+        sources: ['fake-node'],
+        downloadFolder: folder,
+      },
+      makeSlowChunkServer(content, 200),
+    );
+
+    await pauseDownload(prisma, id);
+    const afterPause = await prisma.download.findUniqueOrThrow({ where: { id } });
+    expect(afterPause.state).toBe('PAUSED');
+
+    await prisma.download.update({ where: { id }, data: { state: 'CANCELLED' } });
+
+    const result = await resumeDownload(prisma, id);
+    expect(result).toBe(false);
+
+    const record = await prisma.download.findUniqueOrThrow({ where: { id } });
+    expect(record.state).toBe('CANCELLED');
+  });
+
   it('can pause and then resume to completion', async () => {
     const content = Buffer.from('pause and resume content here');
     const hash = sha256(content);

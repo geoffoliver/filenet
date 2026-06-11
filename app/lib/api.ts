@@ -1,3 +1,18 @@
+export function formatSpeed(bps: number): string {
+  if (bps === 0) return '–';
+  return `${formatBytes(bps)}/s`;
+}
+
+export function formatEta(seconds: number | null): string {
+  if (seconds === null || seconds <= 0) return '–';
+  if (seconds < 60) return `${seconds}s`;
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  if (m < 60) return `${m}m ${s}s`;
+  const h = Math.floor(m / 60);
+  return `${h}h ${m % 60}m`;
+}
+
 export function formatBytes(s: string | number): string {
   let n: bigint;
   try {

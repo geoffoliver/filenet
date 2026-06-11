@@ -506,29 +506,68 @@ export async function resumeDownload(
       activeDownloadFolders.set(id, record.downloadFolder);
     }
 
-    dl = {
-      id,
-      sha256: record.sha256,
-      size: record.size,
-      chunkSize,
-      totalChunks,
-      completedChunks: new Set(completedChunks),
-      inFlight: new Set(),
-      sources,
-      fileHandle,
-      tmpPath,
-      paused: false,
-      stopped: false,
-      speedSamples: [],
-      startedAt: record.createdAt,
-    };
-    activeDownloads.set(id, dl);
+    // A concurrent resumeDownload call may have rebuilt and set the entry while
+    // we were awaiting I/O above. JS is single-threaded so this check-then-set
+    // is atomic — no await between here and activeDownloads.set below.
+    const concurrent = activeDownloads.get(id);
+    if (concurrent) {
+      // Discard our duplicate; close the file handle we just opened.
+      try {
+        await fileHandle.close();
+      } catch {}
+      dl = concurrent;
+    } else {
+      dl = {
+        id,
+        sha256: record.sha256,
+        size: record.size,
+        chunkSize,
+        totalChunks,
+        completedChunks: new Set(completedChunks),
+        inFlight: new Set(),
+        sources,
+        fileHandle,
+        tmpPath,
+        paused: false,
+        stopped: false,
+        speedSamples: [],
+        startedAt: record.createdAt,
+      };
+      activeDownloads.set(id, dl);
+    }
   }
 
-  await prisma.download.update({
-    where: { id },
+  // Conditional update: only flip to DOWNLOADING if the record is still PAUSED.
+  // This guards against two races:
+  //   1. A concurrent cancel changed state to CANCELLED — temp file may be gone.
+  //   2. A concurrent resumeDownload already flipped state to DOWNLOADING — the
+  //      pump is already running and we must not tear it down.
+  const updated = await prisma.download.updateMany({
+    where: { id, state: 'PAUSED' },
     data: { state: 'DOWNLOADING', tmpPath: dl.tmpPath },
   });
+  if (updated.count === 0) {
+    // Only clean up the in-memory state we just rebuilt when the record is
+    // truly gone or in a terminal state (CANCELLED/FAILED). If another resume
+    // already started the pump (state=DOWNLOADING), leave that pump running.
+    const current = await prisma.download.findUnique({ where: { id } });
+    if (
+      !current ||
+      current.state === 'CANCELLED' ||
+      current.state === 'FAILED' ||
+      current.state === 'COMPLETED'
+    ) {
+      dl.stopped = true;
+      if (dl.fileHandle) {
+        try {
+          await dl.fileHandle.close();
+        } catch {}
+      }
+      activeDownloads.delete(id);
+      activeDownloadFolders.delete(id);
+    }
+    return false;
+  }
   dl.paused = false;
 
   pump(prisma, dl, requestChunkFn).catch((err: unknown) =>

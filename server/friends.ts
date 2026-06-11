@@ -135,10 +135,34 @@ export function shouldAutoAccept(
   providedPassword: string | undefined,
 ): boolean {
   if (settings.autoAcceptFromAnyone) return true;
-  if (settings.invitePassword !== null && providedPassword !== undefined) {
-    const a = Buffer.from(providedPassword);
-    const b = Buffer.from(settings.invitePassword);
-    if (a.length === b.length && timingSafeEqual(a, b)) return true;
+  // When a password is configured, always run the timing-safe comparison regardless
+  // of whether the caller supplied a password. This prevents distinguishing "wrong
+  // password" from "no password provided" by timing within this branch.
+  if (settings.invitePassword !== null) {
+    // Use a NUL-byte sentinel for an omitted password so it can never compare
+    // equal to a configured empty-string password (both would otherwise be
+    // zero-length buffers that pad identically and pass timingSafeEqual).
+    // Check byte lengths before allocating — Buffer.byteLength does not allocate.
+    // Reject oversized inputs to prevent a huge configured password forcing large
+    // Buffer.alloc on every friend request.
+    const MAX_PASSWORD_BYTES = 1024;
+    const rawA = providedPassword !== undefined ? providedPassword : '\0';
+    const rawB = settings.invitePassword;
+    if (
+      Buffer.byteLength(rawA) > MAX_PASSWORD_BYTES ||
+      Buffer.byteLength(rawB) > MAX_PASSWORD_BYTES
+    )
+      return false;
+    const a = Buffer.from(rawA);
+    const b = Buffer.from(rawB);
+    const len = Math.max(a.length, b.length) || 1;
+    const paddedA = Buffer.alloc(len);
+    const paddedB = Buffer.alloc(len);
+    a.copy(paddedA);
+    b.copy(paddedB);
+    // timingSafeEqual runs first so it always executes in constant time; the length
+    // check is a non-secret integer comparison and is safe as a final AND condition.
+    if (timingSafeEqual(paddedA, paddedB) && a.length === b.length) return true;
   }
   return false;
 }
