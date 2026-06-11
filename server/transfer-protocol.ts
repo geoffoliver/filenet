@@ -121,7 +121,7 @@ export async function handleChunkRequest(
         offset: msg.offset,
         data: buf.subarray(0, bytesRead).toString('base64'),
       });
-      // Accumulate upload stats — flushed to DB on a debounce timer (non-critical).
+      // Accumulate upload stats — flushed to DB on a throttle timer (non-critical).
       if (bytesRead > 0) {
         const dedupKey = `${friend.id}:${msg.sha256}`;
         const isFirstChunk = !servedFiles.has(dedupKey);
