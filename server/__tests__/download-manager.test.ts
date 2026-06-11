@@ -246,11 +246,9 @@ describe('cancelDownload', () => {
 // ---------------------------------------------------------------------------
 
 describe('pauseDownload / resumeDownload', () => {
-  it('returns false when trying to resume a cancelled download (TOCTOU guard)', async () => {
-    // Simulate: download is PAUSED in DB but a concurrent cancel just flipped it to CANCELLED.
-    // resumeDownload must not re-open the download in that case.
-    // Use a slow chunk server (200ms delay) so the pump is guaranteed to still be
-    // in-flight when pauseDownload runs, making the PAUSED state deterministic.
+  it('returns false without modifying state when record is already CANCELLED', async () => {
+    // Covers the initial guard: resumeDownload rejects outright if the DB record
+    // is not in PAUSED state when the call begins.
     const content = Buffer.from('toctou test content here for resume cancel race');
     const hash = sha256(content);
     const folder = join(tmpDir, 'dl-toctou');
@@ -269,18 +267,15 @@ describe('pauseDownload / resumeDownload', () => {
       makeSlowChunkServer(content, 200),
     );
 
-    // Pause while the pump is blocked waiting for the slow chunk server
     await pauseDownload(prisma, id);
     const afterPause = await prisma.download.findUniqueOrThrow({ where: { id } });
     expect(afterPause.state).toBe('PAUSED');
 
-    // Manually flip to CANCELLED in the DB to simulate a concurrent cancel
     await prisma.download.update({ where: { id }, data: { state: 'CANCELLED' } });
 
     const result = await resumeDownload(prisma, id);
     expect(result).toBe(false);
 
-    // Confirm state stays CANCELLED
     const record = await prisma.download.findUniqueOrThrow({ where: { id } });
     expect(record.state).toBe('CANCELLED');
   });

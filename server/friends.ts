@@ -135,9 +135,9 @@ export function shouldAutoAccept(
   providedPassword: string | undefined,
 ): boolean {
   if (settings.autoAcceptFromAnyone) return true;
-  // Always run the timing-safe comparison when a password is configured so that
-  // omitting the password field doesn't create a measurable short-circuit that
-  // leaks whether a password is set at all.
+  // When a password is configured, always run the timing-safe comparison regardless
+  // of whether the caller supplied a password. This prevents distinguishing "wrong
+  // password" from "no password provided" by timing within this branch.
   if (settings.invitePassword !== null) {
     const a = Buffer.from(providedPassword ?? '');
     const b = Buffer.from(settings.invitePassword);
@@ -146,9 +146,8 @@ export function shouldAutoAccept(
     const paddedB = Buffer.alloc(len);
     a.copy(paddedA);
     b.copy(paddedB);
-    // Always run timingSafeEqual before checking length equality so the crypto
-    // executes in constant time regardless of whether lengths match. The length
-    // check is a non-secret integer comparison and does not leak password content.
+    // timingSafeEqual runs first so it always executes in constant time; the length
+    // check is a non-secret integer comparison and is safe as a final AND condition.
     if (timingSafeEqual(paddedA, paddedB) && a.length === b.length) return true;
   }
   return false;
