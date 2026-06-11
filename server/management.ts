@@ -301,8 +301,13 @@ export function createManagementFetch(deps: ManagementDeps): (req: Request) => P
             filename: string;
             size: string;
             mimeType?: string | null;
-            sources: string[];
+            sources: unknown[];
           };
+          // Trim sources once up front so both validation and usage work off the
+          // same values without calling .trim() twice per entry.
+          const trimmedSources = Array.isArray(sources)
+            ? sources.map((s) => (typeof s === 'string' ? s.trim() : s))
+            : sources;
           if (
             typeof sha256 !== 'string' ||
             !/^[0-9a-f]{64}$/.test(sha256) ||
@@ -311,12 +316,10 @@ export function createManagementFetch(deps: ManagementDeps): (req: Request) => P
             filename.trim().length > 1000 ||
             typeof size !== 'string' ||
             !/^\d+$/.test(size) ||
-            !Array.isArray(sources) ||
-            sources.length === 0 ||
-            sources.length > 100 ||
-            sources.some(
-              (s) => typeof s !== 'string' || !s.trim() || !/^[0-9a-f]{32}$/.test(s.trim()),
-            ) ||
+            !Array.isArray(trimmedSources) ||
+            trimmedSources.length === 0 ||
+            trimmedSources.length > 100 ||
+            trimmedSources.some((s) => typeof s !== 'string' || !/^[0-9a-f]{32}$/.test(s)) ||
             (mimeType !== null && mimeType !== undefined && typeof mimeType !== 'string') ||
             (typeof mimeType === 'string' && mimeType.length > 200)
           ) {
@@ -335,7 +338,7 @@ export function createManagementFetch(deps: ManagementDeps): (req: Request) => P
             filename: truncateToBytes(filename.trim(), 200),
             size: BigInt(size),
             mimeType: mimeType ? mimeType.trim() || null : null,
-            sources: sources.map((s: string) => s.trim()),
+            sources: trimmedSources as string[],
             downloadFolder,
           });
           return Response.json({ id }, { status: 201 });

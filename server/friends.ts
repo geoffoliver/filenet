@@ -142,12 +142,19 @@ export function shouldAutoAccept(
     // Use a NUL-byte sentinel for an omitted password so it can never compare
     // equal to a configured empty-string password (both would otherwise be
     // zero-length buffers that pad identically and pass timingSafeEqual).
-    const a = Buffer.from(providedPassword !== undefined ? providedPassword : '\0');
-    const b = Buffer.from(settings.invitePassword);
-    // Reject oversized inputs before allocating to prevent a DoS via a huge
-    // configured password forcing large Buffer.alloc on every friend request.
+    // Check byte lengths before allocating — Buffer.byteLength does not allocate.
+    // Reject oversized inputs to prevent a huge configured password forcing large
+    // Buffer.alloc on every friend request.
     const MAX_PASSWORD_BYTES = 1024;
-    if (a.length > MAX_PASSWORD_BYTES || b.length > MAX_PASSWORD_BYTES) return false;
+    const rawA = providedPassword !== undefined ? providedPassword : '\0';
+    const rawB = settings.invitePassword;
+    if (
+      Buffer.byteLength(rawA) > MAX_PASSWORD_BYTES ||
+      Buffer.byteLength(rawB) > MAX_PASSWORD_BYTES
+    )
+      return false;
+    const a = Buffer.from(rawA);
+    const b = Buffer.from(rawB);
     const len = Math.max(a.length, b.length) || 1;
     const paddedA = Buffer.alloc(len);
     const paddedB = Buffer.alloc(len);
