@@ -69,7 +69,7 @@ A split-pane view like Slack, Discord, or any other chat app that everyone is fa
 
 ### Friends
 
-A list of friends that shows their name, how long you've been friends, total count of shared files, total files downloaded from user (count and size), total file uploaded to user (count and size). This page should also include an "Add Friend" button that shows a form that lets a user add a new friend by inputting a name, domain or IP address, and an optional password for the friend. Finally, for each friend in the list there should be options to remove them from your friend list.
+A list of friends that shows their name, how long you've been friends, total count of shared files, total files downloaded from user (count and size), total files uploaded to user (count and size). This page should also include an "Add Friend" button that shows a form that lets a user add a new friend by inputting a name, domain or IP address, and an optional password for the friend. Finally, for each friend in the list there should be options to remove them from your friend list.
 
 ### Transfers
 

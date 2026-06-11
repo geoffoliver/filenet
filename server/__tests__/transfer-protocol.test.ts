@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { unlinkSync } from 'fs';
 
 import {
+  flushUploadStatsForTesting,
   getLastTransferIdForTesting,
   handleChunkError,
   handleChunkRequest,
@@ -226,13 +227,8 @@ describe('handleChunkRequest', () => {
       (msg) => received.push(msg),
     );
 
-    const deadline = Date.now() + 2000;
-    let updated = await prisma.friend.findUniqueOrThrow({ where: { id: friend.id } });
-    while (updated.uploadTotalBytes !== BigInt(content.length)) {
-      if (Date.now() > deadline) throw new Error('Timed out waiting for upload stats');
-      await new Promise((r) => setTimeout(r, 10));
-      updated = await prisma.friend.findUniqueOrThrow({ where: { id: friend.id } });
-    }
+    await flushUploadStatsForTesting(friend.id, prisma);
+    const updated = await prisma.friend.findUniqueOrThrow({ where: { id: friend.id } });
     expect(updated.uploadTotalBytes).toBe(BigInt(content.length));
     expect(updated.uploadCount).toBe(1);
   });
@@ -270,13 +266,8 @@ describe('handleChunkRequest', () => {
       );
     }
 
-    const deadline = Date.now() + 2000;
-    let updated = await prisma.friend.findUniqueOrThrow({ where: { id: friend.id } });
-    while (updated.uploadTotalBytes !== BigInt(10)) {
-      if (Date.now() > deadline) throw new Error('Timed out waiting for upload stats');
-      await new Promise((r) => setTimeout(r, 10));
-      updated = await prisma.friend.findUniqueOrThrow({ where: { id: friend.id } });
-    }
+    await flushUploadStatsForTesting(friend.id, prisma);
+    const updated = await prisma.friend.findUniqueOrThrow({ where: { id: friend.id } });
     expect(updated.uploadCount).toBe(1);
     expect(updated.uploadTotalBytes).toBe(BigInt(10));
   });
