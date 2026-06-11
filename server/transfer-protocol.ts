@@ -25,19 +25,21 @@ const CHUNK_TIMEOUT_MS = 30_000;
 const servedFiles = new Set<string>();
 const MAX_SERVED_FILES = 100_000;
 
-// Per-friend upload stat accumulators — flushed to DB on a debounce timer so
+// Per-friend upload stat accumulators — flushed to DB on a throttle timer so
 // sustained chunk serving doesn't create a write per chunk in SQLite.
 interface UploadAccumulator {
   bytes: bigint;
-  countFirst: boolean;
+  newFileCount: number; // distinct (friendId, sha256) pairs seen since last flush
 }
 const pendingUploads = new Map<string, UploadAccumulator>();
 const pendingUploadTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const UPLOAD_FLUSH_MS = 2_000;
 
 function scheduleUploadFlush(friendId: string, prisma: PrismaClient): void {
-  const existing = pendingUploadTimers.get(friendId);
-  if (existing) clearTimeout(existing);
+  // Throttle: only schedule if no timer is already pending for this friend.
+  // Unlike debounce, this guarantees the flush fires within UPLOAD_FLUSH_MS
+  // even under sustained chunk traffic.
+  if (pendingUploadTimers.has(friendId)) return;
   pendingUploadTimers.set(
     friendId,
     setTimeout(() => {
@@ -50,7 +52,9 @@ function scheduleUploadFlush(friendId: string, prisma: PrismaClient): void {
           where: { id: friendId },
           data: {
             uploadTotalBytes: { increment: pending.bytes },
-            ...(pending.countFirst ? { uploadCount: { increment: 1 } } : {}),
+            ...(pending.newFileCount > 0
+              ? { uploadCount: { increment: pending.newFileCount } }
+              : {}),
           },
         })
         .catch((err: unknown) => console.error('Failed to flush upload stats:', err));
@@ -128,9 +132,9 @@ export async function handleChunkRequest(
           }
           servedFiles.add(dedupKey);
         }
-        const acc = pendingUploads.get(friend.id) ?? { bytes: 0n, countFirst: false };
+        const acc = pendingUploads.get(friend.id) ?? { bytes: 0n, newFileCount: 0 };
         acc.bytes += BigInt(bytesRead);
-        if (isFirstChunk) acc.countFirst = true;
+        if (isFirstChunk) acc.newFileCount++;
         pendingUploads.set(friend.id, acc);
         scheduleUploadFlush(friend.id, prisma);
       }
@@ -259,7 +263,7 @@ export async function flushUploadStatsForTesting(
     where: { id: friendId },
     data: {
       uploadTotalBytes: { increment: pending.bytes },
-      ...(pending.countFirst ? { uploadCount: { increment: 1 } } : {}),
+      ...(pending.newFileCount > 0 ? { uploadCount: { increment: pending.newFileCount } } : {}),
     },
   });
 }

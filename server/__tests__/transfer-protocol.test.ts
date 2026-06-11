@@ -272,6 +272,53 @@ describe('handleChunkRequest', () => {
     expect(updated.uploadTotalBytes).toBe(BigInt(10));
   });
 
+  it('increments uploadCount by the number of distinct files served within one flush window', async () => {
+    const contentA = Buffer.from('file-alpha-content');
+    const contentB = Buffer.from('file-beta-content');
+    const pathA = join(tmpDir, 'multi-file-a.bin');
+    const pathB = join(tmpDir, 'multi-file-b.bin');
+    await writeFile(pathA, contentA);
+    await writeFile(pathB, contentB);
+    await indexFile(prisma, pathA);
+    await indexFile(prisma, pathB);
+    const fileA = await prisma.sharedFile.findFirstOrThrow({ where: { path: pathA } });
+    const fileB = await prisma.sharedFile.findFirstOrThrow({ where: { path: pathB } });
+
+    const friend = await prisma.friend.create({
+      data: {
+        name: 'Peer',
+        address: '8.8.8.8',
+        port: 7734,
+        nodeId: '0'.repeat(32),
+        status: 'ACCEPTED',
+      },
+    });
+
+    // Serve one chunk from each of two different files to the same peer
+    for (const [sha256, content] of [
+      [fileA.sha256, contentA],
+      [fileB.sha256, contentB],
+    ] as [string, Buffer][]) {
+      await handleChunkRequest(
+        {
+          type: 'chunk-request',
+          transferId: `tid-multi-${sha256.slice(0, 4)}`,
+          sha256,
+          offset: 0,
+          length: content.length,
+        },
+        '0'.repeat(32),
+        prisma,
+        () => {},
+      );
+    }
+
+    await flushUploadStatsForTesting(friend.id, prisma);
+    const updated = await prisma.friend.findUniqueOrThrow({ where: { id: friend.id } });
+    expect(updated.uploadCount).toBe(2);
+    expect(updated.uploadTotalBytes).toBe(BigInt(contentA.length + contentB.length));
+  });
+
   it('silently drops request from non-friend', async () => {
     const received: InnerMessage[] = [];
     await handleChunkRequest(
