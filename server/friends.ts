@@ -139,7 +139,10 @@ export function shouldAutoAccept(
   // of whether the caller supplied a password. This prevents distinguishing "wrong
   // password" from "no password provided" by timing within this branch.
   if (settings.invitePassword !== null) {
-    const a = Buffer.from(providedPassword ?? '');
+    // Use a NUL-byte sentinel for an omitted password so it can never compare
+    // equal to a configured empty-string password (both would otherwise be
+    // zero-length buffers that pad identically and pass timingSafeEqual).
+    const a = Buffer.from(providedPassword !== undefined ? providedPassword : '\0');
     const b = Buffer.from(settings.invitePassword);
     const len = Math.max(a.length, b.length) || 1;
     const paddedA = Buffer.alloc(len);
