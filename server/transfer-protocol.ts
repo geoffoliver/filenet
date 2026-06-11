@@ -98,7 +98,7 @@ export async function handleChunkRequest(
           .update({
             where: { id: friend.id },
             data: {
-              uploadTotalBytes: { increment: bytesRead },
+              uploadTotalBytes: { increment: BigInt(bytesRead) },
               ...(countAsFirst ? { uploadCount: { increment: 1 } } : {}),
             },
           })
