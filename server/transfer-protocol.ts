@@ -85,18 +85,25 @@ export async function handleChunkRequest(
         data: buf.subarray(0, bytesRead).toString('base64'),
       });
       // Fire-and-forget upload stat update — non-critical, must not throw on the upload path.
-      const dedupKey = `${friend.id}:${msg.sha256}`;
-      const isFirstChunk = !servedFiles.has(dedupKey);
-      if (isFirstChunk && servedFiles.size < MAX_SERVED_FILES) servedFiles.add(dedupKey);
-      prisma.friend
-        .update({
-          where: { id: friend.id },
-          data: {
-            uploadTotalBytes: { increment: bytesRead },
-            ...(isFirstChunk ? { uploadCount: { increment: 1 } } : {}),
-          },
-        })
-        .catch((err: unknown) => console.error('Failed to update upload stats:', err));
+      if (bytesRead > 0) {
+        const dedupKey = `${friend.id}:${msg.sha256}`;
+        const underCap = servedFiles.size < MAX_SERVED_FILES;
+        const isFirstChunk = !servedFiles.has(dedupKey);
+        // Only count as first — and only add to dedup set — when under cap.
+        // If cap is hit, we skip the count rather than over-count (undercounting
+        // is safer than inflating uploadCount on every subsequent chunk).
+        const countAsFirst = isFirstChunk && underCap;
+        if (countAsFirst) servedFiles.add(dedupKey);
+        prisma.friend
+          .update({
+            where: { id: friend.id },
+            data: {
+              uploadTotalBytes: { increment: bytesRead },
+              ...(countAsFirst ? { uploadCount: { increment: 1 } } : {}),
+            },
+          })
+          .catch((err: unknown) => console.error('Failed to update upload stats:', err));
+      }
     } finally {
       await fh.close();
     }

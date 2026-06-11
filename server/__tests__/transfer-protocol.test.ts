@@ -226,6 +226,8 @@ describe('handleChunkRequest', () => {
       (msg) => received.push(msg),
     );
 
+    // Allow the fire-and-forget DB update to settle before reading back.
+    await new Promise((r) => setTimeout(r, 50));
     const updated = await prisma.friend.findUniqueOrThrow({ where: { id: friend.id } });
     expect(updated.uploadTotalBytes).toBe(BigInt(content.length));
     expect(updated.uploadCount).toBe(1);
