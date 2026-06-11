@@ -28,6 +28,8 @@ model Friend {
 
   downloadCount      Int    @default(0)
   downloadTotalBytes BigInt @default(0)
+  uploadCount        Int    @default(0)
+  uploadTotalBytes   BigInt @default(0)
 
   @@unique([address, port])
 }

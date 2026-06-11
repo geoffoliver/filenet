@@ -195,6 +195,83 @@ describe('handleChunkRequest', () => {
     }
   });
 
+  it('increments uploadTotalBytes by the number of bytes served', async () => {
+    const content = Buffer.from('upload tracking test');
+    const filePath = join(tmpDir, 'upload-bytes-test.txt');
+    await writeFile(filePath, content);
+    await indexFile(prisma, filePath);
+    const file = await prisma.sharedFile.findFirstOrThrow({ where: { path: filePath } });
+
+    const friend = await prisma.friend.create({
+      data: {
+        name: 'Peer',
+        address: '6.6.6.6',
+        port: 7734,
+        nodeId: 'e'.repeat(32),
+        status: 'ACCEPTED',
+      },
+    });
+
+    const received: InnerMessage[] = [];
+    await handleChunkRequest(
+      {
+        type: 'chunk-request',
+        transferId: 'tid-upload-bytes',
+        sha256: file.sha256,
+        offset: 0,
+        length: content.length,
+      },
+      'e'.repeat(32),
+      prisma,
+      (msg) => received.push(msg),
+    );
+
+    const updated = await prisma.friend.findUniqueOrThrow({ where: { id: friend.id } });
+    expect(updated.uploadTotalBytes).toBe(BigInt(content.length));
+    expect(updated.uploadCount).toBe(1);
+  });
+
+  it('increments uploadCount only once per unique sha256 per peer', async () => {
+    const content = Buffer.from('ABCDEFGHIJ');
+    const filePath = join(tmpDir, 'upload-count-test.bin');
+    await writeFile(filePath, content);
+    await indexFile(prisma, filePath);
+    const file = await prisma.sharedFile.findFirstOrThrow({ where: { path: filePath } });
+
+    const friend = await prisma.friend.create({
+      data: {
+        name: 'Peer',
+        address: '7.7.7.7',
+        port: 7734,
+        nodeId: 'f'.repeat(32),
+        status: 'ACCEPTED',
+      },
+    });
+
+    // Serve two separate chunks of the same file to the same peer
+    for (const offset of [0, 5]) {
+      await handleChunkRequest(
+        {
+          type: 'chunk-request',
+          transferId: `tid-count-${offset}`,
+          sha256: file.sha256,
+          offset,
+          length: 5,
+        },
+        'f'.repeat(32),
+        prisma,
+        () => {},
+      );
+    }
+
+    // Allow fire-and-forget DB updates to settle
+    await new Promise((r) => setTimeout(r, 50));
+
+    const updated = await prisma.friend.findUniqueOrThrow({ where: { id: friend.id } });
+    expect(updated.uploadCount).toBe(1);
+    expect(updated.uploadTotalBytes).toBe(BigInt(10));
+  });
+
   it('silently drops request from non-friend', async () => {
     const received: InnerMessage[] = [];
     await handleChunkRequest(

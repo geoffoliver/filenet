@@ -20,6 +20,11 @@ import type { ConnectedPeer } from './connections';
 export const CHUNK_SIZE = 1024 * 1024; // 1 MB
 const CHUNK_TIMEOUT_MS = 30_000;
 
+// Tracks (friendId:sha256) pairs already counted for uploadCount so each unique
+// file served to each peer is counted exactly once. Capped to prevent unbounded growth.
+const servedFiles = new Set<string>();
+const MAX_SERVED_FILES = 100_000;
+
 // Pending download-side chunk callbacks keyed by transferId
 const pendingChunks = new Map<
   string,
@@ -79,6 +84,19 @@ export async function handleChunkRequest(
         offset: msg.offset,
         data: buf.subarray(0, bytesRead).toString('base64'),
       });
+      // Fire-and-forget upload stat update — non-critical, must not throw on the upload path.
+      const dedupKey = `${friend.id}:${msg.sha256}`;
+      const isFirstChunk = !servedFiles.has(dedupKey);
+      if (isFirstChunk && servedFiles.size < MAX_SERVED_FILES) servedFiles.add(dedupKey);
+      prisma.friend
+        .update({
+          where: { id: friend.id },
+          data: {
+            uploadTotalBytes: { increment: bytesRead },
+            ...(isFirstChunk ? { uploadCount: { increment: 1 } } : {}),
+          },
+        })
+        .catch((err: unknown) => console.error('Failed to update upload stats:', err));
     } finally {
       await fh.close();
     }
@@ -181,6 +199,7 @@ export async function dispatchTransferMessage(
 
 export function resetPendingForTesting(): void {
   pendingChunks.clear();
+  servedFiles.clear();
   lastTransferId = '';
 }
 

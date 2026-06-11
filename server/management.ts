@@ -106,17 +106,22 @@ export function createManagementFetch(deps: ManagementDeps): (req: Request) => P
       if (url.pathname === '/api/friends') {
         if (req.method === 'GET') {
           const friends = await getFriends(prisma);
-          const enriched = friends.map(({ downloadCount, downloadTotalBytes, ...f }) => ({
-            ...f,
-            online: f.nodeId ? !!getConnectedPeer(f.nodeId) : false,
-            // Only surface counters for ACCEPTED friends. If a friend was ACCEPTED
-            // (accumulating download credit) and later blocked, the historical counter
-            // persists in the DB but must not be exposed for non-ACCEPTED statuses.
-            downloads:
-              f.status === 'ACCEPTED'
-                ? { count: downloadCount, totalSize: String(downloadTotalBytes) }
-                : { count: 0, totalSize: '0' },
-          }));
+          const enriched = friends.map(
+            ({ downloadCount, downloadTotalBytes, uploadCount, uploadTotalBytes, ...f }) => ({
+              ...f,
+              online: f.nodeId ? !!getConnectedPeer(f.nodeId) : false,
+              // Only surface counters for ACCEPTED friends — historical data must not
+              // be exposed if the friendship status has since changed.
+              downloads:
+                f.status === 'ACCEPTED'
+                  ? { count: downloadCount, totalSize: String(downloadTotalBytes) }
+                  : { count: 0, totalSize: '0' },
+              uploads:
+                f.status === 'ACCEPTED'
+                  ? { count: uploadCount, totalSize: String(uploadTotalBytes) }
+                  : { count: 0, totalSize: '0' },
+            }),
+          );
           return Response.json(enriched);
         }
 
@@ -133,9 +138,20 @@ export function createManagementFetch(deps: ManagementDeps): (req: Request) => P
               console.error(`Failed to connect to ${address}:${port}:`, err);
             },
           );
-          const { downloadCount: _dc, downloadTotalBytes: _dtb, ...friendData } = friend;
+          const {
+            downloadCount: _dc,
+            downloadTotalBytes: _dtb,
+            uploadCount: _uc,
+            uploadTotalBytes: _utb,
+            ...friendData
+          } = friend;
           return Response.json(
-            { ...friendData, online: false, downloads: { count: 0, totalSize: '0' } },
+            {
+              ...friendData,
+              online: false,
+              downloads: { count: 0, totalSize: '0' },
+              uploads: { count: 0, totalSize: '0' },
+            },
             { status: 201 },
           );
         }
@@ -183,11 +199,18 @@ export function createManagementFetch(deps: ManagementDeps): (req: Request) => P
                   });
               }
             }
-            const { downloadCount: _dc2, downloadTotalBytes: _dtb2, ...updatedData } = updated;
+            const {
+              downloadCount: _dc2,
+              downloadTotalBytes: _dtb2,
+              uploadCount: _uc2,
+              uploadTotalBytes: _utb2,
+              ...updatedData
+            } = updated;
             return Response.json({
               ...updatedData,
               online: updated.nodeId ? !!getConnectedPeer(updated.nodeId) : false,
               downloads: { count: 0, totalSize: '0' },
+              uploads: { count: 0, totalSize: '0' },
             });
           }
 
