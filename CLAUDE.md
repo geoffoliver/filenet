@@ -38,10 +38,6 @@ The application should let users configure certain aspects:
 
 - Profile details
   - Name
-  - Email
-  - Picture
-  - Bio
-  - Links
 - The folder/folders they want to share
 - The folder where they want to download files
 - Scripts (JS/TS) to execute once a download completes
@@ -49,10 +45,6 @@ The application should let users configure certain aspects:
 - Whether to auto accept friend requests:
   - From people they don't know
   - From friends of friends
-- How many "degrees of separation" to share files:
-  - Friends
-  - Friends of friends
-  - Everyone
 - The ability to force a rescan of shared files
 
 ## UI
@@ -77,7 +69,7 @@ A split-pane view like Slack, Discord, or any other chat app that everyone is fa
 
 ### Friends
 
-A list of friends that shows their name, profile picture (if available), how long you've been friends, total count of shared files, total files downloaded from user (count and size), total file uploaded to user (count and size). This page should also include an "Add Friend" button that shows a form that lets a user add a new friend by inputting a name, domain or IP address, and an optional password for the friend. Finally, for each friend in the list there should be options to remove them from your friend list.
+A list of friends that shows their name, how long you've been friends, total count of shared files, total files downloaded from user (count and size), total file uploaded to user (count and size). This page should also include an "Add Friend" button that shows a form that lets a user add a new friend by inputting a name, domain or IP address, and an optional password for the friend. Finally, for each friend in the list there should be options to remove them from your friend list.
 
 ### Transfers
 
