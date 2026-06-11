@@ -1,5 +1,16 @@
 import { randomUUID } from 'node:crypto';
 
+// Truncate a string to at most maxBytes UTF-8 bytes without splitting a
+// multi-byte character. Needed because filesystem name limits are byte-based.
+function truncateToBytes(str: string, maxBytes: number): string {
+  const buf = Buffer.from(str, 'utf8');
+  if (buf.length <= maxBytes) return str;
+  let end = maxBytes;
+  // Walk back over any UTF-8 continuation bytes (0x80–0xBF) to find a boundary.
+  while (end > 0 && (buf[end] & 0xc0) === 0x80) end--;
+  return buf.subarray(0, end).toString('utf8');
+}
+
 import type { PrismaClient, SharedFile } from '@prisma/client';
 
 import {
@@ -321,7 +332,7 @@ export function createManagementFetch(deps: ManagementDeps): (req: Request) => P
           }
           const id = await startDownload(prisma, {
             sha256,
-            filename: filename.trim().slice(0, 200),
+            filename: truncateToBytes(filename.trim(), 200),
             size: BigInt(size),
             mimeType: mimeType ? mimeType.trim() || null : null,
             sources: sources.map((s: string) => s.trim()),
@@ -509,7 +520,7 @@ export function createManagementFetch(deps: ManagementDeps): (req: Request) => P
           }
           const convId = `group:${randomUUID()}`;
           const conv = await prisma.conversation.create({
-            data: { id: convId, type: 'GROUP', name: name.trim().slice(0, 200) },
+            data: { id: convId, type: 'GROUP', name: truncateToBytes(name.trim(), 200) },
             include: { messages: { orderBy: { sentAt: 'desc' }, take: 1 } },
           });
           return Response.json(conv, { status: 201 });

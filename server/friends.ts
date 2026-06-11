@@ -144,6 +144,10 @@ export function shouldAutoAccept(
     // zero-length buffers that pad identically and pass timingSafeEqual).
     const a = Buffer.from(providedPassword !== undefined ? providedPassword : '\0');
     const b = Buffer.from(settings.invitePassword);
+    // Reject oversized inputs before allocating to prevent a DoS via a huge
+    // configured password forcing large Buffer.alloc on every friend request.
+    const MAX_PASSWORD_BYTES = 1024;
+    if (a.length > MAX_PASSWORD_BYTES || b.length > MAX_PASSWORD_BYTES) return false;
     const len = Math.max(a.length, b.length) || 1;
     const paddedA = Buffer.alloc(len);
     const paddedB = Buffer.alloc(len);
