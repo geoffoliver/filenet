@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'bun:test';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'bun:test';
 import { homedir, tmpdir } from 'node:os';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import type { PrismaClient } from '@prisma/client';
@@ -554,6 +554,48 @@ describe('PATCH /api/settings', () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.downloadFolder).toBeNull();
+  });
+
+  describe('env-controlled fields', () => {
+    afterEach(() => {
+      delete process.env.SHARED_FOLDERS;
+      delete process.env.DOWNLOAD_FOLDER;
+    });
+
+    it('rejects sharedFolders when SHARED_FOLDERS env var is set', async () => {
+      process.env.SHARED_FOLDERS = '/shared';
+      const res = await makeHandler()(
+        jsonReq('/api/settings', 'PATCH', { sharedFolders: ['/evil'] }),
+      );
+      expect(res.status).toBe(409);
+      expect(await res.text()).toContain('SHARED_FOLDERS');
+    });
+
+    it('rejects downloadFolder when DOWNLOAD_FOLDER env var is set', async () => {
+      process.env.DOWNLOAD_FOLDER = '/downloads';
+      const res = await makeHandler()(
+        jsonReq('/api/settings', 'PATCH', { downloadFolder: '/evil' }),
+      );
+      expect(res.status).toBe(409);
+      expect(await res.text()).toContain('DOWNLOAD_FOLDER');
+    });
+
+    it('still allows unrelated fields when env vars are set', async () => {
+      process.env.SHARED_FOLDERS = '/shared';
+      process.env.DOWNLOAD_FOLDER = '/downloads';
+      const res = await makeHandler()(jsonReq('/api/settings', 'PATCH', { name: 'EnvLocked' }));
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.name).toBe('EnvLocked');
+    });
+
+    it('allows sharedFolders patch when only DOWNLOAD_FOLDER is set', async () => {
+      process.env.DOWNLOAD_FOLDER = '/downloads';
+      const res = await makeHandler()(
+        jsonReq('/api/settings', 'PATCH', { sharedFolders: ['/music'] }),
+      );
+      expect(res.status).toBe(200);
+    });
   });
 
   it('updates listenPort and returns it', async () => {

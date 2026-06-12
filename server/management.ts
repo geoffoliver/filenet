@@ -267,7 +267,9 @@ export function createManagementFetch(deps: ManagementDeps): (req: Request) => P
             .filter((e) => e.isDirectory() && !e.name.startsWith('.'))
             .map((e) => ({ name: e.name, path: join(target, e.name) }))
             .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
-          const parent = target === '/' ? null : dirname(target);
+          // dirname(root) === root on every platform ('/' on POSIX, 'C:\\' on Windows)
+          const parentDir = dirname(target);
+          const parent = parentDir === target ? null : parentDir;
           return Response.json({ path: target, parent, home, entries });
         } catch {
           return new Response('Cannot read directory', { status: 400 });
@@ -288,6 +290,22 @@ export function createManagementFetch(deps: ManagementDeps): (req: Request) => P
           const result = PatchSettingsBodySchema.safeParse(await req.json());
           if (!result.success) {
             return new Response(result.error.issues[0].message, { status: 400 });
+          }
+          // Env-controlled paths must be enforced here, not just hidden in the UI —
+          // otherwise a direct API call could permanently diverge the DB from the
+          // env config (env values only seed the DB on first launch).
+          const env = getEnvConfig();
+          if (result.data.sharedFolders !== undefined && env.sharedFolders.length > 0) {
+            return new Response(
+              'sharedFolders is controlled by the SHARED_FOLDERS environment variable',
+              { status: 409 },
+            );
+          }
+          if (result.data.downloadFolder !== undefined && env.downloadFolder !== null) {
+            return new Response(
+              'downloadFolder is controlled by the DOWNLOAD_FOLDER environment variable',
+              { status: 409 },
+            );
           }
           const updated = await updateSettings(prisma, result.data);
           return Response.json(sanitizeSettings(updated));
