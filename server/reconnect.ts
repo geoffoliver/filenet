@@ -1,6 +1,7 @@
 import type { PrismaClient } from '@prisma/client';
 
 import type { ConnectPeerFn } from './management';
+import type { Identity } from './identity';
 import { getConnectedPeer } from './connections';
 import { getOrCreateSettings } from './config';
 
@@ -21,6 +22,7 @@ export function resetDialingForTesting(): void {
  */
 export async function reconnectOnce(
   prisma: PrismaClient,
+  identity: Identity,
   connectPeer: ConnectPeerFn,
 ): Promise<void> {
   const [settings, friends] = await Promise.all([
@@ -38,17 +40,22 @@ export async function reconnectOnce(
     // A connection attempt is already in-flight for this address — skip
     if (dialing.has(key)) continue;
 
-    // OUTGOING_PENDING means we want to send a friend-request after the handshake
+    // OUTGOING_PENDING means we want to send a friend-request after the handshake.
+    // Fall back to our nodeId when no display name is set — matches the management
+    // API's initial dial. (friend.name is the REMOTE peer's name, not ours.)
     const friendRequest =
       friend.status === 'OUTGOING_PENDING'
-        ? { name: settings.name.trim() || friend.name }
+        ? { name: settings.name.trim() || identity.nodeId }
         : undefined;
 
     dialing.add(key);
-    connectPeer(friend.address, friend.port, friendRequest)
+    // Promise.resolve().then() guards against connectPeer throwing synchronously,
+    // which would otherwise skip .finally() and leave the key stuck in `dialing`.
+    Promise.resolve()
+      .then(() => connectPeer(friend.address, friend.port, friendRequest))
       .catch((err: unknown) => {
         const msg = err instanceof Error ? err.message : String(err);
-        console.log(`[reconnect] ${friend.address}:${friend.port} — ${msg}`);
+        console.error(`[reconnect] ${friend.address}:${friend.port} — ${msg}`);
       })
       .finally(() => dialing.delete(key));
   }
@@ -56,6 +63,7 @@ export async function reconnectOnce(
 
 export function startReconnectLoop(
   prisma: PrismaClient,
+  identity: Identity,
   connectPeer: ConnectPeerFn,
   intervalMs = RECONNECT_INTERVAL_MS,
 ): () => void {
@@ -64,7 +72,7 @@ export function startReconnectLoop(
   function tick(): void {
     if (running) return;
     running = true;
-    reconnectOnce(prisma, connectPeer)
+    reconnectOnce(prisma, identity, connectPeer)
       .catch((err) => console.error('[reconnect] tick error:', err))
       .finally(() => {
         running = false;

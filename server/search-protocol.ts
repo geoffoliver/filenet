@@ -206,7 +206,7 @@ export async function handleSearchRequest(
 
   const sid = msg.searchId.slice(0, 8);
   console.log(
-    `[search] request id=${sid} q="${msg.query}" ttl=${msg.ttl} from=${fromPeer.peerNodeId.slice(0, 8)}`,
+    `[search] request id=${sid} q=${JSON.stringify(msg.query)} ttl=${msg.ttl} from=${fromPeer.peerNodeId.slice(0, 8)}`,
   );
 
   // Only create a return route when we need to relay results back — if ttl=1 we process locally
@@ -307,7 +307,7 @@ export async function initiateNetworkSearch(
 
   const sid = searchId.slice(0, 8);
   console.log(
-    `[search] initiate id=${sid} q="${params.query}" fileType=${params.fileType} peers=${peers.length} timeout=${timeoutMs}ms`,
+    `[search] initiate id=${sid} q=${JSON.stringify(params.query)} fileType=${params.fileType} peers=${peers.length} timeout=${timeoutMs}ms`,
   );
 
   return new Promise((resolve) => {

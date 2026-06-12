@@ -62,7 +62,7 @@ const connectPeerFn = (
     await dispatchVouchMessage(msg, nodeId, prisma);
   });
 
-const stopReconnect = startReconnectLoop(prisma, connectPeerFn);
+const stopReconnect = startReconnectLoop(prisma, identity, connectPeerFn);
 
 const shutdown = () => {
   stopRescan();

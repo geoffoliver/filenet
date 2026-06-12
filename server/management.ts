@@ -319,7 +319,7 @@ export function createManagementFetch(deps: ManagementDeps): (req: Request) => P
         }
         const { q, type, limit, offset, network } = result.data;
         const searchStart = Date.now();
-        console.log(`[search] /api/search q="${q}" type=${type} network=${network}`);
+        console.log(`[search] /api/search q=${JSON.stringify(q)} type=${type} network=${network}`);
         const localSearchPromise = searchFiles(prisma, { query: q, type, limit, offset });
         const networkResultsPromise = network
           ? getAcceptedConnectedPeers(prisma).then((peers) => {
