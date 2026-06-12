@@ -342,6 +342,8 @@ export default function FriendsPage() {
                     {f.acceptedAt && ` · friends since ${timeAgo(f.acceptedAt)}`}
                     {f.downloads.count > 0 &&
                       ` · ${f.downloads.count} file${f.downloads.count !== 1 ? 's' : ''} downloaded (${formatBytes(f.downloads.totalSize)})`}
+                    {f.uploads.count > 0 &&
+                      ` · ${f.uploads.count} file${f.uploads.count !== 1 ? 's' : ''} uploaded (${formatBytes(f.uploads.totalSize)})`}
                   </div>
                 </div>
                 <div className={styles.actions}>

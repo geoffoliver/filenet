@@ -6,6 +6,8 @@ import { tmpdir } from 'node:os';
 import { unlinkSync } from 'fs';
 
 import {
+  cancelUploadFlushForFriend,
+  flushUploadStatsForTesting,
   getLastTransferIdForTesting,
   handleChunkError,
   handleChunkRequest,
@@ -193,6 +195,209 @@ describe('handleChunkRequest', () => {
     if (received[0].type === 'chunk-error') {
       expect(received[0].reason).toMatch(/out of bounds/i);
     }
+  });
+
+  it('sends chunk-error when file is truncated after indexing (stale DB size)', async () => {
+    const content = Buffer.from('original content here');
+    const filePath = join(tmpDir, 'stale-index-test.txt');
+    await writeFile(filePath, content);
+    await indexFile(prisma, filePath);
+    const file = await prisma.sharedFile.findFirstOrThrow({ where: { path: filePath } });
+
+    await prisma.friend.create({
+      data: {
+        name: 'Peer',
+        address: '9.9.9.9',
+        port: 7734,
+        nodeId: '1'.repeat(32),
+        status: 'ACCEPTED',
+      },
+    });
+
+    // Truncate the file on disk — DB still records the original size
+    await writeFile(filePath, Buffer.alloc(0));
+
+    const received: InnerMessage[] = [];
+    await handleChunkRequest(
+      {
+        type: 'chunk-request',
+        transferId: 'tid-stale',
+        sha256: file.sha256,
+        offset: 0,
+        length: content.length,
+      },
+      '1'.repeat(32),
+      prisma,
+      (msg) => received.push(msg),
+    );
+
+    expect(received).toHaveLength(1);
+    expect(received[0].type).toBe('chunk-error');
+    if (received[0].type === 'chunk-error') {
+      expect(received[0].reason).toMatch(/stale/i);
+    }
+  });
+
+  it('cancelUploadFlushForFriend drops pending accumulator so no DB write occurs', async () => {
+    const content = Buffer.from('cancel test content');
+    const filePath = join(tmpDir, 'cancel-flush-test.txt');
+    await writeFile(filePath, content);
+    await indexFile(prisma, filePath);
+    const file = await prisma.sharedFile.findFirstOrThrow({ where: { path: filePath } });
+
+    const friend = await prisma.friend.create({
+      data: {
+        name: 'Peer',
+        address: '2.2.2.2',
+        port: 7734,
+        nodeId: '2'.repeat(32),
+        status: 'ACCEPTED',
+      },
+    });
+
+    await handleChunkRequest(
+      {
+        type: 'chunk-request',
+        transferId: 'tid-cancel',
+        sha256: file.sha256,
+        offset: 0,
+        length: content.length,
+      },
+      '2'.repeat(32),
+      prisma,
+      () => {},
+    );
+
+    cancelUploadFlushForFriend(friend.id);
+
+    // flushUploadStatsForTesting finds nothing pending and returns without writing
+    await flushUploadStatsForTesting(friend.id, prisma);
+    const updated = await prisma.friend.findUniqueOrThrow({ where: { id: friend.id } });
+    expect(updated.uploadTotalBytes).toBe(0n);
+    expect(updated.uploadCount).toBe(0);
+  });
+
+  it('increments uploadTotalBytes by the number of bytes served', async () => {
+    const content = Buffer.from('upload tracking test');
+    const filePath = join(tmpDir, 'upload-bytes-test.txt');
+    await writeFile(filePath, content);
+    await indexFile(prisma, filePath);
+    const file = await prisma.sharedFile.findFirstOrThrow({ where: { path: filePath } });
+
+    const friend = await prisma.friend.create({
+      data: {
+        name: 'Peer',
+        address: '6.6.6.6',
+        port: 7734,
+        nodeId: 'e'.repeat(32),
+        status: 'ACCEPTED',
+      },
+    });
+
+    const received: InnerMessage[] = [];
+    await handleChunkRequest(
+      {
+        type: 'chunk-request',
+        transferId: 'tid-upload-bytes',
+        sha256: file.sha256,
+        offset: 0,
+        length: content.length,
+      },
+      'e'.repeat(32),
+      prisma,
+      (msg) => received.push(msg),
+    );
+
+    await flushUploadStatsForTesting(friend.id, prisma);
+    const updated = await prisma.friend.findUniqueOrThrow({ where: { id: friend.id } });
+    expect(updated.uploadTotalBytes).toBe(BigInt(content.length));
+    expect(updated.uploadCount).toBe(1);
+  });
+
+  it('increments uploadCount only once per unique sha256 per peer', async () => {
+    const content = Buffer.from('ABCDEFGHIJ');
+    const filePath = join(tmpDir, 'upload-count-test.bin');
+    await writeFile(filePath, content);
+    await indexFile(prisma, filePath);
+    const file = await prisma.sharedFile.findFirstOrThrow({ where: { path: filePath } });
+
+    const friend = await prisma.friend.create({
+      data: {
+        name: 'Peer',
+        address: '7.7.7.7',
+        port: 7734,
+        nodeId: 'f'.repeat(32),
+        status: 'ACCEPTED',
+      },
+    });
+
+    // Serve two separate chunks of the same file to the same peer
+    for (const offset of [0, 5]) {
+      await handleChunkRequest(
+        {
+          type: 'chunk-request',
+          transferId: `tid-count-${offset}`,
+          sha256: file.sha256,
+          offset,
+          length: 5,
+        },
+        'f'.repeat(32),
+        prisma,
+        () => {},
+      );
+    }
+
+    await flushUploadStatsForTesting(friend.id, prisma);
+    const updated = await prisma.friend.findUniqueOrThrow({ where: { id: friend.id } });
+    expect(updated.uploadCount).toBe(1);
+    expect(updated.uploadTotalBytes).toBe(BigInt(10));
+  });
+
+  it('increments uploadCount by the number of distinct files served within one flush window', async () => {
+    const contentA = Buffer.from('file-alpha-content');
+    const contentB = Buffer.from('file-beta-content');
+    const pathA = join(tmpDir, 'multi-file-a.bin');
+    const pathB = join(tmpDir, 'multi-file-b.bin');
+    await writeFile(pathA, contentA);
+    await writeFile(pathB, contentB);
+    await indexFile(prisma, pathA);
+    await indexFile(prisma, pathB);
+    const fileA = await prisma.sharedFile.findFirstOrThrow({ where: { path: pathA } });
+    const fileB = await prisma.sharedFile.findFirstOrThrow({ where: { path: pathB } });
+
+    const friend = await prisma.friend.create({
+      data: {
+        name: 'Peer',
+        address: '8.8.8.8',
+        port: 7734,
+        nodeId: '0'.repeat(32),
+        status: 'ACCEPTED',
+      },
+    });
+
+    // Serve one chunk from each of two different files to the same peer
+    for (const [sha256, content] of [
+      [fileA.sha256, contentA],
+      [fileB.sha256, contentB],
+    ] as [string, Buffer][]) {
+      await handleChunkRequest(
+        {
+          type: 'chunk-request',
+          transferId: `tid-multi-${sha256.slice(0, 4)}`,
+          sha256,
+          offset: 0,
+          length: content.length,
+        },
+        '0'.repeat(32),
+        prisma,
+        () => {},
+      );
+    }
+
+    await flushUploadStatsForTesting(friend.id, prisma);
+    const updated = await prisma.friend.findUniqueOrThrow({ where: { id: friend.id } });
+    expect(updated.uploadCount).toBe(2);
+    expect(updated.uploadTotalBytes).toBe(BigInt(contentA.length + contentB.length));
   });
 
   it('silently drops request from non-friend', async () => {

@@ -25,6 +25,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - PDF, EPUB, and DOCX extractors skip files larger than 50 MB to prevent OOM during indexing
   - All string metadata fields are clamped to 500 characters; search-protocol drops oversized metadata JSON (> 4096 chars) rather than sending a corrupt truncated string
 
+- **Upload stats per friend** — tracks `uploadCount` and `uploadTotalBytes` on each `Friend` row; incremented fire-and-forget whenever a chunk is served to an accepted peer, with in-memory deduplication so each unique file served to each peer counts as one upload; exposed as `uploads: { count, totalSize }` in `GET /api/friends` and shown on the Friends page alongside download stats
+
 - **Active Downloads on Home dashboard** — the Home view now shows a live "Active Downloads" panel that polls every 3 s and renders compact rows (filename, progress bar, state badge, speed, ETA, source count) for any `PENDING`, `DOWNLOADING`, or `PAUSED` transfers, with a "View all" link to the Transfers page; `formatSpeed` and `formatEta` consolidated into `app/lib/api.ts` and shared between Home and Transfers views
 
 - **Post-download scripts** — run user-defined `.ts`/`.js` scripts after each download completes; scripts receive `{ file: BunFile, stats: TransferStats }` and run sequentially in configured order; errors in one script do not block subsequent scripts

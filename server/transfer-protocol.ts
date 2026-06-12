@@ -20,6 +20,48 @@ import type { ConnectedPeer } from './connections';
 export const CHUNK_SIZE = 1024 * 1024; // 1 MB
 const CHUNK_TIMEOUT_MS = 30_000;
 
+// Tracks (friendId:sha256) pairs already counted for uploadCount so each unique
+// file served to each peer is counted exactly once. Bounded with FIFO eviction.
+const servedFiles = new Set<string>();
+const MAX_SERVED_FILES = 100_000;
+
+// Per-friend upload stat accumulators — flushed to DB on a throttle timer so
+// sustained chunk serving doesn't create a write per chunk in SQLite.
+interface UploadAccumulator {
+  bytes: bigint;
+  newFileCount: number; // distinct (friendId, sha256) pairs seen since last flush
+}
+const pendingUploads = new Map<string, UploadAccumulator>();
+const pendingUploadTimers = new Map<string, ReturnType<typeof setTimeout>>();
+const UPLOAD_FLUSH_MS = 2_000;
+
+function scheduleUploadFlush(friendId: string, prisma: PrismaClient): void {
+  // Throttle: only schedule if no timer is already pending for this friend.
+  // Unlike debounce, this guarantees the flush fires within UPLOAD_FLUSH_MS
+  // even under sustained chunk traffic.
+  if (pendingUploadTimers.has(friendId)) return;
+  pendingUploadTimers.set(
+    friendId,
+    setTimeout(() => {
+      pendingUploadTimers.delete(friendId);
+      const pending = pendingUploads.get(friendId);
+      if (!pending) return;
+      pendingUploads.delete(friendId);
+      prisma.friend
+        .update({
+          where: { id: friendId },
+          data: {
+            uploadTotalBytes: { increment: pending.bytes },
+            ...(pending.newFileCount > 0
+              ? { uploadCount: { increment: pending.newFileCount } }
+              : {}),
+          },
+        })
+        .catch((err: unknown) => console.error('Failed to flush upload stats:', err));
+    }, UPLOAD_FLUSH_MS),
+  );
+}
+
 // Pending download-side chunk callbacks keyed by transferId
 const pendingChunks = new Map<
   string,
@@ -72,6 +114,17 @@ export async function handleChunkRequest(
     try {
       const buf = Buffer.alloc(msg.length);
       const { bytesRead } = await fh.read(buf, 0, msg.length, msg.offset);
+      if (bytesRead !== msg.length) {
+        // File was modified or truncated after indexing — the DB size is stale.
+        sendResponse({
+          type: 'chunk-error',
+          transferId: msg.transferId,
+          sha256: msg.sha256,
+          offset: msg.offset,
+          reason: 'File modified — stale index',
+        });
+        return;
+      }
       sendResponse({
         type: 'chunk-response',
         transferId: msg.transferId,
@@ -79,6 +132,23 @@ export async function handleChunkRequest(
         offset: msg.offset,
         data: buf.subarray(0, bytesRead).toString('base64'),
       });
+      // Accumulate upload stats — flushed to DB on a throttle timer (non-critical).
+      if (bytesRead > 0) {
+        const dedupKey = `${friend.id}:${msg.sha256}`;
+        const isFirstChunk = !servedFiles.has(dedupKey);
+        if (isFirstChunk) {
+          // FIFO evict oldest entry when at cap so counting continues for new pairs.
+          if (servedFiles.size >= MAX_SERVED_FILES) {
+            servedFiles.delete(servedFiles.values().next().value!);
+          }
+          servedFiles.add(dedupKey);
+        }
+        const acc = pendingUploads.get(friend.id) ?? { bytes: 0n, newFileCount: 0 };
+        acc.bytes += BigInt(bytesRead);
+        if (isFirstChunk) acc.newFileCount++;
+        pendingUploads.set(friend.id, acc);
+        scheduleUploadFlush(friend.id, prisma);
+      }
     } finally {
       await fh.close();
     }
@@ -176,12 +246,50 @@ export async function dispatchTransferMessage(
 }
 
 // ---------------------------------------------------------------------------
+// Friend lifecycle helpers
+// ---------------------------------------------------------------------------
+
+export function cancelUploadFlushForFriend(friendId: string): void {
+  const timer = pendingUploadTimers.get(friendId);
+  if (timer) {
+    clearTimeout(timer);
+    pendingUploadTimers.delete(friendId);
+  }
+  pendingUploads.delete(friendId);
+}
+
+// ---------------------------------------------------------------------------
 // Test helpers
 // ---------------------------------------------------------------------------
 
 export function resetPendingForTesting(): void {
   pendingChunks.clear();
+  servedFiles.clear();
+  pendingUploads.clear();
+  pendingUploadTimers.forEach((t) => clearTimeout(t));
+  pendingUploadTimers.clear();
   lastTransferId = '';
+}
+
+export async function flushUploadStatsForTesting(
+  friendId: string,
+  prisma: PrismaClient,
+): Promise<void> {
+  const timer = pendingUploadTimers.get(friendId);
+  if (timer) {
+    clearTimeout(timer);
+    pendingUploadTimers.delete(friendId);
+  }
+  const pending = pendingUploads.get(friendId);
+  if (!pending) return;
+  pendingUploads.delete(friendId);
+  await prisma.friend.update({
+    where: { id: friendId },
+    data: {
+      uploadTotalBytes: { increment: pending.bytes },
+      ...(pending.newFileCount > 0 ? { uploadCount: { increment: pending.newFileCount } } : {}),
+    },
+  });
 }
 
 export function getLastTransferIdForTesting(): string {

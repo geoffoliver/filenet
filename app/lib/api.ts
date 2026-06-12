@@ -96,6 +96,7 @@ export type Friend = {
   updatedAt: string;
   online: boolean;
   downloads: { count: number; totalSize: string };
+  uploads: { count: number; totalSize: string };
 };
 
 export type AddFriendParams = {
