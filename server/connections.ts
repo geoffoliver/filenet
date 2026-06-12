@@ -208,6 +208,8 @@ export function resolveVouch(fromNodeId: string, candidateNodeId: string, vouche
   }
 }
 
+export const HANDSHAKE_TIMEOUT_MS = 15_000;
+
 export async function connectToPeer(
   identity: Identity,
   prisma: PrismaClient,
@@ -216,6 +218,7 @@ export async function connectToPeer(
   localPort: number,
   friendRequest?: { name: string; password?: string },
   onMessage?: (nodeId: string, msg: InnerMessage) => Promise<void>,
+  handshakeTimeoutMs = HANDSHAKE_TIMEOUT_MS,
 ): Promise<ConnectedPeer> {
   const url = `ws://${address}:${port}`;
   const ws = new WebSocket(url);
@@ -227,6 +230,17 @@ export async function connectToPeer(
     let peerNodeId: string | null = null;
     let peerPublicKey: Buffer | null = null;
     let handshakeDone = false;
+
+    // A peer that accepts the TCP/WS connection but never completes the handshake
+    // would leave this promise pending forever — and with it, any caller state
+    // (e.g. the reconnect loop's in-flight dial set). Reject first (the close
+    // reason does not reliably propagate to the local onclose event), then close.
+    const handshakeTimer = setTimeout(() => {
+      if (!handshakeDone) {
+        reject(new Error(`Handshake timeout after ${handshakeTimeoutMs}ms`));
+        ws.close(1000, 'Handshake timeout');
+      }
+    }, handshakeTimeoutMs);
 
     ws.onopen = () => {
       ws.send(encodeMessage(hello));
@@ -258,6 +272,7 @@ export async function connectToPeer(
           // Mark handshake done immediately so onclose won't spuriously reject
           // if the socket closes while we're doing the DB write below.
           handshakeDone = true;
+          clearTimeout(handshakeTimer);
 
           // Match any OUTGOING_PENDING at this address regardless of whether nodeId
           // was already set — a peer that reinstalled has a new nodeId and the old
@@ -312,6 +327,7 @@ export async function connectToPeer(
       if (!handshakeDone) reject(err);
     };
     ws.onclose = (event) => {
+      clearTimeout(handshakeTimer);
       if (peerNodeId) {
         const current = peers.get(peerNodeId);
         if (current && (current.ws as unknown) === ws) peers.delete(peerNodeId);

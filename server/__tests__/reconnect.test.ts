@@ -242,4 +242,43 @@ describe('reconnectOnce', () => {
     await reconnectOnce(prisma, identity, connectPeer);
     expect(connectPeer).toHaveBeenCalledTimes(2);
   });
+
+  it('logs a dial failure once, stays quiet on repeats, and logs recovery', async () => {
+    await prisma.friend.create({
+      data: {
+        name: 'Jack',
+        address: '10.0.0.10',
+        port: 7734,
+        nodeId: 'jack-id',
+        status: 'ACCEPTED',
+        acceptedAt: new Date(),
+      },
+    });
+    const errSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+    const logSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      const failing = jest.fn(() =>
+        Promise.reject(new Error('connection refused')),
+      ) as jest.Mock<ConnectPeerFn>;
+
+      await reconnectOnce(prisma, identity, failing);
+      await new Promise<void>((r) => setTimeout(r, 10));
+      await reconnectOnce(prisma, identity, failing);
+      await new Promise<void>((r) => setTimeout(r, 10));
+
+      expect(failing).toHaveBeenCalledTimes(2); // still retried...
+      expect(errSpy).toHaveBeenCalledTimes(1); // ...but only logged once
+
+      const succeeding = jest.fn(() =>
+        Promise.resolve({} as ConnectedPeer),
+      ) as jest.Mock<ConnectPeerFn>;
+      await reconnectOnce(prisma, identity, succeeding);
+      await new Promise<void>((r) => setTimeout(r, 10));
+
+      expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('connected'));
+    } finally {
+      errSpy.mockRestore();
+      logSpy.mockRestore();
+    }
+  });
 });

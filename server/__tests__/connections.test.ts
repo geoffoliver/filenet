@@ -6,6 +6,7 @@ import { unlinkSync } from 'fs';
 import {
   type ConnectedPeer,
   closeAndUnregisterPeer,
+  connectToPeer,
   getConnectedPeer,
   handleInboundFriendRequest,
   notifyFriendAccepted,
@@ -873,3 +874,35 @@ function makeFakeWsAuthenticated(
     remoteAddress: '10.0.0.1',
   };
 }
+
+// ---------------------------------------------------------------------------
+// connectToPeer — handshake timeout
+// ---------------------------------------------------------------------------
+
+describe('connectToPeer — handshake timeout', () => {
+  it('rejects when the peer accepts the socket but never completes the handshake', async () => {
+    const identity = generateIdentity();
+    // A server that upgrades the WebSocket but swallows every message — the
+    // hello is never answered, so without a timeout the promise would hang forever.
+    const server = Bun.serve({
+      port: 0,
+      fetch(req, srv) {
+        if (srv.upgrade(req)) return undefined;
+        return new Response('Not Found', { status: 404 });
+      },
+      websocket: {
+        message() {},
+      },
+    });
+    try {
+      const start = Date.now();
+      await expect(
+        connectToPeer(identity, prisma, '127.0.0.1', server.port, 7734, undefined, undefined, 300),
+      ).rejects.toThrow(/Handshake timeout/);
+      // Sanity: rejected because of the timeout, not some later mechanism
+      expect(Date.now() - start).toBeLessThan(2_000);
+    } finally {
+      server.stop(true);
+    }
+  });
+});

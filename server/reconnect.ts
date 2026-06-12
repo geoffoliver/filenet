@@ -11,9 +11,15 @@ export const RECONNECT_INTERVAL_MS = 30_000;
 // when a previous tick's connection hasn't resolved or rejected yet.
 const dialing = new Set<string>();
 
+// Addresses whose dial failure has already been logged — keeps a permanently
+// offline friend from producing an error line every tick. Cleared on success
+// so a future outage logs again.
+const loggedFailures = new Set<string>();
+
 /** @internal – only for use in tests */
 export function resetDialingForTesting(): void {
   dialing.clear();
+  loggedFailures.clear();
 }
 
 /**
@@ -53,9 +59,17 @@ export async function reconnectOnce(
     // which would otherwise skip .finally() and leave the key stuck in `dialing`.
     Promise.resolve()
       .then(() => connectPeer(friend.address, friend.port, friendRequest))
+      .then(() => {
+        if (loggedFailures.delete(key)) {
+          console.log(`[reconnect] ${key} — connected`);
+        }
+      })
       .catch((err: unknown) => {
-        const msg = err instanceof Error ? err.message : String(err);
-        console.error(`[reconnect] ${friend.address}:${friend.port} — ${msg}`);
+        if (!loggedFailures.has(key)) {
+          loggedFailures.add(key);
+          const msg = err instanceof Error ? err.message : String(err);
+          console.error(`[reconnect] ${key} — ${msg} (will keep retrying quietly)`);
+        }
       })
       .finally(() => dialing.delete(key));
   }
