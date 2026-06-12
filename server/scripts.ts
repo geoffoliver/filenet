@@ -2,6 +2,7 @@ import { pathToFileURL } from 'node:url';
 import { resolve } from 'node:path';
 import { stat } from 'node:fs/promises';
 
+import type { BunFile } from 'bun';
 import type { PrismaClient } from '@prisma/client';
 
 import type { TransferStats } from './types';

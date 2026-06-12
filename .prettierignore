@@ -7,3 +7,5 @@ prisma/generated/
 data/
 *.db
 .husky/
+*.yml
+*.yaml

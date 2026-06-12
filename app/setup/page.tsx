@@ -1,8 +1,8 @@
 'use client';
 
-import { patchSettings } from '../lib/api';
+import { type EnvConfig, getEnvConfig, getSettings, patchSettings } from '../lib/api';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { useState } from 'react';
 
 import styles from './setup.module.css';
 
@@ -16,14 +16,16 @@ type WizardState = {
   invitePassword: string;
 };
 
-const TOTAL_STEPS = 6;
-
 export default function SetupPage() {
   const router = useRouter();
   const [step, setStep] = useState(1);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [folderInput, setFolderInput] = useState('');
+  const [envConfig, setEnvConfig] = useState<EnvConfig>({
+    sharedFolders: [],
+    downloadFolder: null,
+  });
 
   const [state, setState] = useState<WizardState>({
     name: '',
@@ -34,6 +36,35 @@ export default function SetupPage() {
     autoAcceptFromFriendsOfFriends: false,
     invitePassword: '',
   });
+
+  useEffect(() => {
+    Promise.all([getSettings().catch(() => null), getEnvConfig()]).then(([settings, env]) => {
+      setEnvConfig(env);
+      if (settings) {
+        setState((s) => ({
+          ...s,
+          sharedFolders: settings.sharedFolders,
+          downloadFolder: settings.downloadFolder ?? '',
+          listenPort: String(settings.listenPort),
+        }));
+      }
+    });
+  }, []);
+
+  // Steps 3 and 4 are skipped when their values are provided via env vars —
+  // those paths are container-internal and can only be changed by editing
+  // docker-compose.yml and rebuilding, not through the UI.
+  const activeSteps = [
+    1,
+    2,
+    ...(envConfig.sharedFolders.length === 0 ? [3] : []),
+    ...(envConfig.downloadFolder === null ? [4] : []),
+    5,
+    6,
+  ];
+
+  const stepIndex = activeSteps.indexOf(step);
+  const isLastStep = stepIndex === activeSteps.length - 1;
 
   function set<K extends keyof WizardState>(key: K, value: WizardState[K]) {
     setState((s) => ({ ...s, [key]: value }));
@@ -62,19 +93,23 @@ export default function SetupPage() {
     return true;
   }
 
-  function next() {
+  function goNext() {
     if (!canAdvance()) return;
     setError('');
-    if (step < TOTAL_STEPS) {
-      setStep((s) => s + 1);
-    } else {
+    if (isLastStep) {
       finish();
+    } else {
+      setStep(activeSteps[stepIndex + 1]);
     }
   }
 
-  function back() {
+  function goBack() {
     setError('');
-    setStep((s) => s - 1);
+    setStep(activeSteps[stepIndex - 1]);
+  }
+
+  function skipStep() {
+    setStep(activeSteps[stepIndex + 1]);
   }
 
   async function finish() {
@@ -100,7 +135,10 @@ export default function SetupPage() {
     }
   }
 
-  const progress = ((step - 1) / (TOTAL_STEPS - 1)) * 100;
+  // Progress and label are based on position in activeSteps, not raw step number.
+  const progress = (stepIndex / (activeSteps.length - 1)) * 100;
+  const visibleStepNum = stepIndex + 1;
+  const visibleTotal = activeSteps.length - 1;
 
   const portPreviewNum = Number(state.listenPort);
   const portPreview =
@@ -116,9 +154,9 @@ export default function SetupPage() {
         </div>
 
         <div className={styles.body}>
-          {step < TOTAL_STEPS && (
+          {!isLastStep && (
             <p className={styles.stepLabel}>
-              Step {step} of {TOTAL_STEPS - 1}
+              Step {visibleStepNum} of {visibleTotal}
             </p>
           )}
 
@@ -156,7 +194,7 @@ export default function SetupPage() {
                   placeholder="e.g. Alice"
                   value={state.name}
                   onChange={(e) => set('name', e.target.value)}
-                  onKeyDown={(e) => e.key === 'Enter' && next()}
+                  onKeyDown={(e) => e.key === 'Enter' && goNext()}
                   autoFocus
                   maxLength={200}
                 />
@@ -260,7 +298,7 @@ export default function SetupPage() {
                   max="65535"
                   value={state.listenPort}
                   onChange={(e) => set('listenPort', e.target.value)}
-                  onKeyDown={(e) => e.key === 'Enter' && next()}
+                  onKeyDown={(e) => e.key === 'Enter' && goNext()}
                   style={{ width: 120 }}
                 />
               </div>
@@ -357,55 +395,39 @@ export default function SetupPage() {
             </>
           )}
 
-          {/* ── Done ────────────────────────────────────────────────────── */}
-          {step === TOTAL_STEPS + 1 && (
-            <>
-              <div className={styles.doneIcon}>✓</div>
-              <h1 className={styles.title}>You&rsquo;re all set!</h1>
-              <p className={styles.description}>
-                Filenet is ready to go. You can find all of these settings under the Settings
-                section at any time.
-              </p>
-            </>
-          )}
-
           {error && <p className={styles.errorMsg}>{error}</p>}
         </div>
 
         <div className={styles.footer}>
           <div>
-            {step > 1 && step <= TOTAL_STEPS && (
-              <button type="button" className="btn btn-ghost" onClick={back} disabled={saving}>
+            {stepIndex > 0 && (
+              <button type="button" className="btn btn-ghost" onClick={goBack} disabled={saving}>
                 Back
               </button>
             )}
           </div>
           <div className={styles.footerRight}>
             {step === 1 && (
-              <button type="button" className="btn btn-primary" onClick={next}>
+              <button type="button" className="btn btn-primary" onClick={goNext}>
                 Get started
               </button>
             )}
-            {step > 1 && step < TOTAL_STEPS && (
+            {stepIndex > 0 && !isLastStep && (
               <>
-                <button
-                  type="button"
-                  className="btn btn-ghost"
-                  onClick={() => setStep((s) => s + 1)}
-                >
+                <button type="button" className="btn btn-ghost" onClick={skipStep}>
                   Skip
                 </button>
                 <button
                   type="button"
                   className="btn btn-primary"
-                  onClick={next}
+                  onClick={goNext}
                   disabled={!canAdvance()}
                 >
                   Next
                 </button>
               </>
             )}
-            {step === TOTAL_STEPS && (
+            {isLastStep && step !== 1 && (
               <button type="button" className="btn btn-primary" onClick={finish} disabled={saving}>
                 {saving ? 'Saving…' : 'Finish setup'}
               </button>

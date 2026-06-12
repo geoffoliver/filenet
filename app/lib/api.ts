@@ -46,6 +46,11 @@ export type Settings = {
   listenPort: number;
 };
 
+export type EnvConfig = {
+  sharedFolders: string[];
+  downloadFolder: string | null;
+};
+
 export type SettingsPatch = {
   name?: string;
   invitePassword?: string | null;
@@ -66,6 +71,12 @@ export async function getMyInfo(): Promise<{ nodeId: string }> {
 export async function getSettings(): Promise<Settings> {
   const res = await fetch('/api/settings');
   if (!res.ok) throw new Error('Failed to load settings');
+  return res.json();
+}
+
+export async function getEnvConfig(): Promise<EnvConfig> {
+  const res = await fetch('/api/settings/env');
+  if (!res.ok) return { sharedFolders: [], downloadFolder: null };
   return res.json();
 }
 
