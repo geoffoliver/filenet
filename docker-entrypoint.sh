@@ -4,7 +4,7 @@ set -e
 # Apply any pending schema changes to the database on every startup.
 # --skip-generate is safe here because Prisma client was already generated
 # at build time.
-bunx prisma db push --skip-generate
+bunx prisma db push
 
 # Start the P2P + management server in the background.
 bun server/index.ts &
