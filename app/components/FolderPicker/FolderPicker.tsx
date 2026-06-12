@@ -82,13 +82,29 @@ export default function FolderPicker({
     return () => document.removeEventListener('keydown', onKey);
   }, [open]);
 
+  // Separator-aware: the server returns native paths, so a Windows host sends
+  // backslashes and a drive-letter root ("C:\Users") instead of a "/" prefix.
+  // Detect by the missing "/" prefix (POSIX names may legally contain "\",
+  // so scanning for backslashes would misclassify those).
+  const isWindowsPath = listing ? !listing.path.startsWith('/') : false;
+  const sep = isWindowsPath ? '\\' : '/';
   const breadcrumbs = listing
     ? listing.path
-        .split('/')
+        // On POSIX, split only on "/" so names containing "\" stay intact
+        .split(isWindowsPath ? /[\\/]/ : '/')
         .filter(Boolean)
         .reduce<{ label: string; path: string }[]>((acc, seg) => {
-          const prev = acc[acc.length - 1]?.path ?? '';
-          acc.push({ label: seg, path: `${prev}/${seg}` });
+          const prev = acc[acc.length - 1]?.path;
+          // First segment: "/seg" on POSIX, "C:\" (the drive itself) on Windows
+          const path =
+            prev === undefined
+              ? isWindowsPath
+                ? seg + sep
+                : sep + seg
+              : prev.endsWith(sep)
+                ? prev + seg
+                : prev + sep + seg;
+          acc.push({ label: seg, path });
           return acc;
         }, [])
     : [];
@@ -130,17 +146,20 @@ export default function FolderPicker({
             </div>
 
             <div className={styles.breadcrumb}>
-              <button
-                type="button"
-                className={styles.crumb}
-                onClick={() => navigate('/')}
-                title="/"
-              >
-                /
-              </button>
+              {/* On Windows the first crumb is the drive root, so no "/" button */}
+              {!isWindowsPath && (
+                <button
+                  type="button"
+                  className={styles.crumb}
+                  onClick={() => navigate('/')}
+                  title="/"
+                >
+                  /
+                </button>
+              )}
               {breadcrumbs.map((c, i) => (
                 <span key={c.path}>
-                  <span className={styles.crumbSep}>/</span>
+                  {(!isWindowsPath || i > 0) && <span className={styles.crumbSep}>{sep}</span>}
                   <button
                     type="button"
                     className={styles.crumb}
