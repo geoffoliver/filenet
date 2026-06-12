@@ -120,8 +120,13 @@ export default function SetupPage() {
     try {
       await patchSettings({
         name: state.name.trim(),
-        sharedFolders: state.sharedFolders,
-        downloadFolder: state.downloadFolder.trim() || null,
+        // Env-controlled fields must be omitted — the server rejects them with
+        // a 409 when SHARED_FOLDERS/DOWNLOAD_FOLDER are set (their wizard steps
+        // are skipped in that mode anyway)
+        ...(envConfig.sharedFolders.length === 0 && { sharedFolders: state.sharedFolders }),
+        ...(envConfig.downloadFolder === null && {
+          downloadFolder: state.downloadFolder.trim() || null,
+        }),
         listenPort: (() => {
           const p = Number(state.listenPort);
           return Number.isInteger(p) && p >= 1 && p <= 65535 ? p : 7734;

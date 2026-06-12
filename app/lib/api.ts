@@ -310,7 +310,7 @@ export type FsEntry = { name: string; path: string };
 export type FsListing = {
   path: string;
   parent: string | null;
-  home: string | null;
+  home: string; // always present — the server falls back to homedir()
   entries: FsEntry[];
 };
 
