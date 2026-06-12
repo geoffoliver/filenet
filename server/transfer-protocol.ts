@@ -114,6 +114,17 @@ export async function handleChunkRequest(
     try {
       const buf = Buffer.alloc(msg.length);
       const { bytesRead } = await fh.read(buf, 0, msg.length, msg.offset);
+      if (bytesRead !== msg.length) {
+        // File was modified or truncated after indexing — the DB size is stale.
+        sendResponse({
+          type: 'chunk-error',
+          transferId: msg.transferId,
+          sha256: msg.sha256,
+          offset: msg.offset,
+          reason: 'File modified — stale index',
+        });
+        return;
+      }
       sendResponse({
         type: 'chunk-response',
         transferId: msg.transferId,
@@ -232,6 +243,19 @@ export async function dispatchTransferMessage(
     if (!result.success) return;
     handleChunkError(result.data);
   }
+}
+
+// ---------------------------------------------------------------------------
+// Friend lifecycle helpers
+// ---------------------------------------------------------------------------
+
+export function cancelUploadFlushForFriend(friendId: string): void {
+  const timer = pendingUploadTimers.get(friendId);
+  if (timer) {
+    clearTimeout(timer);
+    pendingUploadTimers.delete(friendId);
+  }
+  pendingUploads.delete(friendId);
 }
 
 // ---------------------------------------------------------------------------

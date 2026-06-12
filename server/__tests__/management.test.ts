@@ -12,6 +12,7 @@ import { registerPeer, unregisterPeer } from '../connections';
 import { createManagementFetch } from '../management';
 import { createPrismaClient } from '../db';
 import { generateIdentity } from '../identity';
+import { resetPendingForTesting } from '../transfer-protocol';
 
 const TEST_DB_URL = 'file:./data/test-management.db';
 let prisma: PrismaClient;
@@ -57,6 +58,7 @@ beforeEach(async () => {
   await prisma.friend.deleteMany();
   await prisma.settings.deleteMany();
   await prisma.postDownloadScript.deleteMany();
+  resetPendingForTesting();
 });
 
 // ---------------------------------------------------------------------------
@@ -294,7 +296,7 @@ describe('PUT /api/friends/:id — accept', () => {
     expect(body.status).toBe('ACCEPTED');
   });
 
-  it('response includes downloads and uploads zero stats so UI does not crash on optimistic update', async () => {
+  it('response includes zero download and upload stats for a freshly created friend', async () => {
     const f = await prisma.friend.create({
       data: { name: 'Grace2', address: '10.0.0.16', port: 7734, status: 'INCOMING_PENDING' },
     });
@@ -304,6 +306,27 @@ describe('PUT /api/friends/:id — accept', () => {
     expect(body.downloads.totalSize).toBe('0');
     expect(body.uploads.count).toBe(0);
     expect(body.uploads.totalSize).toBe('0');
+  });
+
+  it('response reflects actual DB download and upload counts from the accepted record', async () => {
+    const f = await prisma.friend.create({
+      data: {
+        name: 'Stats',
+        address: '10.0.0.19',
+        port: 7734,
+        status: 'INCOMING_PENDING',
+        downloadCount: 3,
+        downloadTotalBytes: 5000n,
+        uploadCount: 7,
+        uploadTotalBytes: 12000n,
+      },
+    });
+    const res = await makeHandler()(jsonReq(`/api/friends/${f.id}`, 'PUT', { action: 'accept' }));
+    const body = await res.json();
+    expect(body.downloads.count).toBe(3);
+    expect(body.downloads.totalSize).toBe('5000');
+    expect(body.uploads.count).toBe(7);
+    expect(body.uploads.totalSize).toBe('12000');
   });
 
   it('response includes online boolean to match GET /api/friends shape', async () => {

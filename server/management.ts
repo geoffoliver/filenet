@@ -46,6 +46,7 @@ import {
   updateSettings,
 } from './config';
 import type { Identity } from './identity';
+import { cancelUploadFlushForFriend } from './transfer-protocol';
 import { dmConversationId } from './chat';
 import { initiateNetworkSearch } from './search-protocol';
 import { scanAndIndex } from './indexer';
@@ -200,17 +201,17 @@ export function createManagementFetch(deps: ManagementDeps): (req: Request) => P
               }
             }
             const {
-              downloadCount: _dc2,
-              downloadTotalBytes: _dtb2,
-              uploadCount: _uc2,
-              uploadTotalBytes: _utb2,
+              downloadCount,
+              downloadTotalBytes,
+              uploadCount,
+              uploadTotalBytes,
               ...updatedData
             } = updated;
             return Response.json({
               ...updatedData,
               online: updated.nodeId ? !!getConnectedPeer(updated.nodeId) : false,
-              downloads: { count: 0, totalSize: '0' },
-              uploads: { count: 0, totalSize: '0' },
+              downloads: { count: downloadCount, totalSize: String(downloadTotalBytes) },
+              uploads: { count: uploadCount, totalSize: String(uploadTotalBytes) },
             });
           }
 
@@ -236,6 +237,7 @@ export function createManagementFetch(deps: ManagementDeps): (req: Request) => P
         if (req.method === 'DELETE') {
           const toDelete = await prisma.friend.findUnique({ where: { id } });
           if (!toDelete) return new Response(`Friend ${id} not found`, { status: 404 });
+          cancelUploadFlushForFriend(id);
           if (toDelete.nodeId) closeAndUnregisterPeer(toDelete.nodeId);
           await prisma.friend.delete({ where: { id } });
           return new Response(null, { status: 204 });

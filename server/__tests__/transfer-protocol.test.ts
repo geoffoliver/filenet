@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { unlinkSync } from 'fs';
 
 import {
+  cancelUploadFlushForFriend,
   flushUploadStatsForTesting,
   getLastTransferIdForTesting,
   handleChunkError,
@@ -194,6 +195,86 @@ describe('handleChunkRequest', () => {
     if (received[0].type === 'chunk-error') {
       expect(received[0].reason).toMatch(/out of bounds/i);
     }
+  });
+
+  it('sends chunk-error when file is truncated after indexing (stale DB size)', async () => {
+    const content = Buffer.from('original content here');
+    const filePath = join(tmpDir, 'stale-index-test.txt');
+    await writeFile(filePath, content);
+    await indexFile(prisma, filePath);
+    const file = await prisma.sharedFile.findFirstOrThrow({ where: { path: filePath } });
+
+    await prisma.friend.create({
+      data: {
+        name: 'Peer',
+        address: '9.9.9.9',
+        port: 7734,
+        nodeId: '1'.repeat(32),
+        status: 'ACCEPTED',
+      },
+    });
+
+    // Truncate the file on disk — DB still records the original size
+    await writeFile(filePath, Buffer.alloc(0));
+
+    const received: InnerMessage[] = [];
+    await handleChunkRequest(
+      {
+        type: 'chunk-request',
+        transferId: 'tid-stale',
+        sha256: file.sha256,
+        offset: 0,
+        length: content.length,
+      },
+      '1'.repeat(32),
+      prisma,
+      (msg) => received.push(msg),
+    );
+
+    expect(received).toHaveLength(1);
+    expect(received[0].type).toBe('chunk-error');
+    if (received[0].type === 'chunk-error') {
+      expect(received[0].reason).toMatch(/stale/i);
+    }
+  });
+
+  it('cancelUploadFlushForFriend drops pending accumulator so no DB write occurs', async () => {
+    const content = Buffer.from('cancel test content');
+    const filePath = join(tmpDir, 'cancel-flush-test.txt');
+    await writeFile(filePath, content);
+    await indexFile(prisma, filePath);
+    const file = await prisma.sharedFile.findFirstOrThrow({ where: { path: filePath } });
+
+    const friend = await prisma.friend.create({
+      data: {
+        name: 'Peer',
+        address: '2.2.2.2',
+        port: 7734,
+        nodeId: '2'.repeat(32),
+        status: 'ACCEPTED',
+      },
+    });
+
+    await handleChunkRequest(
+      {
+        type: 'chunk-request',
+        transferId: 'tid-cancel',
+        sha256: file.sha256,
+        offset: 0,
+        length: content.length,
+      },
+      '2'.repeat(32),
+      prisma,
+      () => {},
+    );
+
+    cancelUploadFlushForFriend(friend.id);
+
+    // flushUploadStatsForTesting finds nothing pending and returns without writing
+    await flushUploadStatsForTesting(friend.id, prisma);
+    const updated = await prisma.friend.findUniqueOrThrow({ where: { id: friend.id } });
+    expect(updated.uploadTotalBytes).toBe(0n);
+    expect(updated.uploadCount).toBe(0);
   });
 
   it('increments uploadTotalBytes by the number of bytes served', async () => {
