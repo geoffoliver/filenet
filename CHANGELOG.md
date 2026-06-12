@@ -10,6 +10,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **Docker support** — `Dockerfile`, `docker-compose.yml`, and `docker-entrypoint.sh` for self-hosting; runs `prisma db push` on startup, persists the database in a named volume, and exposes the UI (`:3000`) and P2P (`:7734`) ports
+  - `SHARED_FOLDERS` (colon-separated paths) and `DOWNLOAD_FOLDER` env vars seed the database on first launch so the setup wizard and Settings page always reflect the container's volume mounts
+  - Setup wizard skips the shared-folders and download-folder steps entirely when those env vars are set — those paths are container-internal and can only be changed by editing `docker-compose.yml` and rebuilding
+  - Settings → Files section displays env-controlled paths as read-only with an explanatory note; add/remove controls are hidden when the value is provided via environment variable
 
 - **Friends-of-friends auto-accept** — when `autoAcceptFromFriendsOfFriends` is enabled in settings, incoming friend requests from unknown nodes are automatically accepted if any accepted connected peer vouches for them
   - New `friend-vouch-request` / `friend-vouch-response` wire protocol; queries are sent to all currently connected accepted peers with a 3-second timeout
