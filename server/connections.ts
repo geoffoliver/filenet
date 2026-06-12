@@ -230,6 +230,7 @@ export async function connectToPeer(
     let peerNodeId: string | null = null;
     let peerPublicKey: Buffer | null = null;
     let handshakeDone = false;
+    let timedOut = false;
 
     // A peer that accepts the TCP/WS connection but never completes the handshake
     // would leave this promise pending forever — and with it, any caller state
@@ -237,6 +238,7 @@ export async function connectToPeer(
     // reason does not reliably propagate to the local onclose event), then close.
     const handshakeTimer = setTimeout(() => {
       if (!handshakeDone) {
+        timedOut = true;
         reject(new Error(`Handshake timeout after ${handshakeTimeoutMs}ms`));
         ws.close(1000, 'Handshake timeout');
       }
@@ -247,6 +249,10 @@ export async function connectToPeer(
     };
 
     ws.onmessage = async (event) => {
+      // A hello-ack can already be queued when the timeout fires; processing it
+      // would register the peer and send a friend-request on a connection the
+      // caller has already seen rejected. Drop everything after the timeout.
+      if (timedOut) return;
       try {
         const wire = decodeMessage(
           typeof event.data === 'string' ? event.data : Buffer.from(event.data),

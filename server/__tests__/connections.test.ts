@@ -905,4 +905,45 @@ describe('connectToPeer — handshake timeout', () => {
       server.stop(true);
     }
   });
+
+  it('never registers the peer when the hello-ack arrives after the timeout', async () => {
+    const initiator = generateIdentity();
+    const responder = generateIdentity();
+    // A server that answers the hello with a VALID hello-ack — but only after
+    // the client's timeout has already fired. Whether the late ack is stopped
+    // by the socket close or the timedOut guard, the invariant is the same:
+    // a timed-out dial must never produce a registered peer.
+    const server = Bun.serve({
+      port: 0,
+      fetch(req, srv) {
+        if (srv.upgrade(req)) return undefined;
+        return new Response('Not Found', { status: 404 });
+      },
+      websocket: {
+        message(ws, raw) {
+          const wire = decodeMessage(typeof raw === 'string' ? raw : Buffer.from(raw));
+          if (wire.type === 'hello') {
+            const { ack } = createHelloAck_forTest(responder, wire);
+            setTimeout(() => {
+              try {
+                ws.send(encodeMessage(ack));
+              } catch {
+                // socket already closed by the client's timeout — expected
+              }
+            }, 500);
+          }
+        },
+      },
+    });
+    try {
+      await expect(
+        connectToPeer(initiator, prisma, '127.0.0.1', server.port, 7734, undefined, undefined, 200),
+      ).rejects.toThrow(/Handshake timeout/);
+      // Wait past the delayed ack, then confirm no peer was registered
+      await new Promise<void>((r) => setTimeout(r, 500));
+      expect(getConnectedPeer(responder.nodeId)).toBeUndefined();
+    } finally {
+      server.stop(true);
+    }
+  });
 });
