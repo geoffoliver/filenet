@@ -10,24 +10,47 @@ import styles from './FolderPicker.module.css';
 type Props = {
   value: string;
   onChange: (path: string) => void;
+  /** Called when the user confirms a selection via the modal (in addition to onChange). */
+  onSelect?: (path: string) => void;
+  onKeyDown?: (e: React.KeyboardEvent<HTMLInputElement>) => void;
+  inputRef?: React.RefObject<HTMLInputElement | null>;
   placeholder?: string;
   id?: string;
 };
 
-export default function FolderPicker({ value, onChange, placeholder, id }: Props) {
+export default function FolderPicker({
+  value,
+  onChange,
+  onSelect,
+  onKeyDown,
+  inputRef,
+  placeholder,
+  id,
+}: Props) {
   const [open, setOpen] = useState(false);
   const [listing, setListing] = useState<FsListing | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const dialogRef = useRef<HTMLDivElement>(null);
+  const abortRef = useRef<AbortController | null>(null);
 
   function navigate(path?: string) {
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
+
     setLoading(true);
     setError('');
-    listDirectory(path)
-      .then(setListing)
-      .catch((err: Error) => setError(err.message))
-      .finally(() => setLoading(false));
+    listDirectory(path, controller.signal)
+      .then((result) => {
+        if (!controller.signal.aborted) setListing(result);
+      })
+      .catch((err: Error) => {
+        if (!controller.signal.aborted && err.name !== 'AbortError') setError(err.message);
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setLoading(false);
+      });
   }
 
   function openPicker() {
@@ -38,15 +61,17 @@ export default function FolderPicker({ value, onChange, placeholder, id }: Props
   function select() {
     if (!listing) return;
     onChange(listing.path);
+    onSelect?.(listing.path);
     setOpen(false);
   }
 
   function close() {
+    abortRef.current?.abort();
     setOpen(false);
     setError('');
+    setListing(null);
   }
 
-  // Close on Escape, trap focus inside dialog
   useEffect(() => {
     if (!open) return;
     function onKey(e: KeyboardEvent) {
@@ -72,11 +97,13 @@ export default function FolderPicker({ value, onChange, placeholder, id }: Props
     <>
       <div className={styles.inputRow}>
         <input
+          ref={inputRef}
           id={id}
           className="input"
           type="text"
           value={value}
           onChange={(e) => onChange(e.target.value)}
+          onKeyDown={onKeyDown}
           placeholder={placeholder ?? '/path/to/folder'}
         />
         <button type="button" className="btn btn-ghost" onClick={openPicker}>
@@ -150,7 +177,6 @@ export default function FolderPicker({ value, onChange, placeholder, id }: Props
                       key={e.path}
                       type="button"
                       className={styles.entry}
-                      onDoubleClick={() => navigate(e.path)}
                       onClick={() => navigate(e.path)}
                     >
                       <span className={styles.icon}>📁</span>
@@ -161,7 +187,7 @@ export default function FolderPicker({ value, onChange, placeholder, id }: Props
               )}
             </div>
 
-            {listing && (
+            {listing && !loading && (
               <div className={styles.footer}>
                 <span className={styles.currentPath}>{listing.path}</span>
                 <div className={styles.footerActions}>

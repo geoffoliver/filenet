@@ -72,8 +72,8 @@ export default function SetupPage() {
     setState((s) => ({ ...s, [key]: value }));
   }
 
-  function addFolder() {
-    const path = folderInput.trim();
+  function addFolder(pathOverride?: string) {
+    const path = (pathOverride ?? folderInput).trim();
     if (!path || state.sharedFolders.includes(path)) return;
     set('sharedFolders', [...state.sharedFolders, path]);
     setFolderInput('');
@@ -235,9 +235,11 @@ export default function SetupPage() {
                 <FolderPicker
                   value={folderInput}
                   onChange={setFolderInput}
+                  onSelect={(p) => addFolder(p)}
+                  onKeyDown={(e) => e.key === 'Enter' && addFolder()}
                   placeholder="/home/alice/Music"
                 />
-                <button type="button" className="btn btn-ghost" onClick={addFolder}>
+                <button type="button" className="btn btn-ghost" onClick={() => addFolder()}>
                   Add
                 </button>
               </div>

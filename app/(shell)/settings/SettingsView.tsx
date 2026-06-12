@@ -194,12 +194,14 @@ function FilesSection({ initial, envConfig }: { initial: Settings; envConfig: En
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState('');
+  const folderInputRef = useRef<HTMLInputElement>(null);
 
-  function addFolder() {
-    const trimmed = newFolder.trim();
+  function addFolder(pathOverride?: string) {
+    const trimmed = (pathOverride ?? newFolder).trim();
     if (!trimmed || folders.includes(trimmed)) return;
     setFolders((prev) => [...prev, trimmed]);
     setNewFolder('');
+    folderInputRef.current?.focus();
   }
 
   function removeFolder(path: string) {
@@ -273,9 +275,17 @@ function FilesSection({ initial, envConfig }: { initial: Settings; envConfig: En
                 <FolderPicker
                   value={newFolder}
                   onChange={setNewFolder}
+                  onSelect={(p) => addFolder(p)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      addFolder();
+                    }
+                  }}
+                  inputRef={folderInputRef}
                   placeholder="/path/to/folder"
                 />
-                <button type="button" className="btn btn-ghost" onClick={addFolder}>
+                <button type="button" className="btn btn-ghost" onClick={() => addFolder()}>
                   Add
                 </button>
               </div>

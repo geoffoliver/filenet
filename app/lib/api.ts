@@ -314,9 +314,9 @@ export type FsListing = {
   entries: FsEntry[];
 };
 
-export async function listDirectory(path?: string): Promise<FsListing> {
+export async function listDirectory(path?: string, signal?: AbortSignal): Promise<FsListing> {
   const qs = path ? `?path=${encodeURIComponent(path)}` : '';
-  const res = await fetch(`/api/fs${qs}`);
+  const res = await fetch(`/api/fs${qs}`, { signal });
   if (!res.ok) throw new Error('Cannot read directory');
   return res.json();
 }

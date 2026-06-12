@@ -249,7 +249,8 @@ export function createManagementFetch(deps: ManagementDeps): (req: Request) => P
       }
 
       if (url.pathname === '/api/fs' && req.method === 'GET') {
-        const target = url.searchParams.get('path') || homedir();
+        const home = homedir();
+        const target = url.searchParams.get('path') || home;
         try {
           const info = await stat(target);
           if (!info.isDirectory()) return new Response('Not a directory', { status: 400 });
@@ -259,7 +260,7 @@ export function createManagementFetch(deps: ManagementDeps): (req: Request) => P
             .map((e) => ({ name: e.name, path: join(target, e.name) }))
             .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
           const parent = target === '/' ? null : dirname(target);
-          return Response.json({ path: target, parent, home: homedir(), entries });
+          return Response.json({ path: target, parent, home, entries });
         } catch {
           return new Response('Cannot read directory', { status: 400 });
         }
