@@ -1,8 +1,8 @@
 'use client';
 
-import { patchSettings } from '../lib/api';
+import { type EnvConfig, getEnvConfig, getSettings, patchSettings } from '../lib/api';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { useState } from 'react';
 
 import styles from './setup.module.css';
 
@@ -24,6 +24,10 @@ export default function SetupPage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [folderInput, setFolderInput] = useState('');
+  const [envConfig, setEnvConfig] = useState<EnvConfig>({
+    sharedFolders: [],
+    downloadFolder: null,
+  });
 
   const [state, setState] = useState<WizardState>({
     name: '',
@@ -34,6 +38,20 @@ export default function SetupPage() {
     autoAcceptFromFriendsOfFriends: false,
     invitePassword: '',
   });
+
+  useEffect(() => {
+    Promise.all([getSettings().catch(() => null), getEnvConfig()]).then(([settings, env]) => {
+      setEnvConfig(env);
+      if (settings) {
+        setState((s) => ({
+          ...s,
+          sharedFolders: settings.sharedFolders,
+          downloadFolder: settings.downloadFolder ?? '',
+          listenPort: String(settings.listenPort),
+        }));
+      }
+    });
+  }, []);
 
   function set<K extends keyof WizardState>(key: K, value: WizardState[K]) {
     setState((s) => ({ ...s, [key]: value }));
@@ -173,6 +191,13 @@ export default function SetupPage() {
                 add or remove folders at any time from Settings.
               </p>
 
+              {envConfig.sharedFolders.length > 0 && (
+                <p className="field-hint" style={{ marginBottom: 12 }}>
+                  Pre-configured via <code>SHARED_FOLDERS</code> environment variable. You can
+                  adjust this in Settings.
+                </p>
+              )}
+
               {state.sharedFolders.length > 0 && (
                 <ul className={styles.folderList}>
                   {state.sharedFolders.map((f) => (
@@ -191,22 +216,26 @@ export default function SetupPage() {
                 </ul>
               )}
 
-              <div className={styles.addFolderRow}>
-                <input
-                  className="input"
-                  type="text"
-                  placeholder="/home/alice/Music"
-                  value={folderInput}
-                  onChange={(e) => setFolderInput(e.target.value)}
-                  onKeyDown={(e) => e.key === 'Enter' && addFolder()}
-                />
-                <button type="button" className="btn btn-ghost" onClick={addFolder}>
-                  Add
-                </button>
-              </div>
-              <p className="field-hint" style={{ marginTop: 8 }}>
-                You can skip this and add folders later.
-              </p>
+              {envConfig.sharedFolders.length === 0 && (
+                <>
+                  <div className={styles.addFolderRow}>
+                    <input
+                      className="input"
+                      type="text"
+                      placeholder="/home/alice/Music"
+                      value={folderInput}
+                      onChange={(e) => setFolderInput(e.target.value)}
+                      onKeyDown={(e) => e.key === 'Enter' && addFolder()}
+                    />
+                    <button type="button" className="btn btn-ghost" onClick={addFolder}>
+                      Add
+                    </button>
+                  </div>
+                  <p className="field-hint" style={{ marginTop: 8 }}>
+                    You can skip this and add folders later.
+                  </p>
+                </>
+              )}
             </>
           )}
 
@@ -218,6 +247,12 @@ export default function SetupPage() {
                 Files you download from friends will be saved here. Leave blank to choose a location
                 per download.
               </p>
+              {envConfig.downloadFolder && (
+                <p className="field-hint" style={{ marginBottom: 12 }}>
+                  Pre-configured via <code>DOWNLOAD_FOLDER</code> environment variable. You can
+                  adjust this in Settings.
+                </p>
+              )}
               <div className="field">
                 <label className="label" htmlFor="dlFolder">
                   Download folder
@@ -229,6 +264,7 @@ export default function SetupPage() {
                   placeholder="/home/alice/Downloads"
                   value={state.downloadFolder}
                   onChange={(e) => set('downloadFolder', e.target.value)}
+                  readOnly={!!envConfig.downloadFolder}
                 />
                 <span className="field-hint">Optional — you can set this later in Settings.</span>
               </div>

@@ -7,11 +7,14 @@ services:
       - "7734:7734"   # P2P WebSocket — forward this port on your router
     volumes:
       - filenet-data:/app/data          # SQLite database + keys (persistent)
-      - /path/to/your/files:/shared     # Replace with your actual shared folder path
+      - /path/to/your/files:/shared     # Replace with the folder(s) you want to share
+      - /path/to/downloads:/downloads   # Replace with where you want downloads saved
     environment:
       PORT: "3000"
       MGMT_PORT: "7735"
       DATABASE_URL: "file:./data/filenet.db"
+      SHARED_FOLDERS: "/shared"
+      DOWNLOAD_FOLDER: "/downloads"
       # P2P_PORT: "7734"   # Uncomment to override the port stored in settings
 
 volumes:

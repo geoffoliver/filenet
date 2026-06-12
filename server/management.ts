@@ -40,6 +40,7 @@ import {
   startDownload,
 } from './download-manager';
 import {
+  getEnvConfig,
   getOrCreateSettings,
   parseSharedFolders,
   sanitizeSettings,
@@ -242,6 +243,10 @@ export function createManagementFetch(deps: ManagementDeps): (req: Request) => P
           await prisma.friend.delete({ where: { id } });
           return new Response(null, { status: 204 });
         }
+      }
+
+      if (url.pathname === '/api/settings/env' && req.method === 'GET') {
+        return Response.json(getEnvConfig());
       }
 
       if (url.pathname === '/api/settings') {
