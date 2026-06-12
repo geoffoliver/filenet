@@ -171,3 +171,4 @@
 - [x] CHANGELOG (start and maintain)
 - [x] README: installation, configuration, running, scripting API docs
 - [x] Create necessary files to spin the app up in a Docker container (full `next start`, not a static export or anything dumb)
+- [ ] Database migrations

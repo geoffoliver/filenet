@@ -13,6 +13,7 @@ import { dispatchTransferMessage } from './transfer-protocol';
 import { getOrCreateIdentity } from './identity';
 import { pauseAllActiveDownloads } from './download-manager';
 import { startPeriodicRescan } from './indexer';
+import { startReconnectLoop } from './reconnect';
 
 const prisma = createPrismaClient();
 const MGMT_PORT = parseInt(process.env.MGMT_PORT ?? '7735', 10);
@@ -50,8 +51,22 @@ const stopRescan = startPeriodicRescan(
   },
 );
 
+const connectPeerFn = (
+  address: string,
+  port: number,
+  friendRequest?: { name: string; password?: string },
+) =>
+  connectToPeer(identity, prisma, address, port, PORT, friendRequest, async (nodeId, msg) => {
+    await dispatchSearchMessage(msg, nodeId, prisma, identity);
+    await dispatchTransferMessage(msg, nodeId, prisma);
+    await dispatchVouchMessage(msg, nodeId, prisma);
+  });
+
+const stopReconnect = startReconnectLoop(prisma, connectPeerFn);
+
 const shutdown = () => {
   stopRescan();
+  stopReconnect();
   pauseAllActiveDownloads(prisma)
     .catch(() => {})
     .finally(() => process.exit(0));
@@ -63,16 +78,7 @@ process.on('SIGINT', shutdown);
 Bun.serve({
   port: MGMT_PORT,
   hostname: '127.0.0.1',
-  fetch: createManagementFetch({
-    identity,
-    prisma,
-    connectPeer: (address, port, friendRequest) =>
-      connectToPeer(identity, prisma, address, port, PORT, friendRequest, async (nodeId, msg) => {
-        await dispatchSearchMessage(msg, nodeId, prisma, identity);
-        await dispatchTransferMessage(msg, nodeId, prisma);
-        await dispatchVouchMessage(msg, nodeId, prisma);
-      }),
-  }),
+  fetch: createManagementFetch({ identity, prisma, connectPeer: connectPeerFn }),
 });
 
 // P2P server — public, WebSocket + pubkey endpoint only
