@@ -16,7 +16,7 @@ services:
       DATABASE_URL: "file:./data/filenet.db"
       # To share multiple folders, mount each one above and list them colon-separated:
       # SHARED_FOLDERS: "/shared:/shared2"
-      SHARED_FOLDERS: "/shared"
+      SHARED_FOLDERS: "/shared:/downloads"
       DOWNLOAD_FOLDER: "/downloads"
       # P2P_PORT: "7734"   # Uncomment to override the port stored in settings
 
