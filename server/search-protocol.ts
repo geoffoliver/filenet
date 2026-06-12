@@ -166,6 +166,9 @@ export function handleSearchResult(
       }
     }
     if (added > 0) pending.resultsPerSender.set(sender, senderCount + added);
+    console.log(
+      `[search] result id=${msg.searchId.slice(0, 8)} from=${msg.fromNodeId.slice(0, 8)} +${added} item(s) (total ${pending.results.length}/${MAX_NETWORK_RESULTS})`,
+    );
     // Resolve early once we've hit the result cap instead of waiting for timeout
     if (pending.results.length >= MAX_NETWORK_RESULTS) {
       clearTimeout(pending.timer);
@@ -201,6 +204,11 @@ export async function handleSearchRequest(
   if (msg.ttl <= 0) return; // TTL exhausted — drop without processing
   if (!markSeen(msg.searchId)) return; // already seen — drop (cycle prevention)
 
+  const sid = msg.searchId.slice(0, 8);
+  console.log(
+    `[search] request id=${sid} q="${msg.query}" ttl=${msg.ttl} from=${fromPeer.peerNodeId.slice(0, 8)}`,
+  );
+
   // Only create a return route when we need to relay results back — if ttl=1 we process locally
   // and never forward, so no downstream results can ever arrive and a route would be dead weight.
   if (msg.ttl > 1) {
@@ -219,6 +227,7 @@ export async function handleSearchRequest(
   }
 
   // Execute local search — skip the count query since the protocol only uses files
+  const localStart = Date.now();
   const { files } = await searchFiles(prisma, {
     query: msg.query,
     type: coerceFileType(msg.fileType),
@@ -226,6 +235,9 @@ export async function handleSearchRequest(
     offset: 0,
     skipTotal: true,
   });
+  console.log(
+    `[search] request id=${sid} — local DB took ${Date.now() - localStart}ms, found ${files.length} file(s)`,
+  );
 
   if (files.length > 0) {
     const resultMsg: SearchResultMessage = {
@@ -253,15 +265,20 @@ export async function handleSearchRequest(
   // Forward with TTL decremented; ttl=1 means "process locally, do not forward further"
   if (msg.ttl > 1) {
     const forward: SearchRequestMessage = { ...msg, ttl: msg.ttl - 1 };
+    let forwardCount = 0;
     for (const peer of allPeers) {
       if (peer.peerNodeId !== fromPeer.peerNodeId) {
         try {
           sendFn(peer, forward);
+          forwardCount++;
         } catch {
           // peer disconnected — skip
         }
       }
     }
+    console.log(
+      `[search] request id=${sid} — forwarded to ${forwardCount} peer(s) with ttl=${msg.ttl - 1}`,
+    );
   }
 }
 
@@ -288,7 +305,13 @@ export async function initiateNetworkSearch(
     createdAt: routeCreatedAt,
   });
 
+  const sid = searchId.slice(0, 8);
+  console.log(
+    `[search] initiate id=${sid} q="${params.query}" fileType=${params.fileType} peers=${peers.length} timeout=${timeoutMs}ms`,
+  );
+
   return new Promise((resolve) => {
+    const startedAt = Date.now();
     const pending: PendingSearch = {
       results: [],
       seenKeys: new Set(),
@@ -296,6 +319,9 @@ export async function initiateNetworkSearch(
       timer: setTimeout(() => {
         pendingSearches.delete(searchId);
         searchRoutes.delete(searchId);
+        console.log(
+          `[search] initiate id=${sid} — timed out after ${Date.now() - startedAt}ms, ${pending.results.length} result(s)`,
+        );
         resolve(pending.results);
       }, timeoutMs),
       resolve,
