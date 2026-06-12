@@ -281,4 +281,39 @@ describe('reconnectOnce', () => {
       logSpy.mockRestore();
     }
   });
+
+  it('prunes failure-log suppression for removed friends so a re-added friend logs again', async () => {
+    const kate = {
+      name: 'Kate',
+      address: '10.0.0.11',
+      port: 7734,
+      nodeId: 'kate-id',
+      status: 'ACCEPTED' as const,
+      acceptedAt: new Date(),
+    };
+    await prisma.friend.create({ data: kate });
+    const errSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const failing = jest.fn(() =>
+        Promise.reject(new Error('connection refused')),
+      ) as jest.Mock<ConnectPeerFn>;
+
+      await reconnectOnce(prisma, identity, failing);
+      await new Promise<void>((r) => setTimeout(r, 10));
+      expect(errSpy).toHaveBeenCalledTimes(1);
+
+      // Friend removed — the next pass must prune the suppression entry
+      await prisma.friend.deleteMany({ where: { nodeId: 'kate-id' } });
+      await reconnectOnce(prisma, identity, failing);
+      await new Promise<void>((r) => setTimeout(r, 10));
+
+      // Re-added at the same address — the failure must log again, not stay suppressed
+      await prisma.friend.create({ data: kate });
+      await reconnectOnce(prisma, identity, failing);
+      await new Promise<void>((r) => setTimeout(r, 10));
+      expect(errSpy).toHaveBeenCalledTimes(2);
+    } finally {
+      errSpy.mockRestore();
+    }
+  });
 });

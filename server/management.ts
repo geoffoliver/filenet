@@ -138,11 +138,12 @@ export function createManagementFetch(deps: ManagementDeps): (req: Request) => P
           const { name, address, port, password } = result.data;
           const friend = await addOutgoingFriend(prisma, { name, address, port });
           const settings = await getOrCreateSettings(prisma);
-          connectPeer(address, port, { name: settings.name || identity.nodeId, password }).catch(
-            (err: unknown) => {
-              console.error(`Failed to connect to ${address}:${port}:`, err);
-            },
-          );
+          connectPeer(address, port, {
+            name: settings.name.trim() || identity.nodeId,
+            password,
+          }).catch((err: unknown) => {
+            console.error(`Failed to connect to ${address}:${port}:`, err);
+          });
           const {
             downloadCount: _dc,
             downloadTotalBytes: _dtb,

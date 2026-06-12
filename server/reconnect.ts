@@ -38,6 +38,14 @@ export async function reconnectOnce(
     }),
   ]);
 
+  // Prune loggedFailures entries for friends that were removed or changed
+  // address/port — without this the set grows forever on long-running nodes,
+  // since the success path (the only other removal) can never fire for them.
+  const currentKeys = new Set(friends.map((f) => `${f.address}:${f.port}`));
+  for (const key of loggedFailures) {
+    if (!currentKeys.has(key)) loggedFailures.delete(key);
+  }
+
   for (const friend of friends) {
     // Already connected — nothing to do
     if (friend.nodeId && getConnectedPeer(friend.nodeId)) continue;
