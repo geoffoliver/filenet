@@ -1,4 +1,4 @@
-import { dirname, join } from 'node:path';
+import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { readdir, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { randomUUID } from 'node:crypto';
@@ -250,7 +250,15 @@ export function createManagementFetch(deps: ManagementDeps): (req: Request) => P
 
       if (url.pathname === '/api/fs' && req.method === 'GET') {
         const home = homedir();
-        const target = url.searchParams.get('path') || home;
+        const rawPath = url.searchParams.get('path');
+        // Reject relative input outright — resolving it against the server's cwd
+        // would silently browse the app directory, and the resulting path could
+        // get persisted into settings. resolve() then normalizes trailing
+        // slashes and ".."/"." segments so the response is always canonical.
+        if (rawPath && !isAbsolute(rawPath)) {
+          return new Response('Path must be absolute', { status: 400 });
+        }
+        const target = resolve(rawPath || home);
         try {
           const info = await stat(target);
           if (!info.isDirectory()) return new Response('Not a directory', { status: 400 });

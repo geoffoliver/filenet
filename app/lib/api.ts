@@ -317,7 +317,10 @@ export type FsListing = {
 export async function listDirectory(path?: string, signal?: AbortSignal): Promise<FsListing> {
   const qs = path ? `?path=${encodeURIComponent(path)}` : '';
   const res = await fetch(`/api/fs${qs}`, { signal });
-  if (!res.ok) throw new Error('Cannot read directory');
+  if (!res.ok) {
+    const msg = await res.text();
+    throw new Error(msg || 'Cannot read directory');
+  }
   return res.json();
 }
 

@@ -1,11 +1,11 @@
 import { randomUUID } from 'node:crypto';
 
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'bun:test';
+import { homedir, tmpdir } from 'node:os';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import type { PrismaClient } from '@prisma/client';
 import { execSync } from 'child_process';
 import { join } from 'node:path';
-import { tmpdir } from 'node:os';
 import { unlinkSync } from 'fs';
 
 import { registerPeer, unregisterPeer } from '../connections';
@@ -1787,7 +1787,28 @@ describe('GET /api/fs', () => {
   it('includes home directory in response', async () => {
     const res = await makeHandler()(req(`/api/fs?path=${encodeURIComponent(fsRoot)}`));
     const body = await res.json();
-    expect(typeof body.home === 'string' || body.home === null).toBe(true);
+    expect(body.home).toBe(homedir());
+  });
+
+  it('defaults to the home directory when no path is given', async () => {
+    const res = await makeHandler()(req('/api/fs'));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.path).toBe(homedir());
+  });
+
+  it('rejects relative paths', async () => {
+    const res = await makeHandler()(req(`/api/fs?path=${encodeURIComponent('../somewhere')}`));
+    expect(res.status).toBe(400);
+    expect(await res.text()).toBe('Path must be absolute');
+  });
+
+  it('normalizes trailing slashes and dot segments', async () => {
+    const messy = `${fsRoot}/Music/../Music/`;
+    const res = await makeHandler()(req(`/api/fs?path=${encodeURIComponent(messy)}`));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.path).toBe(join(fsRoot, 'Music'));
   });
 
   it('returns entries sorted alphabetically', async () => {
