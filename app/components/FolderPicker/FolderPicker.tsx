@@ -18,6 +18,49 @@ type Props = {
   id?: string;
 };
 
+type Crumb = { label: string; path: string };
+
+// Builds clickable breadcrumb segments from a native server path. Handles
+// POSIX ("/home/x"), Windows drive ("C:\Users"), and UNC ("\\server\share\x")
+// forms. POSIX is detected by the "/" prefix — POSIX names may legally contain
+// backslashes, so scanning for "\" would misclassify those.
+function buildBreadcrumbs(fullPath: string): { crumbs: Crumb[]; sep: string; isPosix: boolean } {
+  const isPosix = fullPath.startsWith('/');
+  const sep = isPosix ? '/' : '\\';
+  // On POSIX, split only on "/" so names containing "\" stay intact
+  const segments = fullPath.split(isPosix ? '/' : /[\\/]/).filter(Boolean);
+  const crumbs: Crumb[] = [];
+
+  if (!isPosix && /^[\\/]{2}/.test(fullPath)) {
+    // UNC path: "\\server\share" is the smallest navigable root — a bare
+    // "\\server" is not listable, so the pair forms a single root crumb.
+    const [server, share, ...rest] = segments;
+    if (server) {
+      const root = share ? `\\\\${server}\\${share}` : `\\\\${server}`;
+      crumbs.push({ label: root, path: root });
+      for (const seg of rest) {
+        crumbs.push({ label: seg, path: crumbs[crumbs.length - 1].path + sep + seg });
+      }
+    }
+    return { crumbs, sep, isPosix };
+  }
+
+  for (const seg of segments) {
+    const prev = crumbs[crumbs.length - 1]?.path;
+    // First segment: "/seg" on POSIX, "C:\" (the drive itself) on Windows
+    const path =
+      prev === undefined
+        ? isPosix
+          ? sep + seg
+          : seg + sep
+        : prev.endsWith(sep)
+          ? prev + seg
+          : prev + sep + seg;
+    crumbs.push({ label: seg, path });
+  }
+  return { crumbs, sep, isPosix };
+}
+
 export default function FolderPicker({
   value,
   onChange,
@@ -82,32 +125,15 @@ export default function FolderPicker({
     return () => document.removeEventListener('keydown', onKey);
   }, [open]);
 
-  // Separator-aware: the server returns native paths, so a Windows host sends
-  // backslashes and a drive-letter root ("C:\Users") instead of a "/" prefix.
-  // Detect by the missing "/" prefix (POSIX names may legally contain "\",
-  // so scanning for backslashes would misclassify those).
-  const isWindowsPath = listing ? !listing.path.startsWith('/') : false;
-  const sep = isWindowsPath ? '\\' : '/';
-  const breadcrumbs = listing
-    ? listing.path
-        // On POSIX, split only on "/" so names containing "\" stay intact
-        .split(isWindowsPath ? /[\\/]/ : '/')
-        .filter(Boolean)
-        .reduce<{ label: string; path: string }[]>((acc, seg) => {
-          const prev = acc[acc.length - 1]?.path;
-          // First segment: "/seg" on POSIX, "C:\" (the drive itself) on Windows
-          const path =
-            prev === undefined
-              ? isWindowsPath
-                ? seg + sep
-                : sep + seg
-              : prev.endsWith(sep)
-                ? prev + seg
-                : prev + sep + seg;
-          acc.push({ label: seg, path });
-          return acc;
-        }, [])
-    : [];
+  // Abort any in-flight directory request on unmount so its .then can't fire
+  // against an unmounted component.
+  useEffect(() => () => abortRef.current?.abort(), []);
+
+  const {
+    crumbs: breadcrumbs,
+    sep,
+    isPosix,
+  } = listing ? buildBreadcrumbs(listing.path) : { crumbs: [], sep: '/', isPosix: true };
 
   return (
     <>
@@ -146,8 +172,8 @@ export default function FolderPicker({
             </div>
 
             <div className={styles.breadcrumb}>
-              {/* On Windows the first crumb is the drive root, so no "/" button */}
-              {!isWindowsPath && (
+              {/* On Windows the first crumb is the drive/UNC root, so no "/" button */}
+              {isPosix && (
                 <button
                   type="button"
                   className={styles.crumb}
@@ -159,7 +185,7 @@ export default function FolderPicker({
               )}
               {breadcrumbs.map((c, i) => (
                 <span key={c.path}>
-                  {(!isWindowsPath || i > 0) && <span className={styles.crumbSep}>{sep}</span>}
+                  {(isPosix || i > 0) && <span className={styles.crumbSep}>{sep}</span>}
                   <button
                     type="button"
                     className={styles.crumb}

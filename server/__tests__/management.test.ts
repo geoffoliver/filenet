@@ -557,9 +557,16 @@ describe('PATCH /api/settings', () => {
   });
 
   describe('env-controlled fields', () => {
+    // Capture before any test mutates, restore after each — unconditionally
+    // deleting would clobber a developer's real environment.
+    const savedSharedFolders = process.env.SHARED_FOLDERS;
+    const savedDownloadFolder = process.env.DOWNLOAD_FOLDER;
+
     afterEach(() => {
-      delete process.env.SHARED_FOLDERS;
-      delete process.env.DOWNLOAD_FOLDER;
+      if (savedSharedFolders === undefined) delete process.env.SHARED_FOLDERS;
+      else process.env.SHARED_FOLDERS = savedSharedFolders;
+      if (savedDownloadFolder === undefined) delete process.env.DOWNLOAD_FOLDER;
+      else process.env.DOWNLOAD_FOLDER = savedDownloadFolder;
     });
 
     it('rejects sharedFolders when SHARED_FOLDERS env var is set', async () => {
