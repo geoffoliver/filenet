@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Docker support** — `Dockerfile`, `docker-compose.yml`, and `docker-entrypoint.sh` for self-hosting; runs `prisma db push` on startup, persists the database in a named volume, and exposes the UI (`:3000`) and P2P (`:7734`) ports
+
 - **Friends-of-friends auto-accept** — when `autoAcceptFromFriendsOfFriends` is enabled in settings, incoming friend requests from unknown nodes are automatically accepted if any accepted connected peer vouches for them
   - New `friend-vouch-request` / `friend-vouch-response` wire protocol; queries are sent to all currently connected accepted peers with a 3-second timeout
   - Only responses from peers that were explicitly queried are accepted, preventing unsolicited vouch injections

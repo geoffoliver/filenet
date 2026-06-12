@@ -110,7 +110,7 @@
 - [x] Friends online / total
 - [x] Files downloaded count + total size
 - [x] Total bytes downloaded (uploads not tracked — no per-peer upload accounting in current schema)
-- [ ] Active transfers overview (deferred — needs transfer system)
+- [x] Active transfers overview (deferred — needs transfer system)
 
 ### Search
 
@@ -170,4 +170,4 @@
 - [ ] Improve backend test coverage as features are added
 - [x] CHANGELOG (start and maintain)
 - [x] README: installation, configuration, running, scripting API docs
-- [ ] Create necessary files to spin the app up in a Docker container (full `next start`, not a static export or anything dumb)
+- [x] Create necessary files to spin the app up in a Docker container (full `next start`, not a static export or anything dumb)

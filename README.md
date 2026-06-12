@@ -26,6 +26,17 @@ bunx prisma db push
 
 ## Running
 
+### Docker (recommended for self-hosting)
+
+```bash
+# Edit docker-compose.yml to set your shared folder path, then:
+docker compose up -d
+```
+
+Open [http://localhost:3000](http://localhost:3000). The database is persisted in the `filenet-data` Docker volume. Forward port `7734` on your router to allow peers to connect.
+
+### Manual
+
 ```bash
 bun run dev
 ```
