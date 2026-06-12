@@ -1,3 +1,6 @@
+import { dirname, join } from 'node:path';
+import { readdir, stat } from 'node:fs/promises';
+import { homedir } from 'node:os';
 import { randomUUID } from 'node:crypto';
 
 // Truncate a string to at most maxBytes UTF-8 bytes without splitting a
@@ -242,6 +245,23 @@ export function createManagementFetch(deps: ManagementDeps): (req: Request) => P
           if (toDelete.nodeId) closeAndUnregisterPeer(toDelete.nodeId);
           await prisma.friend.delete({ where: { id } });
           return new Response(null, { status: 204 });
+        }
+      }
+
+      if (url.pathname === '/api/fs' && req.method === 'GET') {
+        const target = url.searchParams.get('path') || homedir();
+        try {
+          const info = await stat(target);
+          if (!info.isDirectory()) return new Response('Not a directory', { status: 400 });
+          const raw = await readdir(target, { withFileTypes: true });
+          const entries = raw
+            .filter((e) => e.isDirectory() && !e.name.startsWith('.'))
+            .map((e) => ({ name: e.name, path: join(target, e.name) }))
+            .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
+          const parent = target === '/' ? null : dirname(target);
+          return Response.json({ path: target, parent, home: homedir(), entries });
+        } catch {
+          return new Response('Cannot read directory', { status: 400 });
         }
       }
 

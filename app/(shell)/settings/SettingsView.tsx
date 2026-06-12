@@ -2,6 +2,8 @@
 
 import { useEffect, useRef, useState } from 'react';
 
+import FolderPicker from '../../components/FolderPicker/FolderPicker';
+
 import type { EnvConfig, PostDownloadScript, Settings } from '../../lib/api';
 import {
   addScript,
@@ -192,25 +194,16 @@ function FilesSection({ initial, envConfig }: { initial: Settings; envConfig: En
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState('');
-  const newFolderRef = useRef<HTMLInputElement>(null);
 
   function addFolder() {
     const trimmed = newFolder.trim();
     if (!trimmed || folders.includes(trimmed)) return;
     setFolders((prev) => [...prev, trimmed]);
     setNewFolder('');
-    newFolderRef.current?.focus();
   }
 
   function removeFolder(path: string) {
     setFolders((prev) => prev.filter((f) => f !== path));
-  }
-
-  function handleNewFolderKey(e: React.KeyboardEvent) {
-    if (e.key === 'Enter') {
-      e.preventDefault();
-      addFolder();
-    }
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -277,13 +270,9 @@ function FilesSection({ initial, envConfig }: { initial: Settings; envConfig: En
                 ))}
               </ul>
               <div className={styles.addFolderRow}>
-                <input
-                  ref={newFolderRef}
-                  className="input"
-                  type="text"
+                <FolderPicker
                   value={newFolder}
-                  onChange={(e) => setNewFolder(e.target.value)}
-                  onKeyDown={handleNewFolderKey}
+                  onChange={setNewFolder}
                   placeholder="/path/to/folder"
                 />
                 <button type="button" className="btn btn-ghost" onClick={addFolder}>
@@ -305,11 +294,9 @@ function FilesSection({ initial, envConfig }: { initial: Settings; envConfig: En
               </p>
             </>
           ) : (
-            <input
-              className="input"
-              type="text"
+            <FolderPicker
               value={downloadFolder}
-              onChange={(e) => setDownloadFolder(e.target.value)}
+              onChange={setDownloadFolder}
               placeholder="/path/to/downloads"
             />
           )}

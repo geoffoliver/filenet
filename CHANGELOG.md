@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Folder browser** — setup wizard and Settings now include a "Browse…" button next to folder path inputs; clicking it opens a modal that lets users navigate their filesystem visually and select a folder, so they never have to type a path manually; the text input remains editable for power users
+  - New `GET /api/fs?path=...` endpoint lists subdirectories at a given path (hidden dirs excluded), returns `{ path, parent, home, entries }`, defaults to the user's home directory
+  - `FolderPicker` component (modal with breadcrumb nav + scrollable dir list) used in shared-folder add row and download-folder input in both the setup wizard and Settings
+
 - **Docker support** — `Dockerfile`, `docker-compose.yml`, and `docker-entrypoint.sh` for self-hosting; runs `prisma db push` on startup, persists the database in a named volume, and exposes the UI (`:3000`) and P2P (`:7734`) ports
   - `SHARED_FOLDERS` (colon-separated paths) and `DOWNLOAD_FOLDER` env vars seed the database on first launch so the setup wizard and Settings page always reflect the container's volume mounts
   - Setup wizard skips the shared-folders and download-folder steps entirely when those env vars are set — those paths are container-internal and can only be changed by editing `docker-compose.yml` and rebuilding

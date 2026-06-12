@@ -4,6 +4,8 @@ import { type EnvConfig, getEnvConfig, getSettings, patchSettings } from '../lib
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 
+import FolderPicker from '../components/FolderPicker/FolderPicker';
+
 import styles from './setup.module.css';
 
 type WizardState = {
@@ -230,13 +232,10 @@ export default function SetupPage() {
               )}
 
               <div className={styles.addFolderRow}>
-                <input
-                  className="input"
-                  type="text"
-                  placeholder="/home/alice/Music"
+                <FolderPicker
                   value={folderInput}
-                  onChange={(e) => setFolderInput(e.target.value)}
-                  onKeyDown={(e) => e.key === 'Enter' && addFolder()}
+                  onChange={setFolderInput}
+                  placeholder="/home/alice/Music"
                 />
                 <button type="button" className="btn btn-ghost" onClick={addFolder}>
                   Add
@@ -260,13 +259,11 @@ export default function SetupPage() {
                 <label className="label" htmlFor="dlFolder">
                   Download folder
                 </label>
-                <input
+                <FolderPicker
                   id="dlFolder"
-                  className="input"
-                  type="text"
-                  placeholder="/home/alice/Downloads"
                   value={state.downloadFolder}
-                  onChange={(e) => set('downloadFolder', e.target.value)}
+                  onChange={(p) => set('downloadFolder', p)}
+                  placeholder="/home/alice/Downloads"
                 />
                 <span className="field-hint">Optional — you can set this later in Settings.</span>
               </div>

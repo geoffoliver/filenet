@@ -102,7 +102,7 @@
 - [x] Step 5: Auto-accept preferences + invite password
 - [x] Progress bar + back/skip/next/finish navigation
 - [x] Step: listening port + port-forwarding instructions
-- [ ] Maybe: native folder-browser component (API-backed directory listing) to replace manual path input in shared folders + download folder steps
+- [x] Native folder-browser component (API-backed directory listing) replaces manual path input in shared folders + download folder steps (setup wizard + Settings)
 
 ### Home (Dashboard)
 

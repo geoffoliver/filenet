@@ -1738,6 +1738,80 @@ describe('scripts API', () => {
 });
 
 // ---------------------------------------------------------------------------
+// GET /api/fs
+// ---------------------------------------------------------------------------
+
+describe('GET /api/fs', () => {
+  let fsRoot: string;
+
+  beforeAll(async () => {
+    fsRoot = await mkdtemp(join(tmpdir(), 'filenet-fs-test-'));
+    await mkdir(join(fsRoot, 'Music'));
+    await mkdir(join(fsRoot, 'Movies'));
+    await mkdir(join(fsRoot, '.hidden'));
+    await writeFile(join(fsRoot, 'readme.txt'), 'hello');
+  });
+
+  afterAll(async () => {
+    await rm(fsRoot, { recursive: true, force: true });
+  });
+
+  it('lists subdirectories at a given path', async () => {
+    const res = await makeHandler()(req(`/api/fs?path=${encodeURIComponent(fsRoot)}`));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.path).toBe(fsRoot);
+    const names = body.entries.map((e: { name: string }) => e.name);
+    expect(names).toContain('Movies');
+    expect(names).toContain('Music');
+  });
+
+  it('excludes hidden directories and files', async () => {
+    const res = await makeHandler()(req(`/api/fs?path=${encodeURIComponent(fsRoot)}`));
+    const body = await res.json();
+    const names = body.entries.map((e: { name: string }) => e.name);
+    expect(names).not.toContain('.hidden');
+    expect(names).not.toContain('readme.txt');
+  });
+
+  it('includes parent path (null at filesystem root)', async () => {
+    const res = await makeHandler()(req(`/api/fs?path=${encodeURIComponent(fsRoot)}`));
+    const body = await res.json();
+    expect(body.parent).not.toBeNull();
+
+    const rootRes = await makeHandler()(req('/api/fs?path=/'));
+    const rootBody = await rootRes.json();
+    expect(rootBody.parent).toBeNull();
+  });
+
+  it('includes home directory in response', async () => {
+    const res = await makeHandler()(req(`/api/fs?path=${encodeURIComponent(fsRoot)}`));
+    const body = await res.json();
+    expect(typeof body.home === 'string' || body.home === null).toBe(true);
+  });
+
+  it('returns entries sorted alphabetically', async () => {
+    const res = await makeHandler()(req(`/api/fs?path=${encodeURIComponent(fsRoot)}`));
+    const body = await res.json();
+    const names = body.entries.map((e: { name: string }) => e.name);
+    expect(names).toEqual(
+      [...names].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' })),
+    );
+  });
+
+  it('returns 400 for a non-existent path', async () => {
+    const res = await makeHandler()(req('/api/fs?path=/this/does/not/exist/xyz123'));
+    expect(res.status).toBe(400);
+  });
+
+  it('returns 400 for a path that is a file, not a directory', async () => {
+    const filePath = join(fsRoot, 'readme.txt');
+    const res = await makeHandler()(req(`/api/fs?path=${encodeURIComponent(filePath)}`));
+    expect(res.status).toBe(400);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // 404 fallback
 // ---------------------------------------------------------------------------
 
