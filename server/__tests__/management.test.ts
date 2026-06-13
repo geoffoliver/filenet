@@ -1,11 +1,11 @@
 import { randomUUID } from 'node:crypto';
 
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'bun:test';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'bun:test';
+import { homedir, tmpdir } from 'node:os';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import type { PrismaClient } from '@prisma/client';
 import { execSync } from 'child_process';
 import { join } from 'node:path';
-import { tmpdir } from 'node:os';
 import { unlinkSync } from 'fs';
 
 import { registerPeer, unregisterPeer } from '../connections';
@@ -554,6 +554,55 @@ describe('PATCH /api/settings', () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.downloadFolder).toBeNull();
+  });
+
+  describe('env-controlled fields', () => {
+    // Capture before any test mutates, restore after each — unconditionally
+    // deleting would clobber a developer's real environment.
+    const savedSharedFolders = process.env.SHARED_FOLDERS;
+    const savedDownloadFolder = process.env.DOWNLOAD_FOLDER;
+
+    afterEach(() => {
+      if (savedSharedFolders === undefined) delete process.env.SHARED_FOLDERS;
+      else process.env.SHARED_FOLDERS = savedSharedFolders;
+      if (savedDownloadFolder === undefined) delete process.env.DOWNLOAD_FOLDER;
+      else process.env.DOWNLOAD_FOLDER = savedDownloadFolder;
+    });
+
+    it('rejects sharedFolders when SHARED_FOLDERS env var is set', async () => {
+      process.env.SHARED_FOLDERS = '/shared';
+      const res = await makeHandler()(
+        jsonReq('/api/settings', 'PATCH', { sharedFolders: ['/evil'] }),
+      );
+      expect(res.status).toBe(409);
+      expect(await res.text()).toContain('SHARED_FOLDERS');
+    });
+
+    it('rejects downloadFolder when DOWNLOAD_FOLDER env var is set', async () => {
+      process.env.DOWNLOAD_FOLDER = '/downloads';
+      const res = await makeHandler()(
+        jsonReq('/api/settings', 'PATCH', { downloadFolder: '/evil' }),
+      );
+      expect(res.status).toBe(409);
+      expect(await res.text()).toContain('DOWNLOAD_FOLDER');
+    });
+
+    it('still allows unrelated fields when env vars are set', async () => {
+      process.env.SHARED_FOLDERS = '/shared';
+      process.env.DOWNLOAD_FOLDER = '/downloads';
+      const res = await makeHandler()(jsonReq('/api/settings', 'PATCH', { name: 'EnvLocked' }));
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.name).toBe('EnvLocked');
+    });
+
+    it('allows sharedFolders patch when only DOWNLOAD_FOLDER is set', async () => {
+      process.env.DOWNLOAD_FOLDER = '/downloads';
+      const res = await makeHandler()(
+        jsonReq('/api/settings', 'PATCH', { sharedFolders: ['/music'] }),
+      );
+      expect(res.status).toBe(200);
+    });
   });
 
   it('updates listenPort and returns it', async () => {
@@ -1734,6 +1783,101 @@ describe('scripts API', () => {
       const res = await makeHandler()(req('/api/scripts/a/b', { method: 'DELETE' }));
       expect(res.status).toBe(400);
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// GET /api/fs
+// ---------------------------------------------------------------------------
+
+describe('GET /api/fs', () => {
+  let fsRoot: string;
+
+  beforeAll(async () => {
+    fsRoot = await mkdtemp(join(tmpdir(), 'filenet-fs-test-'));
+    await mkdir(join(fsRoot, 'Music'));
+    await mkdir(join(fsRoot, 'Movies'));
+    await mkdir(join(fsRoot, '.hidden'));
+    await writeFile(join(fsRoot, 'readme.txt'), 'hello');
+  });
+
+  afterAll(async () => {
+    await rm(fsRoot, { recursive: true, force: true });
+  });
+
+  it('lists subdirectories at a given path', async () => {
+    const res = await makeHandler()(req(`/api/fs?path=${encodeURIComponent(fsRoot)}`));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.path).toBe(fsRoot);
+    const names = body.entries.map((e: { name: string }) => e.name);
+    expect(names).toContain('Movies');
+    expect(names).toContain('Music');
+  });
+
+  it('excludes hidden directories and files', async () => {
+    const res = await makeHandler()(req(`/api/fs?path=${encodeURIComponent(fsRoot)}`));
+    const body = await res.json();
+    const names = body.entries.map((e: { name: string }) => e.name);
+    expect(names).not.toContain('.hidden');
+    expect(names).not.toContain('readme.txt');
+  });
+
+  it('includes parent path (null at filesystem root)', async () => {
+    const res = await makeHandler()(req(`/api/fs?path=${encodeURIComponent(fsRoot)}`));
+    const body = await res.json();
+    expect(body.parent).not.toBeNull();
+
+    const rootRes = await makeHandler()(req('/api/fs?path=/'));
+    const rootBody = await rootRes.json();
+    expect(rootBody.parent).toBeNull();
+  });
+
+  it('includes home directory in response', async () => {
+    const res = await makeHandler()(req(`/api/fs?path=${encodeURIComponent(fsRoot)}`));
+    const body = await res.json();
+    expect(body.home).toBe(homedir());
+  });
+
+  it('defaults to the home directory when no path is given', async () => {
+    const res = await makeHandler()(req('/api/fs'));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.path).toBe(homedir());
+  });
+
+  it('rejects relative paths', async () => {
+    const res = await makeHandler()(req(`/api/fs?path=${encodeURIComponent('../somewhere')}`));
+    expect(res.status).toBe(400);
+    expect(await res.text()).toBe('Path must be absolute');
+  });
+
+  it('normalizes trailing slashes and dot segments', async () => {
+    const messy = `${fsRoot}/Music/../Music/`;
+    const res = await makeHandler()(req(`/api/fs?path=${encodeURIComponent(messy)}`));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.path).toBe(join(fsRoot, 'Music'));
+  });
+
+  it('returns entries sorted alphabetically', async () => {
+    const res = await makeHandler()(req(`/api/fs?path=${encodeURIComponent(fsRoot)}`));
+    const body = await res.json();
+    const names = body.entries.map((e: { name: string }) => e.name);
+    expect(names).toEqual(
+      [...names].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' })),
+    );
+  });
+
+  it('returns 400 for a non-existent path', async () => {
+    const res = await makeHandler()(req('/api/fs?path=/this/does/not/exist/xyz123'));
+    expect(res.status).toBe(400);
+  });
+
+  it('returns 400 for a path that is a file, not a directory', async () => {
+    const filePath = join(fsRoot, 'readme.txt');
+    const res = await makeHandler()(req(`/api/fs?path=${encodeURIComponent(filePath)}`));
+    expect(res.status).toBe(400);
   });
 });
 

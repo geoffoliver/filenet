@@ -1,3 +1,6 @@
+import { dirname, isAbsolute, join, resolve } from 'node:path';
+import { readdir, stat } from 'node:fs/promises';
+import { homedir } from 'node:os';
 import { randomUUID } from 'node:crypto';
 
 // Truncate a string to at most maxBytes UTF-8 bytes without splitting a
@@ -245,6 +248,34 @@ export function createManagementFetch(deps: ManagementDeps): (req: Request) => P
         }
       }
 
+      if (url.pathname === '/api/fs' && req.method === 'GET') {
+        const home = homedir();
+        const rawPath = url.searchParams.get('path');
+        // Reject relative input outright — resolving it against the server's cwd
+        // would silently browse the app directory, and the resulting path could
+        // get persisted into settings. resolve() then normalizes trailing
+        // slashes and ".."/"." segments so the response is always canonical.
+        if (rawPath && !isAbsolute(rawPath)) {
+          return new Response('Path must be absolute', { status: 400 });
+        }
+        const target = resolve(rawPath || home);
+        try {
+          const info = await stat(target);
+          if (!info.isDirectory()) return new Response('Not a directory', { status: 400 });
+          const raw = await readdir(target, { withFileTypes: true });
+          const entries = raw
+            .filter((e) => e.isDirectory() && !e.name.startsWith('.'))
+            .map((e) => ({ name: e.name, path: join(target, e.name) }))
+            .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
+          // dirname(root) === root on every platform ('/' on POSIX, 'C:\\' on Windows)
+          const parentDir = dirname(target);
+          const parent = parentDir === target ? null : parentDir;
+          return Response.json({ path: target, parent, home, entries });
+        } catch {
+          return new Response('Cannot read directory', { status: 400 });
+        }
+      }
+
       if (url.pathname === '/api/settings/env' && req.method === 'GET') {
         return Response.json(getEnvConfig());
       }
@@ -259,6 +290,22 @@ export function createManagementFetch(deps: ManagementDeps): (req: Request) => P
           const result = PatchSettingsBodySchema.safeParse(await req.json());
           if (!result.success) {
             return new Response(result.error.issues[0].message, { status: 400 });
+          }
+          // Env-controlled paths must be enforced here, not just hidden in the UI —
+          // otherwise a direct API call could permanently diverge the DB from the
+          // env config (env values only seed the DB on first launch).
+          const env = getEnvConfig();
+          if (result.data.sharedFolders !== undefined && env.sharedFolders.length > 0) {
+            return new Response(
+              'sharedFolders is controlled by the SHARED_FOLDERS environment variable',
+              { status: 409 },
+            );
+          }
+          if (result.data.downloadFolder !== undefined && env.downloadFolder !== null) {
+            return new Response(
+              'downloadFolder is controlled by the DOWNLOAD_FOLDER environment variable',
+              { status: 409 },
+            );
           }
           const updated = await updateSettings(prisma, result.data);
           return Response.json(sanitizeSettings(updated));

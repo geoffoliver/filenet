@@ -4,6 +4,8 @@ import { type EnvConfig, getEnvConfig, getSettings, patchSettings } from '../lib
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 
+import FolderPicker from '../components/FolderPicker/FolderPicker';
+
 import styles from './setup.module.css';
 
 type WizardState = {
@@ -70,8 +72,8 @@ export default function SetupPage() {
     setState((s) => ({ ...s, [key]: value }));
   }
 
-  function addFolder() {
-    const path = folderInput.trim();
+  function addFolder(pathOverride?: string) {
+    const path = (pathOverride ?? folderInput).trim();
     if (!path || state.sharedFolders.includes(path)) return;
     set('sharedFolders', [...state.sharedFolders, path]);
     setFolderInput('');
@@ -118,8 +120,13 @@ export default function SetupPage() {
     try {
       await patchSettings({
         name: state.name.trim(),
-        sharedFolders: state.sharedFolders,
-        downloadFolder: state.downloadFolder.trim() || null,
+        // Env-controlled fields must be omitted — the server rejects them with
+        // a 409 when SHARED_FOLDERS/DOWNLOAD_FOLDER are set (their wizard steps
+        // are skipped in that mode anyway)
+        ...(envConfig.sharedFolders.length === 0 && { sharedFolders: state.sharedFolders }),
+        ...(envConfig.downloadFolder === null && {
+          downloadFolder: state.downloadFolder.trim() || null,
+        }),
         listenPort: (() => {
           const p = Number(state.listenPort);
           return Number.isInteger(p) && p >= 1 && p <= 65535 ? p : 7734;
@@ -230,15 +237,14 @@ export default function SetupPage() {
               )}
 
               <div className={styles.addFolderRow}>
-                <input
-                  className="input"
-                  type="text"
-                  placeholder="/home/alice/Music"
+                <FolderPicker
                   value={folderInput}
-                  onChange={(e) => setFolderInput(e.target.value)}
+                  onChange={setFolderInput}
+                  onSelect={(p) => addFolder(p)}
                   onKeyDown={(e) => e.key === 'Enter' && addFolder()}
+                  placeholder="/home/alice/Music"
                 />
-                <button type="button" className="btn btn-ghost" onClick={addFolder}>
+                <button type="button" className="btn btn-ghost" onClick={() => addFolder()}>
                   Add
                 </button>
               </div>
@@ -260,13 +266,11 @@ export default function SetupPage() {
                 <label className="label" htmlFor="dlFolder">
                   Download folder
                 </label>
-                <input
+                <FolderPicker
                   id="dlFolder"
-                  className="input"
-                  type="text"
-                  placeholder="/home/alice/Downloads"
                   value={state.downloadFolder}
-                  onChange={(e) => set('downloadFolder', e.target.value)}
+                  onChange={(p) => set('downloadFolder', p)}
+                  placeholder="/home/alice/Downloads"
                 />
                 <span className="field-hint">Optional — you can set this later in Settings.</span>
               </div>

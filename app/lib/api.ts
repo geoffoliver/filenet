@@ -305,6 +305,25 @@ export async function removeScript(id: string): Promise<void> {
   }
 }
 
+export type FsEntry = { name: string; path: string };
+
+export type FsListing = {
+  path: string;
+  parent: string | null;
+  home: string; // always present — the server falls back to homedir()
+  entries: FsEntry[];
+};
+
+export async function listDirectory(path?: string, signal?: AbortSignal): Promise<FsListing> {
+  const qs = path ? `?path=${encodeURIComponent(path)}` : '';
+  const res = await fetch(`/api/fs${qs}`, { signal });
+  if (!res.ok) {
+    const msg = await res.text();
+    throw new Error(msg || 'Cannot read directory');
+  }
+  return res.json();
+}
+
 export async function triggerRescan(): Promise<{ indexed: number; removed: number }> {
   const res = await fetch('/api/rescan', { method: 'POST' });
   if (!res.ok) throw new Error('Rescan failed');

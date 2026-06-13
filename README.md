@@ -72,6 +72,11 @@ Filenet requires a manually forwarded port — there is no automatic NAT travers
 3. Forward **TCP port 7734** (or your configured port) to your machine's local IP address
 4. Share your **public IP address** (or a domain name pointing to it) with friends
 
+> ⚠️ **Forward only the P2P port.** Never expose the web UI (port 3000) to the
+> internet — it has no authentication and grants full control of the
+> application, including browsing the host filesystem, to anyone who can reach
+> it. The UI is meant for your home network only.
+
 ## Post-download scripts
 
 Scripts run in order after a download completes. Each script is a TypeScript/JavaScript file with a default export:
