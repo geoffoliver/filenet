@@ -947,6 +947,60 @@ describe('connectToPeer — handshake timeout', () => {
     }
   });
 
+  it('closes socket and discards subsequent messages when onmessage throws before handshake completes', async () => {
+    const initiator = generateIdentity();
+    const responder = generateIdentity();
+    // Server sends a garbled frame immediately, then a valid hello-ack 200 ms later.
+    // The bad frame causes JSON.parse to throw inside onmessage's catch block; the
+    // fix must close the socket and set the drop-messages guard so the delayed
+    // hello-ack never registers a peer.
+    const server = Bun.serve({
+      port: 0,
+      fetch(req, srv) {
+        if (srv.upgrade(req)) return undefined;
+        return new Response('Not Found', { status: 404 });
+      },
+      websocket: {
+        message(ws, raw) {
+          const wire = decodeMessage(typeof raw === 'string' ? raw : Buffer.from(raw));
+          if (wire.type === 'hello') {
+            ws.send('not-valid-json'); // triggers SyntaxError in client onmessage
+            const { ack } = createHelloAck_forTest(responder, wire);
+            setTimeout(() => {
+              try {
+                ws.send(encodeMessage(ack));
+              } catch {
+                // socket already closed by client — expected
+              }
+            }, 200);
+          }
+        },
+      },
+    });
+    try {
+      const start = Date.now();
+      await expect(
+        connectToPeer(
+          initiator,
+          prisma,
+          '127.0.0.1',
+          server.port,
+          7734,
+          undefined,
+          undefined,
+          5_000,
+        ),
+      ).rejects.toThrow();
+      // Rejected by the bad frame, not after the 5 s timeout
+      expect(Date.now() - start).toBeLessThan(2_000);
+      // Wait past the delayed hello-ack — no peer must be registered
+      await new Promise<void>((r) => setTimeout(r, 300));
+      expect(getConnectedPeer(responder.nodeId)).toBeUndefined();
+    } finally {
+      server.stop(true);
+    }
+  });
+
   it('rejects via onerror (not the timeout) when the server refuses the WebSocket upgrade', async () => {
     const identity = generateIdentity();
     // A server that returns a plain HTTP response — the WebSocket client fires

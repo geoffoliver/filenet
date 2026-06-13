@@ -323,7 +323,14 @@ export async function connectToPeer(
       } catch (err) {
         if (peerNodeId) closeAndUnregisterPeer(peerNodeId);
         reject(err); // no-op if already resolved; handles pre- and mid-setup failures
-        if (handshakeDone) {
+        if (!handshakeDone) {
+          // Reuse timedOut as a general "drop further messages" flag so that a
+          // hello-ack queued behind the bad frame doesn't register a peer or
+          // send a friend-request after the caller has already seen a failure.
+          clearTimeout(handshakeTimer);
+          timedOut = true;
+          ws.close(1000, 'Pre-handshake error');
+        } else {
           console.error(`Error from peer ${address}:${port}:`, err);
         }
       }
