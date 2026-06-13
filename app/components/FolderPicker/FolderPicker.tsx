@@ -89,7 +89,12 @@ export default function FolderPicker({
         if (!controller.signal.aborted) setListing(result);
       })
       .catch((err: Error) => {
-        if (!controller.signal.aborted && err.name !== 'AbortError') setError(err.message);
+        if (!controller.signal.aborted && err.name !== 'AbortError') {
+          setError(err.message);
+          // Clear the previous listing — keeping it would let the footer offer
+          // "Select this folder" for a stale path while the error is displayed.
+          setListing(null);
+        }
       })
       .finally(() => {
         if (!controller.signal.aborted) setLoading(false);
@@ -117,12 +122,49 @@ export default function FolderPicker({
 
   useEffect(() => {
     if (!open) return;
+    // Capture the triggering control (the Browse button) so focus can be
+    // restored when the dialog closes — otherwise keyboard users lose focus.
+    const trigger = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+
     function onKey(e: KeyboardEvent) {
-      if (e.key === 'Escape') close();
+      if (e.key === 'Escape') {
+        close();
+        return;
+      }
+      // Trap Tab inside the dialog so keyboard users can't reach the page behind it
+      if (e.key === 'Tab') {
+        const dialog = dialogRef.current;
+        if (!dialog) return;
+        const focusables = Array.from(
+          dialog.querySelectorAll<HTMLElement>(
+            'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
+          ),
+        ).filter((el) => !el.hasAttribute('disabled'));
+        if (focusables.length === 0) {
+          e.preventDefault();
+          return;
+        }
+        const first = focusables[0];
+        const last = focusables[focusables.length - 1];
+        const active = document.activeElement;
+        if (e.shiftKey) {
+          if (active === first || !dialog.contains(active)) {
+            e.preventDefault();
+            last.focus();
+          }
+        } else if (active === last || !dialog.contains(active)) {
+          e.preventDefault();
+          first.focus();
+        }
+      }
     }
+
     document.addEventListener('keydown', onKey);
     dialogRef.current?.focus();
-    return () => document.removeEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('keydown', onKey);
+      trigger?.focus();
+    };
   }, [open]);
 
   // Abort any in-flight directory request on unmount so its .then can't fire
@@ -232,7 +274,7 @@ export default function FolderPicker({
               )}
             </div>
 
-            {listing && !loading && (
+            {listing && !loading && !error && (
               <div className={styles.footer}>
                 <span className={styles.currentPath}>{listing.path}</span>
                 <div className={styles.footerActions}>
