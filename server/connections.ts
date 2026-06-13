@@ -293,7 +293,7 @@ export async function connectToPeer(
               type: 'friend-request',
               name: friendRequest.name,
               port: localPort,
-              ...(friendRequest.password ? { password: friendRequest.password } : {}),
+              ...(friendRequest.password !== undefined ? { password: friendRequest.password } : {}),
             };
             sendToPeer(peer, msg);
           }

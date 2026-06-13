@@ -72,6 +72,43 @@ describe('AddFriendBodySchema', () => {
     const r = AddFriendBodySchema.safeParse({ name: 'Bob', address: '10.0.0.1', password: 123 });
     expect(r.success).toBe(false);
   });
+
+  it('trims and accepts a valid password', () => {
+    const r = AddFriendBodySchema.safeParse({
+      name: 'Bob',
+      address: '10.0.0.1',
+      password: '  secret  ',
+    });
+    expect(r.success).toBe(true);
+    if (r.success) expect(r.data.password).toBe('secret');
+  });
+
+  it('rejects a whitespace-only password', () => {
+    const r = AddFriendBodySchema.safeParse({
+      name: 'Bob',
+      address: '10.0.0.1',
+      password: '   ',
+    });
+    expect(r.success).toBe(false);
+  });
+
+  it('rejects a password longer than 200 characters', () => {
+    const r = AddFriendBodySchema.safeParse({
+      name: 'Bob',
+      address: '10.0.0.1',
+      password: 'x'.repeat(201),
+    });
+    expect(r.success).toBe(false);
+  });
+
+  it('accepts a password at exactly 200 characters', () => {
+    const r = AddFriendBodySchema.safeParse({
+      name: 'Bob',
+      address: '10.0.0.1',
+      password: 'x'.repeat(200),
+    });
+    expect(r.success).toBe(true);
+  });
 });
 
 describe('FriendActionBodySchema', () => {
