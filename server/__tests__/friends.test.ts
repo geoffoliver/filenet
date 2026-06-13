@@ -245,6 +245,18 @@ describe('acceptFriendRequest', () => {
     expect(accepted.status).toBe('ACCEPTED');
   });
 
+  it('clears remotePassword on acceptance so the invite credential is not kept past its useful life', async () => {
+    const friend = await addOutgoingFriend(prisma, {
+      name: 'Faye',
+      address: '10.0.0.8',
+      port: 7734,
+      password: 'secret',
+    });
+    expect(friend.remotePassword).toBe('secret');
+    const accepted = await acceptFriendRequest(prisma, friend.id);
+    expect(accepted.remotePassword).toBeNull();
+  });
+
   it('does not overwrite acceptedAt when called again on an already-accepted friend', async () => {
     const peerIdentity = generateIdentity();
     const incoming = await handleIncomingFriendRequest(prisma, {

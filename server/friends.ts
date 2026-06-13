@@ -106,6 +106,7 @@ export async function acceptFriendRequest(
     data: {
       status: 'ACCEPTED',
       acceptedAt: friend.acceptedAt ?? new Date(),
+      remotePassword: null,
     },
   });
 }
