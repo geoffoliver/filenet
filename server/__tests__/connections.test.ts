@@ -946,4 +946,37 @@ describe('connectToPeer — handshake timeout', () => {
       server.stop(true);
     }
   });
+
+  it('rejects via onerror (not the timeout) when the server refuses the WebSocket upgrade', async () => {
+    const identity = generateIdentity();
+    // A server that returns a plain HTTP response — the WebSocket client fires
+    // onerror when it receives a non-101 status, which must clear the handshake
+    // timer and reject the promise without waiting for the full timeout.
+    const server = Bun.serve({
+      port: 0,
+      fetch() {
+        return new Response('Not a WebSocket', { status: 400 });
+      },
+      websocket: { message() {} },
+    });
+    try {
+      const start = Date.now();
+      // Use a 5 s timeout; if the fix is broken the test would hang for 5 s
+      await expect(
+        connectToPeer(
+          identity,
+          prisma,
+          '127.0.0.1',
+          server.port,
+          7734,
+          undefined,
+          undefined,
+          5_000,
+        ),
+      ).rejects.toThrow();
+      expect(Date.now() - start).toBeLessThan(2_000);
+    } finally {
+      server.stop(true);
+    }
+  });
 });

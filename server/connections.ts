@@ -330,6 +330,7 @@ export async function connectToPeer(
     };
 
     ws.onerror = (err) => {
+      clearTimeout(handshakeTimer);
       if (!handshakeDone) reject(err);
     };
     ws.onclose = (event) => {
