@@ -223,6 +223,17 @@ describe('GET /api/friends', () => {
 // ---------------------------------------------------------------------------
 
 describe('POST /api/friends', () => {
+  it('returns 201 even when connectPeer throws synchronously', async () => {
+    const syncThrow = (): Promise<never> => {
+      throw new Error('sync throw'); // no Promise returned — throws before returning
+    };
+    const handler = createManagementFetch({ identity, prisma, connectPeer: syncThrow });
+    const res = await handler(
+      jsonReq('/api/friends', 'POST', { name: 'SyncFail', address: '10.0.0.99', port: 7734 }),
+    );
+    expect(res.status).toBe(201);
+  });
+
   it('creates a friend and returns 201', async () => {
     const res = await makeHandler()(
       jsonReq('/api/friends', 'POST', { name: 'Bob', address: '10.0.0.2', port: 7734 }),

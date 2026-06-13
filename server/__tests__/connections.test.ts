@@ -1001,6 +1001,36 @@ describe('connectToPeer — handshake timeout', () => {
     }
   });
 
+  it('wraps IPv6 addresses in brackets so the WebSocket URL is valid', async () => {
+    const identity = generateIdentity();
+    // A real Bun WebSocket server on the IPv6 loopback interface. Without bracket
+    // wrapping, new WebSocket('ws://::1:<port>') throws a URL syntax error before
+    // any network I/O; with it, the connection proceeds and we get the usual
+    // handshake-timeout rejection instead.
+    let server: ReturnType<typeof Bun.serve>;
+    try {
+      server = Bun.serve({
+        hostname: '::1',
+        port: 0,
+        fetch(req, srv) {
+          if (srv.upgrade(req)) return undefined;
+          return new Response('Not Found', { status: 404 });
+        },
+        websocket: { message() {} },
+      });
+    } catch {
+      // IPv6 loopback not available in this environment — skip
+      return;
+    }
+    try {
+      await expect(
+        connectToPeer(identity, prisma, '::1', server.port, 7734, undefined, undefined, 300),
+      ).rejects.toThrow(/Handshake timeout/);
+    } finally {
+      server.stop(true);
+    }
+  });
+
   it('rejects via onerror (not the timeout) when the server refuses the WebSocket upgrade', async () => {
     const identity = generateIdentity();
     // A server that returns a plain HTTP response — the WebSocket client fires

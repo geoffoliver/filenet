@@ -145,12 +145,19 @@ export function createManagementFetch(deps: ManagementDeps): (req: Request) => P
           const { name, address, port, password } = result.data;
           const friend = await addOutgoingFriend(prisma, { name, address, port, password });
           const settings = await getOrCreateSettings(prisma);
-          connectPeer(address, port, {
-            name: settings.name.trim() || identity.nodeId,
-            password,
-          }).catch((err: unknown) => {
-            console.error(`Failed to connect to ${address}:${port}:`, err);
-          });
+          // Promise.resolve().then() normalises sync throws (e.g. invalid URL for
+          // IPv6 addresses before the bracket fix) into rejected promises so a
+          // crash in connectPeer never turns the 201 response into a 500.
+          Promise.resolve()
+            .then(() =>
+              connectPeer(address, port, {
+                name: settings.name.trim() || identity.nodeId,
+                password,
+              }),
+            )
+            .catch((err: unknown) => {
+              console.error(`Failed to connect to ${address}:${port}:`, err);
+            });
           const {
             downloadCount: _dc,
             downloadTotalBytes: _dtb,
