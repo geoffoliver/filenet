@@ -165,10 +165,12 @@ export function handleSearchResult(
         added++;
       }
     }
-    if (added > 0) pending.resultsPerSender.set(sender, senderCount + added);
-    console.log(
-      `[search] result id=${msg.searchId.slice(0, 8)} from=${msg.fromNodeId.slice(0, 8)} +${added} item(s) (total ${pending.results.length}/${MAX_NETWORK_RESULTS})`,
-    );
+    if (added > 0) {
+      pending.resultsPerSender.set(sender, senderCount + added);
+      console.log(
+        `[search] result id=${msg.searchId.slice(0, 8)} from=${msg.fromNodeId.slice(0, 8)} +${added} item(s) (total ${pending.results.length}/${MAX_NETWORK_RESULTS})`,
+      );
+    }
     // Resolve early once we've hit the result cap instead of waiting for timeout
     if (pending.results.length >= MAX_NETWORK_RESULTS) {
       clearTimeout(pending.timer);
