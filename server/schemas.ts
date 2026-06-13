@@ -11,7 +11,12 @@ export const AddFriendBodySchema = z.object({
   name: z.string().trim().min(1, 'name must be a non-empty string').max(200),
   address: z.string().trim().min(1, 'address must be a non-empty string').max(253),
   port: portSchema.optional().default(7734),
-  password: z.string().trim().min(1).max(200).optional(),
+  password: z
+    .string()
+    .trim()
+    .min(1, 'password must be a non-empty string')
+    .max(200, 'password must be at most 200 characters')
+    .optional(),
 });
 
 export const FriendActionBodySchema = z.object({
