@@ -225,6 +225,7 @@ export function createManagementFetch(deps: ManagementDeps): (req: Request) => P
               downloadTotalBytes,
               uploadCount,
               uploadTotalBytes,
+              remotePassword: _rp3,
               ...updatedData
             } = updated;
             return Response.json({

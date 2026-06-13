@@ -338,6 +338,22 @@ describe('PUT /api/friends/:id — accept', () => {
     expect(body.status).toBe('ACCEPTED');
   });
 
+  it('does not expose remotePassword in the accept response', async () => {
+    const f = await prisma.friend.create({
+      data: {
+        name: 'NoLeak',
+        address: '10.0.0.17',
+        port: 7734,
+        status: 'INCOMING_PENDING',
+        remotePassword: 'should-not-appear',
+      },
+    });
+    const res = await makeHandler()(jsonReq(`/api/friends/${f.id}`, 'PUT', { action: 'accept' }));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.remotePassword).toBeUndefined();
+  });
+
   it('response includes zero download and upload stats for a freshly created friend', async () => {
     const f = await prisma.friend.create({
       data: { name: 'Grace2', address: '10.0.0.16', port: 7734, status: 'INCOMING_PENDING' },
