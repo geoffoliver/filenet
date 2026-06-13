@@ -227,7 +227,9 @@ export default function FolderPicker({
               )}
               {breadcrumbs.map((c, i) => (
                 <span key={c.path}>
-                  {(isPosix || i > 0) && <span className={styles.crumbSep}>{sep}</span>}
+                  {/* Separator only BETWEEN crumbs — the root "/" button already
+                      provides the leading separator on POSIX */}
+                  {i > 0 && <span className={styles.crumbSep}>{sep}</span>}
                   <button
                     type="button"
                     className={styles.crumb}
