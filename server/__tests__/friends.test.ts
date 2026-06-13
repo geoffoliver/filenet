@@ -202,6 +202,24 @@ describe('handleIncomingFriendRequest', () => {
     expect(all.length).toBe(1);
   });
 
+  it('clears remotePassword when upgrading OUTGOING_PENDING to INCOMING_PENDING', async () => {
+    const peerIdentity = generateIdentity();
+    await addOutgoingFriend(prisma, {
+      name: 'Dan',
+      address: '10.0.0.10',
+      port: 7734,
+      password: 'secret',
+    });
+    const incoming = await handleIncomingFriendRequest(prisma, {
+      nodeId: peerIdentity.nodeId,
+      publicKey: peerIdentity.publicKey.toString('base64'),
+      name: 'Dan',
+      address: '10.0.0.10',
+      port: 7734,
+    });
+    expect(incoming.remotePassword).toBeNull();
+  });
+
   it('updates name when upgrading an existing record matched by address+port', async () => {
     const peerIdentity = generateIdentity();
     await addOutgoingFriend(prisma, {

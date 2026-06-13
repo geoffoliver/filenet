@@ -77,6 +77,7 @@ export async function handleIncomingFriendRequest(
         name: params.name,
         status: 'INCOMING_PENDING',
         acceptedAt: null,
+        remotePassword: null,
       },
     });
   }
