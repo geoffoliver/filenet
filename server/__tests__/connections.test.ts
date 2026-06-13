@@ -1031,6 +1031,32 @@ describe('connectToPeer — handshake timeout', () => {
     }
   });
 
+  it('does not double-bracket an already-bracketed IPv6 address', async () => {
+    const identity = generateIdentity();
+    let server: ReturnType<typeof Bun.serve>;
+    try {
+      server = Bun.serve({
+        hostname: '::1',
+        port: 0,
+        fetch(req, srv) {
+          if (srv.upgrade(req)) return undefined;
+          return new Response('Not Found', { status: 404 });
+        },
+        websocket: { message() {} },
+      });
+    } catch {
+      return; // IPv6 not available
+    }
+    try {
+      // '[::1]' already contains brackets — must not produce 'ws://[[::1]]:port'
+      await expect(
+        connectToPeer(identity, prisma, '[::1]', server.port, 7734, undefined, undefined, 300),
+      ).rejects.toThrow(/Handshake timeout/);
+    } finally {
+      server.stop(true);
+    }
+  });
+
   it('rejects via onerror (not the timeout) when the server refuses the WebSocket upgrade', async () => {
     const identity = generateIdentity();
     // A server that returns a plain HTTP response — the WebSocket client fires

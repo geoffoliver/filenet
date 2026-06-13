@@ -220,7 +220,7 @@ export async function connectToPeer(
   onMessage?: (nodeId: string, msg: InnerMessage) => Promise<void>,
   handshakeTimeoutMs = HANDSHAKE_TIMEOUT_MS,
 ): Promise<ConnectedPeer> {
-  const host = address.includes(':') ? `[${address}]` : address;
+  const host = address.includes(':') && !address.startsWith('[') ? `[${address}]` : address;
   const url = `ws://${host}:${port}`;
   const ws = new WebSocket(url);
 
