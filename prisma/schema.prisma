@@ -26,6 +26,8 @@ model Friend {
   acceptedAt DateTime?
   updatedAt  DateTime     @updatedAt
 
+  remotePassword     String? // invite password supplied when adding — resent on reconnect so offline peers can still auto-accept
+
   downloadCount      Int    @default(0)
   downloadTotalBytes BigInt @default(0)
   uploadCount        Int    @default(0)

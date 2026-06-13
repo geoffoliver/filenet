@@ -51,6 +51,25 @@ describe('addOutgoingFriend', () => {
     expect(friend.publicKey).toBeNull();
   });
 
+  it('stores the invite password when provided', async () => {
+    const friend = await addOutgoingFriend(prisma, {
+      name: 'Carol',
+      address: '192.168.1.11',
+      port: 7734,
+      password: 'hunter2',
+    });
+    expect(friend.remotePassword).toBe('hunter2');
+  });
+
+  it('stores null remotePassword when no password is provided', async () => {
+    const friend = await addOutgoingFriend(prisma, {
+      name: 'Dave',
+      address: '192.168.1.12',
+      port: 7734,
+    });
+    expect(friend.remotePassword).toBeNull();
+  });
+
   it('rejects duplicate address + port combinations', async () => {
     await addOutgoingFriend(prisma, {
       name: 'Bob',

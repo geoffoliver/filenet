@@ -57,9 +57,14 @@ export async function reconnectOnce(
     // OUTGOING_PENDING means we want to send a friend-request after the handshake.
     // Fall back to our nodeId when no display name is set — matches the management
     // API's initial dial. (friend.name is the REMOTE peer's name, not ours.)
+    // Include the stored invite password so offline peers with invitePassword
+    // auto-accept can still auto-accept on retried connections.
     const friendRequest =
       friend.status === 'OUTGOING_PENDING'
-        ? { name: settings.name.trim() || identity.nodeId }
+        ? {
+            name: settings.name.trim() || identity.nodeId,
+            ...(friend.remotePassword !== null && { password: friend.remotePassword }),
+          }
         : undefined;
 
     dialing.add(key);

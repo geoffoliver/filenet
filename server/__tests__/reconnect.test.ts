@@ -126,6 +126,41 @@ describe('reconnectOnce', () => {
     expect(req).toEqual({ name: 'test-node-id' });
   });
 
+  it('includes the stored remotePassword in the friend-request so offline peers can still auto-accept', async () => {
+    await prisma.friend.create({
+      data: {
+        name: 'Dan',
+        address: '10.0.0.12',
+        port: 7734,
+        status: 'OUTGOING_PENDING',
+        remotePassword: 'secret123',
+      },
+    });
+    await prisma.settings.updateMany({ data: { name: 'Local User' } });
+    const connectPeer = jest.fn(() =>
+      Promise.resolve({} as ConnectedPeer),
+    ) as jest.Mock<ConnectPeerFn>;
+    await reconnectOnce(prisma, identity, connectPeer);
+    expect(connectPeer).toHaveBeenCalledTimes(1);
+    const [, , req] = connectPeer.mock.calls[0] as Parameters<ConnectPeerFn>;
+    expect(req).toEqual({ name: 'Local User', password: 'secret123' });
+  });
+
+  it('omits the password field in the friend-request when no remotePassword was stored', async () => {
+    await prisma.friend.create({
+      data: { name: 'Eli', address: '10.0.0.13', port: 7734, status: 'OUTGOING_PENDING' },
+    });
+    await prisma.settings.updateMany({ data: { name: 'Local User' } });
+    const connectPeer = jest.fn(() =>
+      Promise.resolve({} as ConnectedPeer),
+    ) as jest.Mock<ConnectPeerFn>;
+    await reconnectOnce(prisma, identity, connectPeer);
+    expect(connectPeer).toHaveBeenCalledTimes(1);
+    const [, , req] = connectPeer.mock.calls[0] as Parameters<ConnectPeerFn>;
+    expect(req).toEqual({ name: 'Local User' });
+    expect(req).not.toHaveProperty('password');
+  });
+
   it('does not leave the dialing set stuck when connectPeer throws synchronously', async () => {
     await prisma.friend.create({
       data: {
