@@ -208,6 +208,8 @@ export function resolveVouch(fromNodeId: string, candidateNodeId: string, vouche
   }
 }
 
+export const HANDSHAKE_TIMEOUT_MS = 15_000;
+
 export async function connectToPeer(
   identity: Identity,
   prisma: PrismaClient,
@@ -216,8 +218,10 @@ export async function connectToPeer(
   localPort: number,
   friendRequest?: { name: string; password?: string },
   onMessage?: (nodeId: string, msg: InnerMessage) => Promise<void>,
+  handshakeTimeoutMs = HANDSHAKE_TIMEOUT_MS,
 ): Promise<ConnectedPeer> {
-  const url = `ws://${address}:${port}`;
+  const host = address.includes(':') && !address.startsWith('[') ? `[${address}]` : address;
+  const url = `ws://${host}:${port}`;
   const ws = new WebSocket(url);
 
   return new Promise((resolve, reject) => {
@@ -227,12 +231,29 @@ export async function connectToPeer(
     let peerNodeId: string | null = null;
     let peerPublicKey: Buffer | null = null;
     let handshakeDone = false;
+    let timedOut = false;
+
+    // A peer that accepts the TCP/WS connection but never completes the handshake
+    // would leave this promise pending forever — and with it, any caller state
+    // (e.g. the reconnect loop's in-flight dial set). Reject first (the close
+    // reason does not reliably propagate to the local onclose event), then close.
+    const handshakeTimer = setTimeout(() => {
+      if (!handshakeDone) {
+        timedOut = true;
+        reject(new Error(`Handshake timeout after ${handshakeTimeoutMs}ms`));
+        ws.close(1000, 'Handshake timeout');
+      }
+    }, handshakeTimeoutMs);
 
     ws.onopen = () => {
       ws.send(encodeMessage(hello));
     };
 
     ws.onmessage = async (event) => {
+      // A hello-ack can already be queued when the timeout fires; processing it
+      // would register the peer and send a friend-request on a connection the
+      // caller has already seen rejected. Drop everything after the timeout.
+      if (timedOut) return;
       try {
         const wire = decodeMessage(
           typeof event.data === 'string' ? event.data : Buffer.from(event.data),
@@ -258,6 +279,7 @@ export async function connectToPeer(
           // Mark handshake done immediately so onclose won't spuriously reject
           // if the socket closes while we're doing the DB write below.
           handshakeDone = true;
+          clearTimeout(handshakeTimer);
 
           // Match any OUTGOING_PENDING at this address regardless of whether nodeId
           // was already set — a peer that reinstalled has a new nodeId and the old
@@ -272,7 +294,7 @@ export async function connectToPeer(
               type: 'friend-request',
               name: friendRequest.name,
               port: localPort,
-              ...(friendRequest.password ? { password: friendRequest.password } : {}),
+              ...(friendRequest.password !== undefined ? { password: friendRequest.password } : {}),
             };
             sendToPeer(peer, msg);
           }
@@ -302,16 +324,25 @@ export async function connectToPeer(
       } catch (err) {
         if (peerNodeId) closeAndUnregisterPeer(peerNodeId);
         reject(err); // no-op if already resolved; handles pre- and mid-setup failures
-        if (handshakeDone) {
+        if (!handshakeDone) {
+          // Reuse timedOut as a general "drop further messages" flag so that a
+          // hello-ack queued behind the bad frame doesn't register a peer or
+          // send a friend-request after the caller has already seen a failure.
+          clearTimeout(handshakeTimer);
+          timedOut = true;
+          ws.close(1000, 'Pre-handshake error');
+        } else {
           console.error(`Error from peer ${address}:${port}:`, err);
         }
       }
     };
 
     ws.onerror = (err) => {
+      clearTimeout(handshakeTimer);
       if (!handshakeDone) reject(err);
     };
     ws.onclose = (event) => {
+      clearTimeout(handshakeTimer);
       if (peerNodeId) {
         const current = peers.get(peerNodeId);
         if (current && (current.ws as unknown) === ws) peers.delete(peerNodeId);

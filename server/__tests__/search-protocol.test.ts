@@ -15,6 +15,7 @@ import {
   MAX_RESULTS_PER_SENDER,
   type NetworkResult,
   ROUTE_EXPIRY_MS,
+  SETTLE_TIMEOUT_MS,
   getInternalMapSizes,
   handleSearchRequest,
   handleSearchResult,
@@ -726,6 +727,106 @@ describe('initiateNetworkSearch', () => {
     expect(results).toEqual([]); // no results sent back
   });
 
+  it('resolves early after settle timeout when results arrive before the main timeout', async () => {
+    const peer = makePeer('settle-peer');
+    const sent: { peer: ConnectedPeer; msg: InnerMessage }[] = [];
+    const settleMs = 50;
+
+    const start = Date.now();
+    const networkResultsPromise = initiateNetworkSearch(
+      identity,
+      [peer],
+      { query: 'settle-test', fileType: 'all' },
+      5_000, // long main timeout — would stall test if settle doesn't work
+      captureAll(sent),
+      settleMs,
+    );
+
+    await Bun.sleep(10);
+    const reqMsg = sent[0].msg as SearchRequestMessage;
+    handleSearchResult({
+      type: 'search-result',
+      searchId: reqMsg.searchId,
+      fromNodeId: 'settle-peer',
+      results: [
+        {
+          filename: 'a.mp3',
+          size: '100',
+          sha256: 'a'.repeat(64),
+          mimeType: 'audio/mpeg',
+          metadata: null,
+        },
+      ],
+    });
+
+    const results = await networkResultsPromise;
+    const elapsed = Date.now() - start;
+
+    expect(results).toHaveLength(1);
+    expect(elapsed).toBeGreaterThanOrEqual(settleMs);
+    expect(elapsed).toBeLessThan(1_000); // nowhere near the 5 s main timeout
+  });
+
+  it('resets settle timer when a second result batch arrives before settle fires', async () => {
+    const peer = makePeer('settle-reset-peer');
+    const sent: { peer: ConnectedPeer; msg: InnerMessage }[] = [];
+    const settleMs = 100;
+
+    const networkResultsPromise = initiateNetworkSearch(
+      identity,
+      [peer],
+      { query: 'settle-reset', fileType: 'all' },
+      5_000,
+      captureAll(sent),
+      settleMs,
+    );
+
+    await Bun.sleep(10);
+    const reqMsg = sent[0].msg as SearchRequestMessage;
+
+    // First batch arrives
+    handleSearchResult({
+      type: 'search-result',
+      searchId: reqMsg.searchId,
+      fromNodeId: 'settle-reset-peer',
+      results: [
+        {
+          filename: 'a.mp3',
+          size: '100',
+          sha256: 'a'.repeat(64),
+          mimeType: 'audio/mpeg',
+          metadata: null,
+        },
+      ],
+    });
+
+    await Bun.sleep(50); // within the settle window
+
+    // Second batch from a different sender
+    handleSearchResult({
+      type: 'search-result',
+      searchId: reqMsg.searchId,
+      fromNodeId: 'settle-reset-peer-2',
+      results: [
+        {
+          filename: 'b.mp3',
+          size: '200',
+          sha256: 'b'.repeat(64),
+          mimeType: 'audio/mpeg',
+          metadata: null,
+        },
+      ],
+    });
+
+    const results = await networkResultsPromise;
+    // Both batches must be in the final results
+    expect(results).toHaveLength(2);
+  });
+
+  it('SETTLE_TIMEOUT_MS constant is exported and positive', () => {
+    expect(SETTLE_TIMEOUT_MS).toBeGreaterThan(0);
+  });
+
   it('deduplicates results with the same sha256 from the same node', async () => {
     const peer = makePeer('dedup-peer');
     const sent: { peer: ConnectedPeer; msg: InnerMessage }[] = [];
@@ -749,7 +850,7 @@ describe('initiateNetworkSearch', () => {
       metadata: null,
     };
 
-    // Send same result twice
+    // Send same result twice — second call must not add a duplicate entry
     handleSearchResult({
       type: 'search-result',
       searchId: reqMsg.searchId,

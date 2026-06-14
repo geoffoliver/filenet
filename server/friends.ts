@@ -8,6 +8,7 @@ export type AddOutgoingFriendParams = {
   name: string;
   address: string;
   port: number;
+  password?: string;
 };
 
 export type IncomingFriendRequestParams = {
@@ -34,6 +35,7 @@ export async function addOutgoingFriend(
         address: params.address,
         port: params.port,
         status: 'OUTGOING_PENDING',
+        remotePassword: params.password ?? null,
       },
     });
   } catch (err) {
@@ -75,6 +77,7 @@ export async function handleIncomingFriendRequest(
         name: params.name,
         status: 'INCOMING_PENDING',
         acceptedAt: null,
+        remotePassword: null,
       },
     });
   }
@@ -104,6 +107,7 @@ export async function acceptFriendRequest(
     data: {
       status: 'ACCEPTED',
       acceptedAt: friend.acceptedAt ?? new Date(),
+      remotePassword: null,
     },
   });
 }

@@ -112,7 +112,14 @@ export function createManagementFetch(deps: ManagementDeps): (req: Request) => P
         if (req.method === 'GET') {
           const friends = await getFriends(prisma);
           const enriched = friends.map(
-            ({ downloadCount, downloadTotalBytes, uploadCount, uploadTotalBytes, ...f }) => ({
+            ({
+              downloadCount,
+              downloadTotalBytes,
+              uploadCount,
+              uploadTotalBytes,
+              remotePassword: _rp,
+              ...f
+            }) => ({
               ...f,
               online: f.nodeId ? !!getConnectedPeer(f.nodeId) : false,
               // Only surface counters for ACCEPTED friends — historical data must not
@@ -136,18 +143,27 @@ export function createManagementFetch(deps: ManagementDeps): (req: Request) => P
             return new Response(result.error.issues[0].message, { status: 400 });
           }
           const { name, address, port, password } = result.data;
-          const friend = await addOutgoingFriend(prisma, { name, address, port });
+          const friend = await addOutgoingFriend(prisma, { name, address, port, password });
           const settings = await getOrCreateSettings(prisma);
-          connectPeer(address, port, { name: settings.name || identity.nodeId, password }).catch(
-            (err: unknown) => {
+          // Promise.resolve().then() normalises sync throws (e.g. invalid URL for
+          // IPv6 addresses before the bracket fix) into rejected promises so a
+          // crash in connectPeer never turns the 201 response into a 500.
+          Promise.resolve()
+            .then(() =>
+              connectPeer(address, port, {
+                name: settings.name.trim() || identity.nodeId,
+                password,
+              }),
+            )
+            .catch((err: unknown) => {
               console.error(`Failed to connect to ${address}:${port}:`, err);
-            },
-          );
+            });
           const {
             downloadCount: _dc,
             downloadTotalBytes: _dtb,
             uploadCount: _uc,
             uploadTotalBytes: _utb,
+            remotePassword: _rp2,
             ...friendData
           } = friend;
           return Response.json(
@@ -209,6 +225,7 @@ export function createManagementFetch(deps: ManagementDeps): (req: Request) => P
               downloadTotalBytes,
               uploadCount,
               uploadTotalBytes,
+              remotePassword: _rp3,
               ...updatedData
             } = updated;
             return Response.json({

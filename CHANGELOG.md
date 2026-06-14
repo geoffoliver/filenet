@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Peer reconnect loop** — the server now automatically re-dials `ACCEPTED` and `OUTGOING_PENDING` friends every 30 seconds so dropped connections re-establish and offline peers are retried without user action
+  - Duplicate in-flight dials are suppressed; first dial failure per address is logged once and then silenced until the connection recovers
+  - Outbound friend-requests on reconnect include the invite password originally supplied at add-time, so peers with invite-password auto-accept can still auto-accept even if they were offline when the friend was first added
+  - 15-second handshake timeout on all outbound dials prevents hung connections from blocking the reconnect loop indefinitely
+  - `[search]` timing logs added to network search initiation, forwarding, and result delivery to help diagnose latency
+  - **Schema migration required:** run `bunx prisma db push` and `bunx prisma generate` to add the `remotePassword` column to the `Friend` table
+
 - **Folder browser** — setup wizard and Settings now include a "Browse…" button next to folder path inputs; clicking it opens a modal that lets users navigate their filesystem visually and select a folder, so they never have to type a path manually; the text input remains editable for power users
   - New `GET /api/fs?path=...` endpoint lists subdirectories at a given path (hidden dirs excluded), returns `{ path, parent, home, entries }`, defaults to the user's home directory
   - `FolderPicker` component (modal with breadcrumb nav + scrollable dir list) used in shared-folder add row and download-folder input in both the setup wizard and Settings

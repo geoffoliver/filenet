@@ -202,23 +202,20 @@ export default function SearchView() {
   // This effect has empty deps because the component remounts on param changes.
   useEffect(() => {
     if (!initialQ.trim()) return;
-    let active = true;
-    searchFiles({ q: initialQ, type: initialType, network: true })
+    const controller = new AbortController();
+    searchFiles({ q: initialQ, type: initialType, network: true }, controller.signal)
       .then((res) => {
-        if (!active) return;
         setHits(mergeResults(res.files, res.network ?? []));
         setHasSearched(true);
         setLoading(false);
       })
-      .catch(() => {
-        if (!active) return;
+      .catch((err: unknown) => {
+        if (err instanceof Error && err.name === 'AbortError') return;
         setError('Search failed. Is the server running?');
         setHasSearched(true);
         setLoading(false);
       });
-    return () => {
-      active = false;
-    };
+    return () => controller.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); // intentionally empty — component remounts when params change
 

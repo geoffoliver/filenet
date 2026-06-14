@@ -108,6 +108,23 @@ describe('GET /api/friends', () => {
     expect(body[0].online).toBe(false); // no peers connected in tests
   });
 
+  it('does not expose remotePassword in the response', async () => {
+    await prisma.friend.create({
+      data: {
+        name: 'Zara',
+        address: '10.0.0.99',
+        port: 7734,
+        status: 'OUTGOING_PENDING',
+        remotePassword: 'supersecret',
+      },
+    });
+    const res = await makeHandler()(req('/api/friends'));
+    const body = await res.json();
+    const zara = body.find((f: { name: string }) => f.name === 'Zara');
+    expect(zara).toBeDefined();
+    expect(zara.remotePassword).toBeUndefined();
+  });
+
   it('includes zero download stats for a friend with no downloads', async () => {
     await prisma.friend.create({
       data: {
@@ -206,6 +223,17 @@ describe('GET /api/friends', () => {
 // ---------------------------------------------------------------------------
 
 describe('POST /api/friends', () => {
+  it('returns 201 even when connectPeer throws synchronously', async () => {
+    const syncThrow = (): Promise<never> => {
+      throw new Error('sync throw'); // no Promise returned — throws before returning
+    };
+    const handler = createManagementFetch({ identity, prisma, connectPeer: syncThrow });
+    const res = await handler(
+      jsonReq('/api/friends', 'POST', { name: 'SyncFail', address: '10.0.0.99', port: 7734 }),
+    );
+    expect(res.status).toBe(201);
+  });
+
   it('creates a friend and returns 201', async () => {
     const res = await makeHandler()(
       jsonReq('/api/friends', 'POST', { name: 'Bob', address: '10.0.0.2', port: 7734 }),
@@ -233,6 +261,20 @@ describe('POST /api/friends', () => {
     );
     const body = await res.json();
     expect(body.online).toBe(false);
+  });
+
+  it('does not expose remotePassword in the response', async () => {
+    const res = await makeHandler()(
+      jsonReq('/api/friends', 'POST', {
+        name: 'Bob',
+        address: '10.0.0.2',
+        port: 7734,
+        password: 'topsecret',
+      }),
+    );
+    expect(res.status).toBe(201);
+    const body = await res.json();
+    expect(body.remotePassword).toBeUndefined();
   });
 
   it('defaults port to 7734 when omitted', async () => {
@@ -294,6 +336,22 @@ describe('PUT /api/friends/:id — accept', () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.status).toBe('ACCEPTED');
+  });
+
+  it('does not expose remotePassword in the accept response', async () => {
+    const f = await prisma.friend.create({
+      data: {
+        name: 'NoLeak',
+        address: '10.0.0.17',
+        port: 7734,
+        status: 'INCOMING_PENDING',
+        remotePassword: 'should-not-appear',
+      },
+    });
+    const res = await makeHandler()(jsonReq(`/api/friends/${f.id}`, 'PUT', { action: 'accept' }));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.remotePassword).toBeUndefined();
   });
 
   it('response includes zero download and upload stats for a freshly created friend', async () => {

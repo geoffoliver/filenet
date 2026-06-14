@@ -455,14 +455,17 @@ export async function deleteConversation(convId: string): Promise<void> {
   }
 }
 
-export async function searchFiles(params: SearchParams): Promise<SearchResponse> {
+export async function searchFiles(
+  params: SearchParams,
+  signal?: AbortSignal,
+): Promise<SearchResponse> {
   const qs = new URLSearchParams();
   if (params.q) qs.set('q', params.q);
   if (params.type && params.type !== 'all') qs.set('type', params.type);
   if (params.limit != null) qs.set('limit', String(params.limit));
   if (params.offset != null) qs.set('offset', String(params.offset));
   if (params.network) qs.set('network', 'true');
-  const res = await fetch(`/api/search?${qs}`);
+  const res = await fetch(`/api/search?${qs}`, { signal });
   if (!res.ok) throw new Error('Search failed');
   return res.json();
 }

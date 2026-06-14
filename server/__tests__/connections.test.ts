@@ -6,6 +6,7 @@ import { unlinkSync } from 'fs';
 import {
   type ConnectedPeer,
   closeAndUnregisterPeer,
+  connectToPeer,
   getConnectedPeer,
   handleInboundFriendRequest,
   notifyFriendAccepted,
@@ -873,3 +874,219 @@ function makeFakeWsAuthenticated(
     remoteAddress: '10.0.0.1',
   };
 }
+
+// ---------------------------------------------------------------------------
+// connectToPeer — handshake timeout
+// ---------------------------------------------------------------------------
+
+describe('connectToPeer — handshake timeout', () => {
+  it('rejects when the peer accepts the socket but never completes the handshake', async () => {
+    const identity = generateIdentity();
+    // A server that upgrades the WebSocket but swallows every message — the
+    // hello is never answered, so without a timeout the promise would hang forever.
+    const server = Bun.serve({
+      port: 0,
+      fetch(req, srv) {
+        if (srv.upgrade(req)) return undefined;
+        return new Response('Not Found', { status: 404 });
+      },
+      websocket: {
+        message() {},
+      },
+    });
+    try {
+      const start = Date.now();
+      await expect(
+        connectToPeer(identity, prisma, '127.0.0.1', server.port, 7734, undefined, undefined, 300),
+      ).rejects.toThrow(/Handshake timeout/);
+      // Sanity: rejected because of the timeout, not some later mechanism
+      expect(Date.now() - start).toBeLessThan(2_000);
+    } finally {
+      server.stop(true);
+    }
+  });
+
+  it('never registers the peer when the hello-ack arrives after the timeout', async () => {
+    const initiator = generateIdentity();
+    const responder = generateIdentity();
+    // A server that answers the hello with a VALID hello-ack — but only after
+    // the client's timeout has already fired. Whether the late ack is stopped
+    // by the socket close or the timedOut guard, the invariant is the same:
+    // a timed-out dial must never produce a registered peer.
+    const server = Bun.serve({
+      port: 0,
+      fetch(req, srv) {
+        if (srv.upgrade(req)) return undefined;
+        return new Response('Not Found', { status: 404 });
+      },
+      websocket: {
+        message(ws, raw) {
+          const wire = decodeMessage(typeof raw === 'string' ? raw : Buffer.from(raw));
+          if (wire.type === 'hello') {
+            const { ack } = createHelloAck_forTest(responder, wire);
+            setTimeout(() => {
+              try {
+                ws.send(encodeMessage(ack));
+              } catch {
+                // socket already closed by the client's timeout — expected
+              }
+            }, 500);
+          }
+        },
+      },
+    });
+    try {
+      await expect(
+        connectToPeer(initiator, prisma, '127.0.0.1', server.port, 7734, undefined, undefined, 200),
+      ).rejects.toThrow(/Handshake timeout/);
+      // Wait past the delayed ack, then confirm no peer was registered
+      await new Promise<void>((r) => setTimeout(r, 500));
+      expect(getConnectedPeer(responder.nodeId)).toBeUndefined();
+    } finally {
+      server.stop(true);
+    }
+  });
+
+  it('closes socket and discards subsequent messages when onmessage throws before handshake completes', async () => {
+    const initiator = generateIdentity();
+    const responder = generateIdentity();
+    // Server sends a garbled frame immediately, then a valid hello-ack 200 ms later.
+    // The bad frame causes JSON.parse to throw inside onmessage's catch block; the
+    // fix must close the socket and set the drop-messages guard so the delayed
+    // hello-ack never registers a peer.
+    const server = Bun.serve({
+      port: 0,
+      fetch(req, srv) {
+        if (srv.upgrade(req)) return undefined;
+        return new Response('Not Found', { status: 404 });
+      },
+      websocket: {
+        message(ws, raw) {
+          const wire = decodeMessage(typeof raw === 'string' ? raw : Buffer.from(raw));
+          if (wire.type === 'hello') {
+            ws.send('not-valid-json'); // triggers SyntaxError in client onmessage
+            const { ack } = createHelloAck_forTest(responder, wire);
+            setTimeout(() => {
+              try {
+                ws.send(encodeMessage(ack));
+              } catch {
+                // socket already closed by client — expected
+              }
+            }, 200);
+          }
+        },
+      },
+    });
+    try {
+      const start = Date.now();
+      await expect(
+        connectToPeer(
+          initiator,
+          prisma,
+          '127.0.0.1',
+          server.port,
+          7734,
+          undefined,
+          undefined,
+          5_000,
+        ),
+      ).rejects.toThrow();
+      // Rejected by the bad frame, not after the 5 s timeout
+      expect(Date.now() - start).toBeLessThan(2_000);
+      // Wait past the delayed hello-ack — no peer must be registered
+      await new Promise<void>((r) => setTimeout(r, 300));
+      expect(getConnectedPeer(responder.nodeId)).toBeUndefined();
+    } finally {
+      server.stop(true);
+    }
+  });
+
+  it('wraps IPv6 addresses in brackets so the WebSocket URL is valid', async () => {
+    const identity = generateIdentity();
+    // A real Bun WebSocket server on the IPv6 loopback interface. Without bracket
+    // wrapping, new WebSocket('ws://::1:<port>') throws a URL syntax error before
+    // any network I/O; with it, the connection proceeds and we get the usual
+    // handshake-timeout rejection instead.
+    let server: ReturnType<typeof Bun.serve>;
+    try {
+      server = Bun.serve({
+        hostname: '::1',
+        port: 0,
+        fetch(req, srv) {
+          if (srv.upgrade(req)) return undefined;
+          return new Response('Not Found', { status: 404 });
+        },
+        websocket: { message() {} },
+      });
+    } catch {
+      // IPv6 loopback not available in this environment — skip
+      return;
+    }
+    try {
+      await expect(
+        connectToPeer(identity, prisma, '::1', server.port, 7734, undefined, undefined, 300),
+      ).rejects.toThrow(/Handshake timeout/);
+    } finally {
+      server.stop(true);
+    }
+  });
+
+  it('does not double-bracket an already-bracketed IPv6 address', async () => {
+    const identity = generateIdentity();
+    let server: ReturnType<typeof Bun.serve>;
+    try {
+      server = Bun.serve({
+        hostname: '::1',
+        port: 0,
+        fetch(req, srv) {
+          if (srv.upgrade(req)) return undefined;
+          return new Response('Not Found', { status: 404 });
+        },
+        websocket: { message() {} },
+      });
+    } catch {
+      return; // IPv6 not available
+    }
+    try {
+      // '[::1]' already contains brackets — must not produce 'ws://[[::1]]:port'
+      await expect(
+        connectToPeer(identity, prisma, '[::1]', server.port, 7734, undefined, undefined, 300),
+      ).rejects.toThrow(/Handshake timeout/);
+    } finally {
+      server.stop(true);
+    }
+  });
+
+  it('rejects via onerror (not the timeout) when the server refuses the WebSocket upgrade', async () => {
+    const identity = generateIdentity();
+    // A server that returns a plain HTTP response — the WebSocket client fires
+    // onerror when it receives a non-101 status, which must clear the handshake
+    // timer and reject the promise without waiting for the full timeout.
+    const server = Bun.serve({
+      port: 0,
+      fetch() {
+        return new Response('Not a WebSocket', { status: 400 });
+      },
+      websocket: { message() {} },
+    });
+    try {
+      const start = Date.now();
+      // Use a 5 s timeout; if the fix is broken the test would hang for 5 s
+      await expect(
+        connectToPeer(
+          identity,
+          prisma,
+          '127.0.0.1',
+          server.port,
+          7734,
+          undefined,
+          undefined,
+          5_000,
+        ),
+      ).rejects.toThrow();
+      expect(Date.now() - start).toBeLessThan(2_000);
+    } finally {
+      server.stop(true);
+    }
+  });
+});

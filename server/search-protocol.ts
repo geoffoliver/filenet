@@ -14,6 +14,9 @@ import type { Identity } from './identity';
 
 export const DEFAULT_TTL = 3;
 export const SEARCH_TIMEOUT_MS = 5_000;
+// How long to wait after the last result batch before resolving early.
+// Keeps the search open for stragglers without forcing the full timeout.
+export const SETTLE_TIMEOUT_MS = 500;
 export const MAX_NETWORK_RESULTS = 200;
 export const MAX_RESULTS_PER_SENDER = 50; // per authenticated sender, matches local search limit
 export const ROUTE_EXPIRY_MS = 10 * 60 * 1_000;
@@ -28,6 +31,8 @@ type PendingSearch = {
   seenKeys: Set<string>;
   resultsPerSender: Map<string, number>; // authenticated sender → result count
   timer: ReturnType<typeof setTimeout>;
+  settleTimer: ReturnType<typeof setTimeout> | null;
+  settleTimeoutMs: number;
   resolve: (results: NetworkResult[]) => void;
 };
 
@@ -52,7 +57,10 @@ export function getInternalMapSizes(): { seenSearchIds: number; searchRoutes: nu
 
 /** Reset all module-level state. Only for use in tests. */
 export function resetInternalMapsForTesting(): void {
-  for (const [, pending] of pendingSearches) clearTimeout(pending.timer);
+  for (const [, pending] of pendingSearches) {
+    clearTimeout(pending.timer);
+    if (pending.settleTimer) clearTimeout(pending.settleTimer);
+  }
   seenSearchIds.clear();
   searchRoutes.clear();
   pendingSearches.clear();
@@ -165,9 +173,20 @@ export function handleSearchResult(
         added++;
       }
     }
-    if (added > 0) pending.resultsPerSender.set(sender, senderCount + added);
+    if (added > 0) {
+      pending.resultsPerSender.set(sender, senderCount + added);
+      // Reset the settle timer — resolve early if no new results arrive within the window.
+      if (pending.settleTimer) clearTimeout(pending.settleTimer);
+      pending.settleTimer = setTimeout(() => {
+        clearTimeout(pending.timer);
+        pendingSearches.delete(msg.searchId);
+        searchRoutes.delete(msg.searchId);
+        pending.resolve(pending.results);
+      }, pending.settleTimeoutMs);
+    }
     // Resolve early once we've hit the result cap instead of waiting for timeout
     if (pending.results.length >= MAX_NETWORK_RESULTS) {
+      if (pending.settleTimer) clearTimeout(pending.settleTimer);
       clearTimeout(pending.timer);
       pendingSearches.delete(msg.searchId);
       searchRoutes.delete(msg.searchId);
@@ -271,6 +290,7 @@ export async function initiateNetworkSearch(
   params: { query: string; fileType: string },
   timeoutMs = SEARCH_TIMEOUT_MS,
   sendFn: (peer: ConnectedPeer, msg: InnerMessage) => void = sendToPeer,
+  settleTimeoutMs = SETTLE_TIMEOUT_MS,
 ): Promise<NetworkResult[]> {
   if (peers.length === 0) return [];
 
@@ -294,10 +314,13 @@ export async function initiateNetworkSearch(
       seenKeys: new Set(),
       resultsPerSender: new Map(),
       timer: setTimeout(() => {
+        if (pending.settleTimer) clearTimeout(pending.settleTimer);
         pendingSearches.delete(searchId);
         searchRoutes.delete(searchId);
         resolve(pending.results);
       }, timeoutMs),
+      settleTimer: null,
+      settleTimeoutMs,
       resolve,
     };
     pendingSearches.set(searchId, pending);

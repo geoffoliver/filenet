@@ -51,6 +51,25 @@ describe('addOutgoingFriend', () => {
     expect(friend.publicKey).toBeNull();
   });
 
+  it('stores the invite password when provided', async () => {
+    const friend = await addOutgoingFriend(prisma, {
+      name: 'Carol',
+      address: '192.168.1.11',
+      port: 7734,
+      password: 'hunter2',
+    });
+    expect(friend.remotePassword).toBe('hunter2');
+  });
+
+  it('stores null remotePassword when no password is provided', async () => {
+    const friend = await addOutgoingFriend(prisma, {
+      name: 'Dave',
+      address: '192.168.1.12',
+      port: 7734,
+    });
+    expect(friend.remotePassword).toBeNull();
+  });
+
   it('rejects duplicate address + port combinations', async () => {
     await addOutgoingFriend(prisma, {
       name: 'Bob',
@@ -183,6 +202,24 @@ describe('handleIncomingFriendRequest', () => {
     expect(all.length).toBe(1);
   });
 
+  it('clears remotePassword when upgrading OUTGOING_PENDING to INCOMING_PENDING', async () => {
+    const peerIdentity = generateIdentity();
+    await addOutgoingFriend(prisma, {
+      name: 'Dan',
+      address: '10.0.0.10',
+      port: 7734,
+      password: 'secret',
+    });
+    const incoming = await handleIncomingFriendRequest(prisma, {
+      nodeId: peerIdentity.nodeId,
+      publicKey: peerIdentity.publicKey.toString('base64'),
+      name: 'Dan',
+      address: '10.0.0.10',
+      port: 7734,
+    });
+    expect(incoming.remotePassword).toBeNull();
+  });
+
   it('updates name when upgrading an existing record matched by address+port', async () => {
     const peerIdentity = generateIdentity();
     await addOutgoingFriend(prisma, {
@@ -224,6 +261,18 @@ describe('acceptFriendRequest', () => {
     });
     const accepted = await acceptFriendRequest(prisma, friend.id);
     expect(accepted.status).toBe('ACCEPTED');
+  });
+
+  it('clears remotePassword on acceptance so the invite credential is not kept past its useful life', async () => {
+    const friend = await addOutgoingFriend(prisma, {
+      name: 'Faye',
+      address: '10.0.0.8',
+      port: 7734,
+      password: 'secret',
+    });
+    expect(friend.remotePassword).toBe('secret');
+    const accepted = await acceptFriendRequest(prisma, friend.id);
+    expect(accepted.remotePassword).toBeNull();
   });
 
   it('does not overwrite acceptedAt when called again on an already-accepted friend', async () => {
