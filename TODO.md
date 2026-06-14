@@ -172,3 +172,4 @@
 - [x] README: installation, configuration, running, scripting API docs
 - [x] Create necessary files to spin the app up in a Docker container (full `next start`, not a static export or anything dumb)
 - [ ] Database migrations
+- [ ] Single-binary distribution (à la Sonarr/Radarr) — requires two changes: (1) migrate from Prisma to `bun:sqlite` (Prisma's native query-engine binary makes self-contained packaging impossible); (2) switch Next.js to `output: 'export'` so the frontend becomes static files the Bun server can serve directly. Once both are done, `bun build --compile` produces a single platform executable with no external dependencies. Cross-compile targets: `bun-linux-x64`, `bun-linux-arm64`, `bun-darwin-x64`, `bun-darwin-arm64`, `bun-windows-x64`.
