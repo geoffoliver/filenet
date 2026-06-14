@@ -335,22 +335,16 @@ export function createManagementFetch(deps: ManagementDeps): (req: Request) => P
           return new Response(result.error.issues[0].message, { status: 400 });
         }
         const { q, type, limit, offset, network } = result.data;
-        const searchStart = Date.now();
-        console.log(`[search] /api/search q=${JSON.stringify(q)} type=${type} network=${network}`);
         const localSearchPromise = searchFiles(prisma, { query: q, type, limit, offset });
         const networkResultsPromise = network
-          ? getAcceptedConnectedPeers(prisma).then((peers) => {
-              console.log(`[search] /api/search — sending to ${peers.length} peer(s)`);
-              return networkSearch(identity, peers, { query: q, fileType: type });
-            })
+          ? getAcceptedConnectedPeers(prisma).then((peers) =>
+              networkSearch(identity, peers, { query: q, fileType: type }),
+            )
           : Promise.resolve([]);
         const [localResult, networkResults] = await Promise.all([
           localSearchPromise,
           networkResultsPromise,
         ]);
-        console.log(
-          `[search] /api/search done in ${Date.now() - searchStart}ms — local: ${localResult.files.length}/${localResult.total}, network: ${networkResults.length}`,
-        );
         return Response.json({
           files: localResult.files.map(toSharedFileDto),
           total: localResult.total,

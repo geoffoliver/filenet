@@ -850,34 +850,22 @@ describe('initiateNetworkSearch', () => {
       metadata: null,
     };
 
-    const logSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
-    try {
-      // Send same result twice — second call adds 0 results and must not log
-      handleSearchResult({
-        type: 'search-result',
-        searchId: reqMsg.searchId,
-        fromNodeId: 'dedup-peer',
-        results: [duplicate],
-      });
-      handleSearchResult({
-        type: 'search-result',
-        searchId: reqMsg.searchId,
-        fromNodeId: 'dedup-peer',
-        results: [duplicate],
-      });
+    // Send same result twice — second call must not add a duplicate entry
+    handleSearchResult({
+      type: 'search-result',
+      searchId: reqMsg.searchId,
+      fromNodeId: 'dedup-peer',
+      results: [duplicate],
+    });
+    handleSearchResult({
+      type: 'search-result',
+      searchId: reqMsg.searchId,
+      fromNodeId: 'dedup-peer',
+      results: [duplicate],
+    });
 
-      const results = await networkResultsPromise;
-      expect(results.filter((r) => r.sha256 === 'c'.repeat(64))).toHaveLength(1);
-      // Only the first call added results and should have logged; the second was a
-      // duplicate (added=0) and must not produce a [search] result log line.
-      const resultLogs = logSpy.mock.calls.filter(
-        ([msg]) => typeof msg === 'string' && (msg as string).includes('[search] result'),
-      );
-      expect(resultLogs).toHaveLength(1);
-      expect(resultLogs[0][0]).toContain('+1');
-    } finally {
-      logSpy.mockRestore();
-    }
+    const results = await networkResultsPromise;
+    expect(results.filter((r) => r.sha256 === 'c'.repeat(64))).toHaveLength(1);
   });
 
   it('caps collected results at MAX_NETWORK_RESULTS', async () => {
