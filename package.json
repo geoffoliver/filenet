@@ -8,6 +8,7 @@
     "start": "bun --bun next start",
     "server": "exec bun server/index.ts",
     "test": "bun test server/__tests__",
+    "test:e2e": "bunx playwright test",
     "lint": "eslint",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
@@ -29,6 +30,7 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@playwright/test": "^1.60.0",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/react": "^19",
