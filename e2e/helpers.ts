@@ -143,11 +143,18 @@ export const MESSAGES = [
 // ---------------------------------------------------------------------------
 
 export async function mockSettingsConfigured(page: Page) {
-  await page.route('/api/settings', (route) => route.fulfill({ json: SETTINGS }));
+  await page.route('/api/settings', (route) => {
+    if (route.request().method() === 'GET') return route.fulfill({ json: SETTINGS });
+    return route.continue();
+  });
 }
 
 export async function mockSettingsUnconfigured(page: Page) {
-  await page.route('/api/settings', (route) => route.fulfill({ json: { ...SETTINGS, name: '' } }));
+  await page.route('/api/settings', (route) => {
+    if (route.request().method() === 'GET')
+      return route.fulfill({ json: { ...SETTINGS, name: '' } });
+    return route.continue();
+  });
 }
 
 export async function mockStats(page: Page) {
@@ -164,7 +171,10 @@ export async function mockFriends(page: Page, friends = FRIENDS) {
 }
 
 export async function mockTransfers(page: Page, transfers = TRANSFERS) {
-  await page.route('/api/transfers', (route) => route.fulfill({ json: transfers }));
+  await page.route('/api/transfers', (route) => {
+    if (route.request().method() === 'GET') return route.fulfill({ json: transfers });
+    return route.continue();
+  });
 }
 
 export async function mockSearch(

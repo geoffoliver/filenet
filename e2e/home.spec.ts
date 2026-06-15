@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 
-import { STATS, mockBaseApp } from './helpers';
+import { SETTINGS, mockBaseApp } from './helpers';
 
 test.beforeEach(async ({ page }) => {
   await mockBaseApp(page);
@@ -40,7 +40,7 @@ test('shows zero stats gracefully when all counts are zero', async ({ page }) =>
 });
 
 test('redirects to /setup when name is not configured', async ({ page }) => {
-  await page.route('/api/settings', (route) => route.fulfill({ json: { ...STATS, name: '' } }));
+  await page.route('/api/settings', (route) => route.fulfill({ json: { ...SETTINGS, name: '' } }));
   await page.goto('/');
   await page.waitForURL('**/setup');
 });

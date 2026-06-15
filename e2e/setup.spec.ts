@@ -71,6 +71,7 @@ test('submitting setup with a name saves settings and redirects', async ({ page 
   await page.getByRole('button', { name: /finish setup/i }).click();
 
   await page.waitForURL('**/home');
+  expect(saved).toBeDefined();
   expect((saved as { name: string }).name).toBe('My Node');
 });
 

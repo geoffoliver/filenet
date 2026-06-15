@@ -49,6 +49,7 @@ test('saving settings calls the API with updated values', async ({ page }) => {
     .first()
     .click();
 
+  expect(patched).toBeDefined();
   expect((patched as { name: string }).name).toBe('Updated Name');
 });
 

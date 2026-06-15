@@ -53,7 +53,7 @@ test('completed download does not have cancel button', async ({ page }) => {
 
 test('pausing a download calls the API and updates state', async ({ page }) => {
   await page.route('/api/transfers/transfer-1', (route) => {
-    if (route.request().method() === 'PUT') {
+    if (route.request().method() === 'PATCH') {
       return route.fulfill({
         json: { ...TRANSFERS[0], state: 'PAUSED' },
       });
