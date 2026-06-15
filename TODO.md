@@ -120,6 +120,7 @@
 - [x] Results list: filename, size, mime type, source count (local + network merged by sha256)
 - [x] Result detail expand: full metadata, hash preview, "on this node" badge
 - [x] Download button placeholder (disabled until transfer system exists)
+- [ ] Live download feedback in search results — after clicking Download, poll `/api/transfers` by SHA-256 to track progress and reflect state in the button: Queued → X% → Downloaded ✓
 
 ### Chat
 
@@ -141,9 +142,11 @@
 
 ### Transfers
 
-- [x] Split-pane: uploads (top) + downloads (bottom)
-- [x] Upload row: filename, progress bar, speed, time remaining, bytes transferred (auto-dismiss on completion)
-- [x] Download row: filename, progress bar, speed, time remaining, bytes transferred, source count
+- [ ] **Overhaul** — Napster-style split pane (downloads top, uploads bottom) with a resizable drag handle between the two panes
+- [ ] Table-style rows: filename, file size (X of Y), peer name/node, status, speed, inline progress bar, rate, time left
+- [ ] Upload rows — files currently being served to peers (requires `feature/upload-tracking` backend to be merged first)
+- [ ] Status bar at the bottom: "Concurrent Downloads: N | Concurrent Uploads: N"
+- [ ] "Clear Finished" button (removes completed/failed rows from both panes)
 - [x] Download controls: pause, resume, cancel (in-progress only)
 - [x] Cancel confirmation + partial file cleanup
 - [x] Manual dismiss of completed downloads
@@ -166,7 +169,7 @@
 - [x] Pre-commit hooks: lint + format check (Prettier / ESLint via lint-staged + husky)
 - [x] GitHub Actions: run tests on push / PR
 - [ ] GitHub Actions: release workflow (bump version, tag `v#.#.#`, publish)
-- [ ] Playwright frontend tests (deferred — add once UI pages have real interactions)
+- [x] Playwright frontend tests (54 tests across all major views; all API calls mocked via `page.route()`)
 - [ ] Improve backend test coverage as features are added
 - [x] CHANGELOG (start and maintain)
 - [x] README: installation, configuration, running, scripting API docs
