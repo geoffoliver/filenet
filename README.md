@@ -77,6 +77,18 @@ Filenet requires a manually forwarded port — there is no automatic NAT travers
 > application, including browsing the host filesystem, to anyone who can reach
 > it. The UI is meant for your home network only.
 
+## Security
+
+All peer-to-peer communication is encrypted at the application layer:
+
+- **Key exchange**: X25519 ECDH, with both sides signing via their Ed25519 identity key — neither side can be impersonated
+- **Session encryption**: AES-256-GCM with a unique key and random IV per message — covers chat, search, friend requests, and file chunks
+- **Identity**: your node ID is the SHA-256 of your public key, so it's cryptographically bound to your keypair
+
+The transport is plain `ws://`, not `wss://` (TLS). A network observer can see which IPs are talking to each other, but cannot read the content of any messages. If you need to hide the fact of communication (not just its content), run Filenet behind a VPN or [Tailscale](https://tailscale.com).
+
+The local database (SQLite) is **not** encrypted at rest. Anyone with filesystem access to the machine can read chat history, the file index, and friend lists.
+
 ## Post-download scripts
 
 Scripts run in order after a download completes. Each script is a TypeScript/JavaScript file with a default export:
