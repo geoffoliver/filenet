@@ -114,6 +114,8 @@ test('Clear Finished button dismisses completed transfers', async ({ page }) => 
   });
 
   await page.goto('/transfers');
+  // Wait for the first poll to render the completed transfer before clicking.
+  await expect(page.getByText('song.mp3')).toBeVisible();
   await page.getByRole('button', { name: /clear finished/i }).click();
   expect(dismissed).toBe('transfer-2');
   await expect(page.getByText('song.mp3')).not.toBeVisible();

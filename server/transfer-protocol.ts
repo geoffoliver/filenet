@@ -88,19 +88,18 @@ interface ActiveUploadSession {
 
 const activeUploadSessions = new Map<string, ActiveUploadSession>();
 
+function pruneIdleUploadSessions(): void {
+  const now = Date.now();
+  for (const [id, s] of activeUploadSessions) {
+    if (now - s.lastActivityAt >= UPLOAD_SESSION_IDLE_MS) {
+      activeUploadSessions.delete(id);
+    }
+  }
+}
+
 // Prune idle sessions on a background timer so expiry fires even when
 // /api/uploads is never polled (headless servers won't have a UI polling it).
-setInterval(
-  () => {
-    const now = Date.now();
-    for (const [id, s] of activeUploadSessions) {
-      if (now - s.lastActivityAt >= UPLOAD_SESSION_IDLE_MS) {
-        activeUploadSessions.delete(id);
-      }
-    }
-  },
-  Math.round(UPLOAD_SESSION_IDLE_MS / 2),
-).unref();
+setInterval(pruneIdleUploadSessions, Math.round(UPLOAD_SESSION_IDLE_MS / 2)).unref();
 
 function recordUploadBytes(session: ActiveUploadSession, bytes: number): void {
   const now = Date.now();
@@ -130,22 +129,18 @@ export type ActiveUploadInfo = {
 };
 
 export function getActiveUploadSessions(): ActiveUploadInfo[] {
-  const now = Date.now();
+  pruneIdleUploadSessions();
   const results: ActiveUploadInfo[] = [];
   for (const [id, s] of activeUploadSessions) {
-    if (now - s.lastActivityAt >= UPLOAD_SESSION_IDLE_MS) {
-      activeUploadSessions.delete(id);
-    } else {
-      results.push({
-        id,
-        sha256: s.sha256,
-        filename: s.filename,
-        size: String(s.size),
-        peerNodeId: s.peerNodeId,
-        bytesServed: String(s.bytesServed),
-        speedBps: calcUploadSpeed(s),
-      });
-    }
+    results.push({
+      id,
+      sha256: s.sha256,
+      filename: s.filename,
+      size: String(s.size),
+      peerNodeId: s.peerNodeId,
+      bytesServed: String(s.bytesServed),
+      speedBps: calcUploadSpeed(s),
+    });
   }
   return results;
 }
@@ -240,23 +235,23 @@ export async function handleChunkRequest(
         scheduleUploadFlush(friend.id, prisma);
 
         // Update live upload session for Transfers UI
-        const sessionKey = `${friend.id}:${msg.sha256}`;
-        const existing = activeUploadSessions.get(sessionKey);
+        const now = Date.now();
+        const existing = activeUploadSessions.get(dedupKey);
         if (existing) {
           existing.bytesServed += BigInt(bytesRead);
-          existing.lastActivityAt = Date.now();
+          existing.lastActivityAt = now;
           recordUploadBytes(existing, bytesRead);
         } else {
-          activeUploadSessions.set(sessionKey, {
+          activeUploadSessions.set(dedupKey, {
             sha256: msg.sha256,
             filename: file.filename,
             size: file.size,
             friendId: friend.id,
             peerNodeId: senderNodeId,
             bytesServed: BigInt(bytesRead),
-            startedAt: Date.now(),
-            lastActivityAt: Date.now(),
-            speedSamples: [{ time: Date.now(), bytes: bytesRead }],
+            startedAt: now,
+            lastActivityAt: now,
+            speedSamples: [{ time: now, bytes: bytesRead }],
           });
         }
       }

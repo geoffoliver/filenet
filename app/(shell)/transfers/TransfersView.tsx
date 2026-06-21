@@ -173,10 +173,15 @@ export default function TransfersView() {
     if (tResult.status === 'fulfilled') {
       setTransfers(tResult.value);
       setLoadError('');
+      setClearError('');
     } else {
       setLoadError('Could not load transfers. Is the server running?');
     }
-    if (uResult.status === 'fulfilled') setUploads(uResult.value);
+    if (uResult.status === 'fulfilled') {
+      setUploads(uResult.value);
+    } else {
+      setUploads([]);
+    }
   }, []);
 
   useEffect(() => {
@@ -236,10 +241,16 @@ export default function TransfersView() {
     setClearError('');
     try {
       const finished = transfers.filter((t) => !ACTIVE_STATES.has(t.state));
-      const results = await Promise.allSettled(finished.map((t) => dismissTransfer(t.id)));
-      const failed = results.filter((r): r is PromiseRejectedResult => r.status === 'rejected');
-      if (failed.length > 0)
-        setClearError(`Failed to dismiss ${failed.length} transfer${failed.length > 1 ? 's' : ''}`);
+      let failCount = 0;
+      for (const t of finished) {
+        try {
+          await dismissTransfer(t.id);
+        } catch {
+          failCount++;
+        }
+      }
+      if (failCount > 0)
+        setClearError(`Failed to dismiss ${failCount} transfer${failCount > 1 ? 's' : ''}`);
       await load();
     } finally {
       setClearing(false);
