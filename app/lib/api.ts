@@ -246,6 +246,22 @@ export async function controlTransfer(
   }
 }
 
+export type Upload = {
+  id: string;
+  sha256: string;
+  filename: string;
+  size: string;
+  peerNodeId: string;
+  bytesServed: string;
+  speedBps: number;
+};
+
+export async function getUploads(): Promise<Upload[]> {
+  const res = await fetch('/api/uploads');
+  if (!res.ok) throw new Error('Failed to load uploads');
+  return res.json();
+}
+
 export async function dismissTransfer(id: string): Promise<void> {
   const res = await fetch(`/api/transfers/${id}`, { method: 'DELETE' });
   if (!res.ok) {

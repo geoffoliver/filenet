@@ -42,6 +42,7 @@ import {
   resumeDownload,
   startDownload,
 } from './download-manager';
+import { cancelUploadFlushForFriend, getActiveUploadSessions } from './transfer-protocol';
 import {
   getEnvConfig,
   getOrCreateSettings,
@@ -50,7 +51,6 @@ import {
   updateSettings,
 } from './config';
 import type { Identity } from './identity';
-import { cancelUploadFlushForFriend } from './transfer-protocol';
 import { dmConversationId } from './chat';
 import { initiateNetworkSearch } from './search-protocol';
 import { scanAndIndex } from './indexer';
@@ -437,6 +437,10 @@ export function createManagementFetch(deps: ManagementDeps): (req: Request) => P
           });
           return Response.json({ id }, { status: 201 });
         }
+      }
+
+      if (url.pathname === '/api/uploads') {
+        return Response.json(getActiveUploadSessions());
       }
 
       if (url.pathname.startsWith('/api/transfers/')) {

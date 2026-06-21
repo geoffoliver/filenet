@@ -62,6 +62,76 @@ function scheduleUploadFlush(friendId: string, prisma: PrismaClient): void {
   );
 }
 
+// ---------------------------------------------------------------------------
+// Live upload session tracking — in-memory, shown in the Transfers UI
+// ---------------------------------------------------------------------------
+
+const UPLOAD_SPEED_WINDOW_MS = 5_000;
+const UPLOAD_SESSION_IDLE_MS = 30_000;
+
+interface SpeedSample {
+  time: number;
+  bytes: number;
+}
+
+interface ActiveUploadSession {
+  sha256: string;
+  filename: string;
+  size: bigint;
+  friendId: string;
+  peerNodeId: string;
+  bytesServed: bigint;
+  startedAt: number;
+  lastActivityAt: number;
+  speedSamples: SpeedSample[];
+}
+
+const activeUploadSessions = new Map<string, ActiveUploadSession>();
+
+function recordUploadBytes(session: ActiveUploadSession, bytes: number): void {
+  const now = Date.now();
+  session.speedSamples.push({ time: now, bytes });
+  const cutoff = now - UPLOAD_SPEED_WINDOW_MS;
+  while (session.speedSamples.length > 0 && session.speedSamples[0].time < cutoff) {
+    session.speedSamples.shift();
+  }
+}
+
+function calcUploadSpeed(session: ActiveUploadSession): number {
+  if (session.speedSamples.length === 0) return 0;
+  const windowMs = Date.now() - session.speedSamples[0].time;
+  if (windowMs < 100) return 0;
+  const totalBytes = session.speedSamples.reduce((sum, r) => sum + r.bytes, 0);
+  return Math.round((totalBytes / windowMs) * 1000);
+}
+
+export type ActiveUploadInfo = {
+  id: string;
+  sha256: string;
+  filename: string;
+  size: string;
+  peerNodeId: string;
+  bytesServed: string;
+  speedBps: number;
+};
+
+export function getActiveUploadSessions(): ActiveUploadInfo[] {
+  const now = Date.now();
+  return Array.from(activeUploadSessions.entries())
+    .filter(([, s]) => now - s.lastActivityAt < UPLOAD_SESSION_IDLE_MS)
+    .map(([id, s]) => ({
+      id,
+      sha256: s.sha256,
+      filename: s.filename,
+      size: String(s.size),
+      peerNodeId: s.peerNodeId,
+      bytesServed: String(s.bytesServed),
+      speedBps: calcUploadSpeed(s),
+    }));
+}
+
+// ---------------------------------------------------------------------------
+
 // Pending download-side chunk callbacks keyed by transferId
 const pendingChunks = new Map<
   string,
@@ -148,6 +218,27 @@ export async function handleChunkRequest(
         if (isFirstChunk) acc.newFileCount++;
         pendingUploads.set(friend.id, acc);
         scheduleUploadFlush(friend.id, prisma);
+
+        // Update live upload session for Transfers UI
+        const sessionKey = `${friend.id}:${msg.sha256}`;
+        const existing = activeUploadSessions.get(sessionKey);
+        if (existing) {
+          existing.bytesServed += BigInt(bytesRead);
+          existing.lastActivityAt = Date.now();
+          recordUploadBytes(existing, bytesRead);
+        } else {
+          activeUploadSessions.set(sessionKey, {
+            sha256: msg.sha256,
+            filename: file.filename,
+            size: file.size,
+            friendId: friend.id,
+            peerNodeId: senderNodeId,
+            bytesServed: BigInt(bytesRead),
+            startedAt: Date.now(),
+            lastActivityAt: Date.now(),
+            speedSamples: [{ time: Date.now(), bytes: bytesRead }],
+          });
+        }
       }
     } finally {
       await fh.close();
@@ -256,6 +347,9 @@ export function cancelUploadFlushForFriend(friendId: string): void {
     pendingUploadTimers.delete(friendId);
   }
   pendingUploads.delete(friendId);
+  for (const key of activeUploadSessions.keys()) {
+    if (key.startsWith(`${friendId}:`)) activeUploadSessions.delete(key);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -268,6 +362,7 @@ export function resetPendingForTesting(): void {
   pendingUploads.clear();
   pendingUploadTimers.forEach((t) => clearTimeout(t));
   pendingUploadTimers.clear();
+  activeUploadSessions.clear();
   lastTransferId = '';
 }
 

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 
+import type { Transfer, Upload } from '../../lib/api';
 import {
   controlTransfer,
   dismissTransfer,
@@ -9,13 +10,12 @@ import {
   formatEta,
   formatSpeed,
   getTransfers,
+  getUploads,
 } from '../../lib/api';
-import type { Transfer } from '../../lib/api';
 
 import styles from './transfers.module.css';
 
 const POLL_MS = 1500;
-
 const ACTIVE_STATES = new Set(['PENDING', 'DOWNLOADING', 'PAUSED']);
 
 // ── Download row ──────────────────────────────────────────────────────────────
@@ -48,46 +48,48 @@ function DownloadRow({ transfer, onAction }: { transfer: Transfer; onAction: () 
   const active = ACTIVE_STATES.has(transfer.state);
 
   return (
-    <li className={styles.row}>
-      <div className={styles.rowTop}>
-        <span className={styles.rowName}>{transfer.filename}</span>
-        <span className={`${styles.stateBadge} ${styles[`state${transfer.state}`]}`}>
-          {transfer.state.toLowerCase()}
-        </span>
-      </div>
+    <li className={`${styles.row} ${working ? styles.rowWorking : ''}`}>
+      <span className={`${styles.stateBar} ${styles[`state${transfer.state}`]}`} />
 
-      {active && (
-        <div
-          className={styles.progressBar}
-          role="progressbar"
-          aria-valuenow={pct}
-          aria-valuemin={0}
-          aria-valuemax={100}
-          aria-label={`${transfer.filename} download progress`}
-        >
-          <div className={styles.progressFill} style={{ width: `${pct}%` }} />
-        </div>
+      <span className={styles.rowName} title={transfer.filename}>
+        {transfer.filename}
+      </span>
+
+      {active ? (
+        <span className={styles.rowProgress}>
+          <span
+            className={styles.progressTrack}
+            role="progressbar"
+            aria-valuenow={pct}
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-label={`${transfer.filename} download progress`}
+          >
+            <span className={styles.progressFill} style={{ width: `${pct}%` }} />
+          </span>
+          <span className={styles.pct}>{pct}%</span>
+        </span>
+      ) : (
+        <span className={styles.rowProgress} />
       )}
 
-      <div className={styles.rowMeta}>
-        <span>
-          {formatBytes(transfer.bytesReceived)} / {formatBytes(transfer.size)}
-        </span>
-        {active && (
-          <>
-            <span>{formatSpeed(transfer.speedBps)}</span>
-            <span>ETA {formatEta(transfer.etaSeconds)}</span>
-            {transfer.sources > 0 && (
-              <span>
-                {transfer.sources} source{transfer.sources !== 1 ? 's' : ''}
-              </span>
-            )}
-          </>
-        )}
-        {transfer.error && <span className={styles.rowError}>{transfer.error}</span>}
-      </div>
+      <span className={styles.rowBytes}>
+        {formatBytes(transfer.bytesReceived)} / {formatBytes(transfer.size)}
+      </span>
 
-      <div className={styles.rowActions}>
+      <span className={styles.rowSpeed}>{active ? formatSpeed(transfer.speedBps) : '–'}</span>
+
+      <span className={styles.rowEta}>
+        {active && transfer.etaSeconds != null ? formatEta(transfer.etaSeconds) : '–'}
+      </span>
+
+      {transfer.sources > 0 && active ? (
+        <span className={styles.rowSources}>{transfer.sources} src</span>
+      ) : (
+        <span className={styles.rowSources} />
+      )}
+
+      <span className={styles.rowActions}>
         {transfer.state === 'DOWNLOADING' && (
           <button className="btn btn-ghost" onClick={() => doAction('pause')} disabled={working}>
             Pause
@@ -105,7 +107,7 @@ function DownloadRow({ transfer, onAction }: { transfer: Transfer; onAction: () 
         )}
         {active && confirming && (
           <>
-            <span className={styles.confirmText}>Cancel download?</span>
+            <span className={styles.confirmText}>Cancel?</span>
             <button className="btn btn-ghost" onClick={() => doAction('cancel')} disabled={working}>
               Yes
             </button>
@@ -123,9 +125,30 @@ function DownloadRow({ transfer, onAction }: { transfer: Transfer; onAction: () 
             Dismiss
           </button>
         )}
-      </div>
+      </span>
 
-      {error && <p className={styles.rowError}>{error}</p>}
+      {error && <span className={styles.rowError}>{error}</span>}
+    </li>
+  );
+}
+
+// ── Upload row ────────────────────────────────────────────────────────────────
+
+function UploadRow({ upload }: { upload: Upload }) {
+  return (
+    <li className={styles.row}>
+      <span className={`${styles.stateBar} ${styles.stateUPLOADING}`} />
+      <span className={styles.rowName} title={upload.filename}>
+        {upload.filename}
+      </span>
+      <span className={styles.rowProgress} />
+      <span className={styles.rowBytes}>
+        {formatBytes(upload.bytesServed)} / {formatBytes(upload.size)}
+      </span>
+      <span className={styles.rowSpeed}>{formatSpeed(upload.speedBps)}</span>
+      <span className={styles.rowEta}>–</span>
+      <span className={styles.rowSources}>{upload.peerNodeId.slice(0, 8)}…</span>
+      <span className={styles.rowActions} />
     </li>
   );
 }
@@ -134,15 +157,20 @@ function DownloadRow({ transfer, onAction }: { transfer: Transfer; onAction: () 
 
 export default function TransfersView() {
   const [transfers, setTransfers] = useState<Transfer[]>([]);
+  const [uploads, setUploads] = useState<Upload[]>([]);
   const [loadError, setLoadError] = useState('');
-  const pollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [splitPct, setSplitPct] = useState(60);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const dragging = useRef(false);
   const mountedRef = useRef(true);
+  const pollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const load = useCallback(async () => {
     try {
-      const data = await getTransfers();
+      const [t, u] = await Promise.all([getTransfers(), getUploads()]);
       if (mountedRef.current) {
-        setTransfers(data);
+        setTransfers(t);
+        setUploads(u);
         setLoadError('');
       }
     } catch {
@@ -171,26 +199,97 @@ export default function TransfersView() {
     };
   }, [load]);
 
-  const downloads = transfers;
+  // Resizable drag handle
+  useEffect(() => {
+    function onMouseMove(e: MouseEvent) {
+      if (!dragging.current || !containerRef.current) return;
+      const rect = containerRef.current.getBoundingClientRect();
+      const pct = ((e.clientY - rect.top) / rect.height) * 100;
+      setSplitPct(Math.min(Math.max(pct, 20), 80));
+    }
+    function onMouseUp() {
+      dragging.current = false;
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    }
+    window.addEventListener('mousemove', onMouseMove);
+    window.addEventListener('mouseup', onMouseUp);
+    return () => {
+      window.removeEventListener('mousemove', onMouseMove);
+      window.removeEventListener('mouseup', onMouseUp);
+    };
+  }, []);
+
+  function onHandleMouseDown(e: React.MouseEvent) {
+    e.preventDefault();
+    dragging.current = true;
+    document.body.style.cursor = 'ns-resize';
+    document.body.style.userSelect = 'none';
+  }
+
+  async function clearFinished() {
+    const finished = transfers.filter((t) => !ACTIVE_STATES.has(t.state));
+    await Promise.allSettled(finished.map((t) => dismissTransfer(t.id)));
+    load();
+  }
+
+  const activeDownloads = transfers.filter((t) => ACTIVE_STATES.has(t.state));
+  const concurrentUploads = uploads.length;
 
   return (
-    <div className={styles.page}>
-      <h1 className={styles.pageTitle}>Transfers</h1>
-
+    <div className={styles.page} ref={containerRef}>
       {loadError && <p className={styles.loadError}>{loadError}</p>}
 
-      <section className={styles.pane}>
-        <h2 className={styles.paneTitle}>Downloads</h2>
-        {downloads.length === 0 ? (
+      {/* Downloads pane */}
+      <div className={styles.pane} style={{ flex: `0 0 ${splitPct}%` }}>
+        <div className={styles.paneHeader}>
+          <h2 className={styles.paneTitle}>Downloads</h2>
+          <button
+            className="btn btn-ghost"
+            onClick={clearFinished}
+            disabled={transfers.every((t) => ACTIVE_STATES.has(t.state))}
+          >
+            Clear Finished
+          </button>
+        </div>
+
+        {transfers.length === 0 ? (
           <p className={styles.empty}>No downloads yet.</p>
         ) : (
           <ul className={styles.list}>
-            {downloads.map((t) => (
+            {transfers.map((t) => (
               <DownloadRow key={t.id} transfer={t} onAction={load} />
             ))}
           </ul>
         )}
-      </section>
+      </div>
+
+      {/* Drag handle */}
+      <div className={styles.handle} onMouseDown={onHandleMouseDown} aria-hidden="true" />
+
+      {/* Uploads pane */}
+      <div className={styles.pane} style={{ flex: 1 }}>
+        <div className={styles.paneHeader}>
+          <h2 className={styles.paneTitle}>Uploads</h2>
+        </div>
+
+        {uploads.length === 0 ? (
+          <p className={styles.empty}>No active uploads.</p>
+        ) : (
+          <ul className={styles.list}>
+            {uploads.map((u) => (
+              <UploadRow key={u.id} upload={u} />
+            ))}
+          </ul>
+        )}
+      </div>
+
+      {/* Status bar */}
+      <div className={styles.statusBar}>
+        <span>Concurrent Downloads: {activeDownloads.length}</span>
+        <span className={styles.statusDivider}>|</span>
+        <span>Concurrent Uploads: {concurrentUploads}</span>
+      </div>
     </div>
   );
 }
