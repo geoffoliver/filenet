@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { unlinkSync } from 'fs';
 
 import {
+  UPLOAD_SESSION_IDLE_MS,
   cancelUploadFlushForFriend,
   flushUploadStatsForTesting,
   getActiveUploadSessions,
@@ -596,5 +597,47 @@ describe('getActiveUploadSessions', () => {
     cancelUploadFlushForFriend(friend.id);
 
     expect(getActiveUploadSessions().some((s) => s.peerNodeId === 'c3'.repeat(16))).toBe(false);
+  });
+
+  it('prunes sessions idle longer than UPLOAD_SESSION_IDLE_MS', async () => {
+    const content = Buffer.from('expiry test content');
+    const filePath = join(tmpDir, 'expiry-session.txt');
+    await writeFile(filePath, content);
+    await indexFile(prisma, filePath);
+    const file = await prisma.sharedFile.findFirstOrThrow({ where: { path: filePath } });
+
+    await prisma.friend.create({
+      data: {
+        name: 'Peer',
+        address: '11.0.0.4',
+        port: 7734,
+        nodeId: 'd4'.repeat(16),
+        status: 'ACCEPTED',
+      },
+    });
+
+    await handleChunkRequest(
+      {
+        type: 'chunk-request',
+        transferId: 'tid-expiry',
+        sha256: file.sha256,
+        offset: 0,
+        length: content.length,
+      },
+      'd4'.repeat(16),
+      prisma,
+      () => {},
+    );
+
+    expect(getActiveUploadSessions().some((s) => s.peerNodeId === 'd4'.repeat(16))).toBe(true);
+
+    // Advance Date.now past the idle threshold so getActiveUploadSessions prunes it.
+    const realNow = Date.now.bind(Date);
+    Date.now = () => realNow() + UPLOAD_SESSION_IDLE_MS + 1_000;
+    try {
+      expect(getActiveUploadSessions().some((s) => s.peerNodeId === 'd4'.repeat(16))).toBe(false);
+    } finally {
+      Date.now = realNow;
+    }
   });
 });

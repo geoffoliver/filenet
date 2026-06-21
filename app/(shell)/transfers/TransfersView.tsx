@@ -160,6 +160,7 @@ export default function TransfersView() {
   const [uploads, setUploads] = useState<Upload[]>([]);
   const [loadError, setLoadError] = useState('');
   const [clearError, setClearError] = useState('');
+  const [clearing, setClearing] = useState(false);
   const [splitPct, setSplitPct] = useState(60);
   const containerRef = useRef<HTMLDivElement>(null);
   const dragging = useRef(false);
@@ -167,16 +168,15 @@ export default function TransfersView() {
   const pollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const load = useCallback(async () => {
-    try {
-      const [t, u] = await Promise.all([getTransfers(), getUploads()]);
-      if (mountedRef.current) {
-        setTransfers(t);
-        setUploads(u);
-        setLoadError('');
-      }
-    } catch {
-      if (mountedRef.current) setLoadError('Could not load transfers. Is the server running?');
+    const [tResult, uResult] = await Promise.allSettled([getTransfers(), getUploads()]);
+    if (!mountedRef.current) return;
+    if (tResult.status === 'fulfilled') {
+      setTransfers(tResult.value);
+      setLoadError('');
+    } else {
+      setLoadError('Could not load transfers. Is the server running?');
     }
+    if (uResult.status === 'fulfilled') setUploads(uResult.value);
   }, []);
 
   useEffect(() => {
@@ -231,13 +231,19 @@ export default function TransfersView() {
   }
 
   async function clearFinished() {
+    if (clearing) return;
+    setClearing(true);
     setClearError('');
-    const finished = transfers.filter((t) => !ACTIVE_STATES.has(t.state));
-    const results = await Promise.allSettled(finished.map((t) => dismissTransfer(t.id)));
-    const failed = results.filter((r): r is PromiseRejectedResult => r.status === 'rejected');
-    if (failed.length > 0)
-      setClearError(`Failed to dismiss ${failed.length} transfer${failed.length > 1 ? 's' : ''}`);
-    await load();
+    try {
+      const finished = transfers.filter((t) => !ACTIVE_STATES.has(t.state));
+      const results = await Promise.allSettled(finished.map((t) => dismissTransfer(t.id)));
+      const failed = results.filter((r): r is PromiseRejectedResult => r.status === 'rejected');
+      if (failed.length > 0)
+        setClearError(`Failed to dismiss ${failed.length} transfer${failed.length > 1 ? 's' : ''}`);
+      await load();
+    } finally {
+      setClearing(false);
+    }
   }
 
   const activeDownloads = transfers.filter((t) => ACTIVE_STATES.has(t.state));
@@ -256,7 +262,7 @@ export default function TransfersView() {
             <button
               className="btn btn-ghost"
               onClick={clearFinished}
-              disabled={transfers.every((t) => ACTIVE_STATES.has(t.state))}
+              disabled={clearing || transfers.every((t) => ACTIVE_STATES.has(t.state))}
             >
               Clear Finished
             </button>

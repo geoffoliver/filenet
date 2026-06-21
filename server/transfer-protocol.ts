@@ -67,7 +67,7 @@ function scheduleUploadFlush(friendId: string, prisma: PrismaClient): void {
 // ---------------------------------------------------------------------------
 
 const UPLOAD_SPEED_WINDOW_MS = 5_000;
-const UPLOAD_SESSION_IDLE_MS = 30_000;
+export const UPLOAD_SESSION_IDLE_MS = 30_000;
 
 interface SpeedSample {
   time: number;
@@ -87,6 +87,20 @@ interface ActiveUploadSession {
 }
 
 const activeUploadSessions = new Map<string, ActiveUploadSession>();
+
+// Prune idle sessions on a background timer so expiry fires even when
+// /api/uploads is never polled (headless servers won't have a UI polling it).
+setInterval(
+  () => {
+    const now = Date.now();
+    for (const [id, s] of activeUploadSessions) {
+      if (now - s.lastActivityAt >= UPLOAD_SESSION_IDLE_MS) {
+        activeUploadSessions.delete(id);
+      }
+    }
+  },
+  Math.round(UPLOAD_SESSION_IDLE_MS / 2),
+).unref();
 
 function recordUploadBytes(session: ActiveUploadSession, bytes: number): void {
   const now = Date.now();
