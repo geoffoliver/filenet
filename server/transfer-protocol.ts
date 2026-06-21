@@ -92,9 +92,9 @@ function recordUploadBytes(session: ActiveUploadSession, bytes: number): void {
   const now = Date.now();
   session.speedSamples.push({ time: now, bytes });
   const cutoff = now - UPLOAD_SPEED_WINDOW_MS;
-  while (session.speedSamples.length > 0 && session.speedSamples[0].time < cutoff) {
-    session.speedSamples.shift();
-  }
+  const firstValid = session.speedSamples.findIndex((s) => s.time >= cutoff);
+  if (firstValid === -1) session.speedSamples = [];
+  else if (firstValid > 0) session.speedSamples.splice(0, firstValid);
 }
 
 function calcUploadSpeed(session: ActiveUploadSession): number {

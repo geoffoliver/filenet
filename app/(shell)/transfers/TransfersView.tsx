@@ -159,6 +159,7 @@ export default function TransfersView() {
   const [transfers, setTransfers] = useState<Transfer[]>([]);
   const [uploads, setUploads] = useState<Upload[]>([]);
   const [loadError, setLoadError] = useState('');
+  const [clearError, setClearError] = useState('');
   const [splitPct, setSplitPct] = useState(60);
   const containerRef = useRef<HTMLDivElement>(null);
   const dragging = useRef(false);
@@ -217,6 +218,8 @@ export default function TransfersView() {
     return () => {
       window.removeEventListener('mousemove', onMouseMove);
       window.removeEventListener('mouseup', onMouseUp);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
     };
   }, []);
 
@@ -228,8 +231,12 @@ export default function TransfersView() {
   }
 
   async function clearFinished() {
+    setClearError('');
     const finished = transfers.filter((t) => !ACTIVE_STATES.has(t.state));
-    await Promise.allSettled(finished.map((t) => dismissTransfer(t.id)));
+    const results = await Promise.allSettled(finished.map((t) => dismissTransfer(t.id)));
+    const failed = results.filter((r): r is PromiseRejectedResult => r.status === 'rejected');
+    if (failed.length > 0)
+      setClearError(`Failed to dismiss ${failed.length} transfer${failed.length > 1 ? 's' : ''}`);
     await load();
   }
 
@@ -244,13 +251,16 @@ export default function TransfersView() {
       <div className={styles.pane} style={{ flex: `0 0 ${splitPct}%` }}>
         <div className={styles.paneHeader}>
           <h2 className={styles.paneTitle}>Downloads</h2>
-          <button
-            className="btn btn-ghost"
-            onClick={clearFinished}
-            disabled={transfers.every((t) => ACTIVE_STATES.has(t.state))}
-          >
-            Clear Finished
-          </button>
+          <span className={styles.paneHeaderRight}>
+            {clearError && <span className={styles.clearError}>{clearError}</span>}
+            <button
+              className="btn btn-ghost"
+              onClick={clearFinished}
+              disabled={transfers.every((t) => ACTIVE_STATES.has(t.state))}
+            >
+              Clear Finished
+            </button>
+          </span>
         </div>
 
         {transfers.length === 0 ? (
@@ -276,9 +286,13 @@ export default function TransfersView() {
         tabIndex={0}
         onMouseDown={onHandleMouseDown}
         onKeyDown={(e) => {
-          if (e.key === 'ArrowUp') setSplitPct((p) => Math.max(p - (e.shiftKey ? 10 : 2), 20));
-          else if (e.key === 'ArrowDown')
-            setSplitPct((p) => Math.min(p + (e.shiftKey ? 10 : 2), 80));
+          if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+            e.preventDefault();
+            const delta = e.shiftKey ? 10 : 2;
+            setSplitPct((p) =>
+              e.key === 'ArrowUp' ? Math.max(p - delta, 20) : Math.min(p + delta, 80),
+            );
+          }
         }}
       />
 

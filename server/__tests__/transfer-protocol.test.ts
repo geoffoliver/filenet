@@ -8,6 +8,7 @@ import { unlinkSync } from 'fs';
 import {
   cancelUploadFlushForFriend,
   flushUploadStatsForTesting,
+  getActiveUploadSessions,
   getLastTransferIdForTesting,
   handleChunkError,
   handleChunkRequest,
@@ -471,5 +472,129 @@ describe('requestChunk + handleChunkError', () => {
         reason: 'nope',
       }),
     ).not.toThrow();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// getActiveUploadSessions — live upload tracking
+// ---------------------------------------------------------------------------
+
+describe('getActiveUploadSessions', () => {
+  it('returns an empty array when no chunks have been served', () => {
+    expect(getActiveUploadSessions()).toEqual([]);
+  });
+
+  it('tracks a session after the first chunk is served', async () => {
+    const content = Buffer.from('live session content');
+    const filePath = join(tmpDir, 'live-session.txt');
+    await writeFile(filePath, content);
+    await indexFile(prisma, filePath);
+    const file = await prisma.sharedFile.findFirstOrThrow({ where: { path: filePath } });
+
+    await prisma.friend.create({
+      data: {
+        name: 'Peer',
+        address: '11.0.0.1',
+        port: 7734,
+        nodeId: 'a1'.repeat(16),
+        status: 'ACCEPTED',
+      },
+    });
+
+    await handleChunkRequest(
+      {
+        type: 'chunk-request',
+        transferId: 'tid-live-1',
+        sha256: file.sha256,
+        offset: 0,
+        length: content.length,
+      },
+      'a1'.repeat(16),
+      prisma,
+      () => {},
+    );
+
+    const sessions = getActiveUploadSessions();
+    expect(sessions).toHaveLength(1);
+    expect(sessions[0].filename).toBe('live-session.txt');
+    expect(sessions[0].peerNodeId).toBe('a1'.repeat(16));
+    expect(BigInt(sessions[0].bytesServed)).toBe(BigInt(content.length));
+    expect(sessions[0].size).toBe(String(content.length));
+    expect(typeof sessions[0].speedBps).toBe('number');
+  });
+
+  it('accumulates bytes across multiple chunk requests for the same file/peer', async () => {
+    const content = Buffer.from('0123456789');
+    const filePath = join(tmpDir, 'multi-chunk-session.bin');
+    await writeFile(filePath, content);
+    await indexFile(prisma, filePath);
+    const file = await prisma.sharedFile.findFirstOrThrow({ where: { path: filePath } });
+
+    await prisma.friend.create({
+      data: {
+        name: 'Peer',
+        address: '11.0.0.2',
+        port: 7734,
+        nodeId: 'b2'.repeat(16),
+        status: 'ACCEPTED',
+      },
+    });
+
+    for (let i = 0; i < 3; i++) {
+      await handleChunkRequest(
+        {
+          type: 'chunk-request',
+          transferId: `tid-mc-${i}`,
+          sha256: file.sha256,
+          offset: 0,
+          length: 5,
+        },
+        'b2'.repeat(16),
+        prisma,
+        () => {},
+      );
+    }
+
+    const sessions = getActiveUploadSessions();
+    const s = sessions.find((x) => x.peerNodeId === 'b2'.repeat(16));
+    expect(s).toBeDefined();
+    expect(BigInt(s!.bytesServed)).toBe(15n);
+  });
+
+  it('cancelUploadFlushForFriend removes active sessions for that friend', async () => {
+    const content = Buffer.from('cancel session test');
+    const filePath = join(tmpDir, 'cancel-session.txt');
+    await writeFile(filePath, content);
+    await indexFile(prisma, filePath);
+    const file = await prisma.sharedFile.findFirstOrThrow({ where: { path: filePath } });
+
+    const friend = await prisma.friend.create({
+      data: {
+        name: 'Peer',
+        address: '11.0.0.3',
+        port: 7734,
+        nodeId: 'c3'.repeat(16),
+        status: 'ACCEPTED',
+      },
+    });
+
+    await handleChunkRequest(
+      {
+        type: 'chunk-request',
+        transferId: 'tid-cancel-session',
+        sha256: file.sha256,
+        offset: 0,
+        length: content.length,
+      },
+      'c3'.repeat(16),
+      prisma,
+      () => {},
+    );
+
+    expect(getActiveUploadSessions().some((s) => s.peerNodeId === 'c3'.repeat(16))).toBe(true);
+
+    cancelUploadFlushForFriend(friend.id);
+
+    expect(getActiveUploadSessions().some((s) => s.peerNodeId === 'c3'.repeat(16))).toBe(false);
   });
 });

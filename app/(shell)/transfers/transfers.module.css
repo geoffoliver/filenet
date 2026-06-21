@@ -21,6 +21,14 @@
   @apply flex-none flex items-center justify-between px-4 py-2 border-b border-[var(--border)];
 }
 
+.paneHeaderRight {
+  @apply flex items-center gap-2;
+}
+
+.clearError {
+  @apply text-xs text-[var(--color-danger)];
+}
+
 .paneTitle {
   @apply text-sm font-semibold text-[var(--text-secondary)] uppercase tracking-wide;
 }
@@ -37,7 +45,13 @@
 /* ── Drag handle ───────────────────────────────────────────────────────────── */
 
 .handle {
-  @apply flex-none h-[6px] cursor-ns-resize bg-[var(--border)] hover:bg-[var(--color-primary)] transition-colors duration-150;
+  @apply flex-none h-[6px] cursor-ns-resize bg-[var(--border)] hover:bg-[var(--color-primary)] transition-colors duration-150 outline-none;
+}
+
+.handle:focus-visible {
+  @apply bg-[var(--color-primary)];
+  outline: 2px solid var(--color-primary);
+  outline-offset: 1px;
 }
 
 /* ── Row ───────────────────────────────────────────────────────────────────── */
