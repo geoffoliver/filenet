@@ -117,18 +117,31 @@ function MetaDetail({ hit }: { hit: SearchHit }) {
 
   useEffect(() => {
     if (!downloadId || (downloadState && TERMINAL_STATES.has(downloadState))) return;
-    const poll = setInterval(async () => {
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout>;
+
+    async function tick() {
       try {
         const transfers = await getTransfers();
+        if (cancelled) return;
         const t = transfers.find((x) => x.id === downloadId);
-        if (!t) return;
-        setDownloadState(t.state);
-        setDownloadProgress(t.progress);
+        if (t) {
+          setDownloadState(t.state);
+          setDownloadProgress(t.progress);
+          if (!TERMINAL_STATES.has(t.state)) timer = setTimeout(tick, 2000);
+        } else {
+          timer = setTimeout(tick, 2000);
+        }
       } catch {
-        // ignore transient errors
+        if (!cancelled) timer = setTimeout(tick, 2000);
       }
-    }, 2000);
-    return () => clearInterval(poll);
+    }
+
+    timer = setTimeout(tick, 2000);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
   }, [downloadId, downloadState]);
 
   if (meta) {
@@ -211,7 +224,7 @@ function MetaDetail({ hit }: { hit: SearchHit }) {
                 : downloadState === 'CANCELLED'
                   ? 'Cancelled'
                   : downloadState === 'DOWNLOADING' || downloadState === 'PAUSED'
-                    ? `${downloadProgress}%`
+                    ? `${Math.round(downloadProgress * 100)}%`
                     : downloadId
                       ? 'Queued'
                       : 'Download'}

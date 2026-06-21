@@ -73,6 +73,7 @@ test('search via navbar navigates to search page', async ({ page }) => {
   await page.waitForURL('**/search?**q=navbar+query**');
 });
 
+// progress is 0..1 fraction, matching the real /api/transfers response
 const TRANSFER_ROW = (state: string, progress: number, completedAt: string | null = null) => ({
   id: 'dl-1',
   sha256: 'a'.repeat(64),
@@ -80,7 +81,7 @@ const TRANSFER_ROW = (state: string, progress: number, completedAt: string | nul
   size: '5242880',
   mimeType: 'audio/mpeg',
   state,
-  bytesReceived: String(Math.floor((5242880 * progress) / 100)),
+  bytesReceived: String(Math.floor(5242880 * progress)),
   progress,
   speedBps: state === 'COMPLETED' ? 0 : 1048576,
   etaSeconds: state === 'COMPLETED' ? null : 5,
@@ -95,7 +96,7 @@ test('download button shows progress while downloading', async ({ page }) => {
   await page.route('/api/transfers', (route) => {
     if (route.request().method() === 'POST') return route.fulfill({ json: { id: 'dl-1' } });
     if (route.request().method() === 'GET')
-      return route.fulfill({ json: [TRANSFER_ROW('DOWNLOADING', 50)] });
+      return route.fulfill({ json: [TRANSFER_ROW('DOWNLOADING', 0.5)] });
     return route.continue();
   });
 
@@ -111,7 +112,7 @@ test('download button shows Done after completion', async ({ page }) => {
     if (route.request().method() === 'POST') return route.fulfill({ json: { id: 'dl-1' } });
     if (route.request().method() === 'GET')
       return route.fulfill({
-        json: [TRANSFER_ROW('COMPLETED', 100, '2024-01-01T01:00:00.000Z')],
+        json: [TRANSFER_ROW('COMPLETED', 1, '2024-01-01T01:00:00.000Z')],
       });
     return route.continue();
   });
