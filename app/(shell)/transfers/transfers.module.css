@@ -139,7 +139,7 @@
 }
 
 .rowError {
-  @apply absolute text-xs text-[var(--color-danger)];
+  @apply flex-none text-xs text-[var(--color-danger)];
 }
 
 /* ── Status bar ────────────────────────────────────────────────────────────── */

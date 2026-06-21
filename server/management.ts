@@ -440,6 +440,7 @@ export function createManagementFetch(deps: ManagementDeps): (req: Request) => P
       }
 
       if (url.pathname === '/api/uploads') {
+        if (req.method !== 'GET') return new Response('Method Not Allowed', { status: 405 });
         return Response.json(getActiveUploadSessions());
       }
 

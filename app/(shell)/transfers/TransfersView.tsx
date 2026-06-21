@@ -230,7 +230,7 @@ export default function TransfersView() {
   async function clearFinished() {
     const finished = transfers.filter((t) => !ACTIVE_STATES.has(t.state));
     await Promise.allSettled(finished.map((t) => dismissTransfer(t.id)));
-    load();
+    await load();
   }
 
   const activeDownloads = transfers.filter((t) => ACTIVE_STATES.has(t.state));
@@ -265,7 +265,22 @@ export default function TransfersView() {
       </div>
 
       {/* Drag handle */}
-      <div className={styles.handle} onMouseDown={onHandleMouseDown} aria-hidden="true" />
+      <div
+        className={styles.handle}
+        role="separator"
+        aria-orientation="horizontal"
+        aria-valuenow={Math.round(splitPct)}
+        aria-valuemin={20}
+        aria-valuemax={80}
+        aria-label="Resize downloads/uploads panes"
+        tabIndex={0}
+        onMouseDown={onHandleMouseDown}
+        onKeyDown={(e) => {
+          if (e.key === 'ArrowUp') setSplitPct((p) => Math.max(p - (e.shiftKey ? 10 : 2), 20));
+          else if (e.key === 'ArrowDown')
+            setSplitPct((p) => Math.min(p + (e.shiftKey ? 10 : 2), 80));
+        }}
+      />
 
       {/* Uploads pane */}
       <div className={styles.pane} style={{ flex: 1 }}>

@@ -117,17 +117,23 @@ export type ActiveUploadInfo = {
 
 export function getActiveUploadSessions(): ActiveUploadInfo[] {
   const now = Date.now();
-  return Array.from(activeUploadSessions.entries())
-    .filter(([, s]) => now - s.lastActivityAt < UPLOAD_SESSION_IDLE_MS)
-    .map(([id, s]) => ({
-      id,
-      sha256: s.sha256,
-      filename: s.filename,
-      size: String(s.size),
-      peerNodeId: s.peerNodeId,
-      bytesServed: String(s.bytesServed),
-      speedBps: calcUploadSpeed(s),
-    }));
+  const results: ActiveUploadInfo[] = [];
+  for (const [id, s] of activeUploadSessions) {
+    if (now - s.lastActivityAt >= UPLOAD_SESSION_IDLE_MS) {
+      activeUploadSessions.delete(id);
+    } else {
+      results.push({
+        id,
+        sha256: s.sha256,
+        filename: s.filename,
+        size: String(s.size),
+        peerNodeId: s.peerNodeId,
+        bytesServed: String(s.bytesServed),
+        speedBps: calcUploadSpeed(s),
+      });
+    }
+  }
+  return results;
 }
 
 // ---------------------------------------------------------------------------
