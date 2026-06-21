@@ -120,7 +120,7 @@
 - [x] Results list: filename, size, mime type, source count (local + network merged by sha256)
 - [x] Result detail expand: full metadata, hash preview, "on this node" badge
 - [x] Download button placeholder (disabled until transfer system exists)
-- [ ] Live download feedback in search results — after clicking Download, poll `/api/transfers` by SHA-256 to track progress and reflect state in the button: Queued → X% → Downloaded ✓
+- [x] Live download feedback in search results — after clicking Download, poll `/api/transfers` every 2 s and reflect state in the button: Queued → X% → Done ✓; re-enables on failure/cancel for retry
 
 ### Chat
 

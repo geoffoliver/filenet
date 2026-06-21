@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Search download feedback** — after clicking Download in search results, the button polls `/api/transfers` every 2 s and reflects live state: Starting… → Queued → 42% → Done ✓; re-enables on failure or cancellation so the user can retry
+
 - **Peer reconnect loop** — the server now automatically re-dials `ACCEPTED` and `OUTGOING_PENDING` friends every 30 seconds so dropped connections re-establish and offline peers are retried without user action
   - Duplicate in-flight dials are suppressed; first dial failure per address is logged once and then silenced until the connection recovers
   - Outbound friend-requests on reconnect include the invite password originally supplied at add-time, so peers with invite-password auto-accept can still auto-accept even if they were offline when the friend was first added

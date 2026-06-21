@@ -3,8 +3,8 @@
 import { useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 
-import type { FileType, LocalFile, NetworkFile } from '../../lib/api';
-import { formatBytes, searchFiles, startDownload } from '../../lib/api';
+import type { FileType, LocalFile, NetworkFile, TransferState } from '../../lib/api';
+import { formatBytes, getTransfers, searchFiles, startDownload } from '../../lib/api';
 
 import styles from './search.module.css';
 
@@ -100,6 +100,8 @@ function mimeIcon(mimeType: string | null): string {
   return '📄';
 }
 
+const TERMINAL_STATES = new Set<TransferState>(['COMPLETED', 'FAILED', 'CANCELLED']);
+
 function MetaDetail({ hit }: { hit: SearchHit }) {
   const meta = parseMeta(hit.metadata);
   // Only include sources we're directly connected to — relayed results carry the
@@ -107,9 +109,40 @@ function MetaDetail({ hit }: { hit: SearchHit }) {
   const directSources = hit.networkSources.filter((n) => !n.viaNodeId || n.viaNodeId === n.nodeId);
   const sources = (hit.local ? 1 : 0) + hit.networkSources.length;
   const rows: { label: string; value: string }[] = [];
-  const [downloading, setDownloading] = useState(false);
+  const [starting, setStarting] = useState(false);
+  const [downloadId, setDownloadId] = useState<string | null>(null);
+  const [downloadState, setDownloadState] = useState<TransferState | null>(null);
+  const [downloadProgress, setDownloadProgress] = useState(0);
   const [downloadError, setDownloadError] = useState('');
-  const [downloaded, setDownloaded] = useState(false);
+
+  useEffect(() => {
+    if (!downloadId || (downloadState && TERMINAL_STATES.has(downloadState))) return;
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout>;
+
+    async function tick() {
+      try {
+        const transfers = await getTransfers();
+        if (cancelled) return;
+        const t = transfers.find((x) => x.id === downloadId);
+        if (t) {
+          setDownloadState(t.state);
+          setDownloadProgress(t.progress);
+          if (!TERMINAL_STATES.has(t.state)) timer = setTimeout(tick, 2000);
+        } else {
+          timer = setTimeout(tick, 2000);
+        }
+      } catch {
+        if (!cancelled) timer = setTimeout(tick, 2000);
+      }
+    }
+
+    timer = setTimeout(tick, 2000);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [downloadId, downloadState]);
 
   if (meta) {
     if (meta.title) rows.push({ label: 'Title', value: String(meta.title) });
@@ -155,10 +188,17 @@ function MetaDetail({ hit }: { hit: SearchHit }) {
         <button
           type="button"
           className="btn btn-primary"
-          disabled={downloading || downloaded || directSources.length === 0}
+          disabled={
+            starting ||
+            (!!downloadId && downloadState !== 'FAILED' && downloadState !== 'CANCELLED') ||
+            directSources.length === 0
+          }
           onClick={() => {
             const allSources = directSources.map((n) => n.nodeId);
-            setDownloading(true);
+            setDownloadId(null);
+            setDownloadState(null);
+            setDownloadProgress(0);
+            setStarting(true);
             setDownloadError('');
             startDownload({
               sha256: hit.sha256,
@@ -167,12 +207,27 @@ function MetaDetail({ hit }: { hit: SearchHit }) {
               mimeType: hit.mimeType ?? undefined,
               sources: allSources,
             })
-              .then(() => setDownloaded(true))
+              .then(({ id }) => {
+                setDownloadId(id);
+                setDownloadState('PENDING');
+              })
               .catch((err: Error) => setDownloadError(err.message))
-              .finally(() => setDownloading(false));
+              .finally(() => setStarting(false));
           }}
         >
-          {downloading ? 'Starting…' : downloaded ? 'Queued' : 'Download'}
+          {starting
+            ? 'Starting…'
+            : downloadState === 'COMPLETED'
+              ? 'Done ✓'
+              : downloadState === 'FAILED'
+                ? 'Failed'
+                : downloadState === 'CANCELLED'
+                  ? 'Cancelled'
+                  : downloadState === 'DOWNLOADING' || downloadState === 'PAUSED'
+                    ? `${Math.round(downloadProgress * 100)}%`
+                    : downloadId
+                      ? 'Queued'
+                      : 'Download'}
         </button>
         {downloadError && <span className={styles.downloadError}>{downloadError}</span>}
       </div>
