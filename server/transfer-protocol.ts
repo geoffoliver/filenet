@@ -355,6 +355,12 @@ export async function dispatchTransferMessage(
 // Friend lifecycle helpers
 // ---------------------------------------------------------------------------
 
+export function clearActiveUploadSessionsForPeer(peerNodeId: string): void {
+  for (const [key, session] of activeUploadSessions) {
+    if (session.peerNodeId === peerNodeId) activeUploadSessions.delete(key);
+  }
+}
+
 export function cancelUploadFlushForFriend(friendId: string): void {
   const timer = pendingUploadTimers.get(friendId);
   if (timer) {

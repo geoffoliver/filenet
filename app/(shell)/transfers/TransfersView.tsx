@@ -44,7 +44,7 @@ function DownloadRow({ transfer, onAction }: { transfer: Transfer; onAction: () 
       .finally(() => setWorking(false));
   }
 
-  const pct = Math.round(transfer.progress * 100);
+  const pct = Math.min(100, Math.max(0, Math.round(transfer.progress * 100)));
   const active = ACTIVE_STATES.has(transfer.state);
 
   return (
@@ -176,6 +176,7 @@ export default function TransfersView() {
       setClearError('');
     } else {
       setLoadError('Could not load transfers. Is the server running?');
+      setClearError('');
     }
     if (uResult.status === 'fulfilled') {
       setUploads(uResult.value);
@@ -241,14 +242,8 @@ export default function TransfersView() {
     setClearError('');
     try {
       const finished = transfers.filter((t) => !ACTIVE_STATES.has(t.state));
-      let failCount = 0;
-      for (const t of finished) {
-        try {
-          await dismissTransfer(t.id);
-        } catch {
-          failCount++;
-        }
-      }
+      const results = await Promise.allSettled(finished.map((t) => dismissTransfer(t.id)));
+      const failCount = results.filter((r) => r.status === 'rejected').length;
       if (failCount > 0)
         setClearError(`Failed to dismiss ${failCount} transfer${failCount > 1 ? 's' : ''}`);
       await load();
