@@ -244,6 +244,7 @@ export async function handleChunkRequest(
 
         // Update live upload session for Transfers UI
         const now = Date.now();
+        const bucket = Math.floor(now / SPEED_BUCKET_MS) * SPEED_BUCKET_MS;
         const existing = activeUploadSessions.get(dedupKey);
         if (existing) {
           existing.bytesServed += BigInt(bytesRead);
@@ -259,7 +260,7 @@ export async function handleChunkRequest(
             bytesServed: BigInt(bytesRead),
             startedAt: now,
             lastActivityAt: now,
-            speedSamples: [{ time: now, bytes: bytesRead }],
+            speedSamples: [{ time: bucket, bytes: bytesRead }],
           });
         }
       }
