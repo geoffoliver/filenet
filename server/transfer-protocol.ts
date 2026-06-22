@@ -69,8 +69,10 @@ function scheduleUploadFlush(friendId: string, prisma: PrismaClient): void {
 const UPLOAD_SPEED_WINDOW_MS = 5_000;
 export const UPLOAD_SESSION_IDLE_MS = 30_000;
 
+const SPEED_BUCKET_MS = 500; // coalesce samples into fixed-width buckets
+
 interface SpeedSample {
-  time: number;
+  time: number; // bucket start (floored to SPEED_BUCKET_MS)
   bytes: number;
 }
 
@@ -103,7 +105,13 @@ setInterval(pruneIdleUploadSessions, Math.round(UPLOAD_SESSION_IDLE_MS / 2)).unr
 
 function recordUploadBytes(session: ActiveUploadSession, bytes: number): void {
   const now = Date.now();
-  session.speedSamples.push({ time: now, bytes });
+  const bucket = Math.floor(now / SPEED_BUCKET_MS) * SPEED_BUCKET_MS;
+  const last = session.speedSamples[session.speedSamples.length - 1];
+  if (last && last.time === bucket) {
+    last.bytes += bytes;
+  } else {
+    session.speedSamples.push({ time: bucket, bytes });
+  }
   const cutoff = now - UPLOAD_SPEED_WINDOW_MS;
   const firstValid = session.speedSamples.findIndex((s) => s.time >= cutoff);
   if (firstValid === -1) session.speedSamples = [];

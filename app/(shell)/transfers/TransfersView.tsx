@@ -127,7 +127,9 @@ function DownloadRow({ transfer, onAction }: { transfer: Transfer; onAction: () 
         )}
       </span>
 
-      {error && <span className={styles.rowError}>{error}</span>}
+      {(error || transfer.error) && (
+        <span className={styles.rowError}>{error || transfer.error}</span>
+      )}
     </li>
   );
 }
