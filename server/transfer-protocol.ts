@@ -119,10 +119,13 @@ function recordUploadBytes(session: ActiveUploadSession, bytes: number): void {
 }
 
 function calcUploadSpeed(session: ActiveUploadSession): number {
-  if (session.speedSamples.length === 0) return 0;
-  const windowMs = Date.now() - session.speedSamples[0].time;
+  const now = Date.now();
+  const cutoff = now - UPLOAD_SPEED_WINDOW_MS;
+  const valid = session.speedSamples.filter((s) => s.time >= cutoff);
+  if (valid.length === 0) return 0;
+  const windowMs = now - valid[0].time;
   if (windowMs < 100) return 0;
-  const totalBytes = session.speedSamples.reduce((sum, r) => sum + r.bytes, 0);
+  const totalBytes = valid.reduce((sum, r) => sum + r.bytes, 0);
   return Math.round((totalBytes / windowMs) * 1000);
 }
 

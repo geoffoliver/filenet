@@ -124,8 +124,10 @@ Bun.serve<PeerData>({
       const state = ws.data.state;
       if (state.phase === 'authenticated') {
         const current = getConnectedPeer(state.peerNodeId);
-        if (current && (current.ws as unknown) === ws) unregisterPeer(state.peerNodeId);
-        clearActiveUploadSessionsForPeer(state.peerNodeId);
+        if (current && (current.ws as unknown) === ws) {
+          unregisterPeer(state.peerNodeId);
+          clearActiveUploadSessionsForPeer(state.peerNodeId);
+        }
       }
     },
   },
