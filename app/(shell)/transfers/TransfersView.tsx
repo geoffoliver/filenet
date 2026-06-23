@@ -167,7 +167,6 @@ export default function TransfersView() {
   const containerRef = useRef<HTMLDivElement>(null);
   const dragging = useRef(false);
   const mountedRef = useRef(true);
-  const pollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const load = useCallback(async () => {
     const [tResult, uResult] = await Promise.allSettled([getTransfers(), getUploads()]);
@@ -195,7 +194,7 @@ export default function TransfersView() {
         await load();
         if (!mountedRef.current) break;
         await new Promise<void>((resolve) => {
-          pollRef.current = setTimeout(resolve, POLL_MS);
+          setTimeout(resolve, POLL_MS);
         });
       }
     }
@@ -204,7 +203,6 @@ export default function TransfersView() {
 
     return () => {
       mountedRef.current = false;
-      if (pollRef.current !== null) clearTimeout(pollRef.current);
     };
   }, [load]);
 

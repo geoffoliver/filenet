@@ -8,6 +8,7 @@ import { unlinkSync } from 'fs';
 import {
   UPLOAD_SESSION_IDLE_MS,
   cancelUploadFlushForFriend,
+  clearActiveUploadSessionsForPeer,
   flushUploadStatsForTesting,
   getActiveUploadSessions,
   getLastTransferIdForTesting,
@@ -597,6 +598,57 @@ describe('getActiveUploadSessions', () => {
     cancelUploadFlushForFriend(friend.id);
 
     expect(getActiveUploadSessions().some((s) => s.peerNodeId === 'c3'.repeat(16))).toBe(false);
+  });
+
+  it('clearActiveUploadSessionsForPeer removes sessions for that peer only', async () => {
+    const content = Buffer.from('peer disconnect test');
+    const filePath = join(tmpDir, 'peer-disconnect-session.txt');
+    await writeFile(filePath, content);
+    await indexFile(prisma, filePath);
+    const file = await prisma.sharedFile.findFirstOrThrow({ where: { path: filePath } });
+
+    // Two friends, same file — only the disconnecting peer's session should be removed.
+    await prisma.friend.create({
+      data: {
+        name: 'Peer E5',
+        address: '11.0.0.5',
+        port: 7734,
+        nodeId: 'e5'.repeat(16),
+        status: 'ACCEPTED',
+      },
+    });
+    await prisma.friend.create({
+      data: {
+        name: 'Peer F6',
+        address: '11.0.0.6',
+        port: 7734,
+        nodeId: 'f6'.repeat(16),
+        status: 'ACCEPTED',
+      },
+    });
+
+    for (const nodeId of ['e5'.repeat(16), 'f6'.repeat(16)]) {
+      await handleChunkRequest(
+        {
+          type: 'chunk-request',
+          transferId: `tid-pd-${nodeId}`,
+          sha256: file.sha256,
+          offset: 0,
+          length: content.length,
+        },
+        nodeId,
+        prisma,
+        () => {},
+      );
+    }
+
+    expect(getActiveUploadSessions().some((s) => s.peerNodeId === 'e5'.repeat(16))).toBe(true);
+    expect(getActiveUploadSessions().some((s) => s.peerNodeId === 'f6'.repeat(16))).toBe(true);
+
+    clearActiveUploadSessionsForPeer('e5'.repeat(16));
+
+    expect(getActiveUploadSessions().some((s) => s.peerNodeId === 'e5'.repeat(16))).toBe(false);
+    expect(getActiveUploadSessions().some((s) => s.peerNodeId === 'f6'.repeat(16))).toBe(true);
   });
 
   it('prunes sessions idle longer than UPLOAD_SESSION_IDLE_MS', async () => {
