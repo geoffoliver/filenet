@@ -174,7 +174,6 @@ export default function TransfersView() {
     if (tResult.status === 'fulfilled') {
       setTransfers(tResult.value);
       setLoadError('');
-      setClearError('');
     } else {
       setLoadError('Could not load transfers. Is the server running?');
       setClearError('');
