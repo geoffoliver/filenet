@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'bun:test';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, jest } from 'bun:test';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { execSync } from 'child_process';
 import { join } from 'node:path';
@@ -683,13 +683,13 @@ describe('getActiveUploadSessions', () => {
 
     expect(getActiveUploadSessions().some((s) => s.peerNodeId === 'd4'.repeat(16))).toBe(true);
 
-    // Advance Date.now past the idle threshold so getActiveUploadSessions prunes it.
-    const realNow = Date.now.bind(Date);
-    Date.now = () => realNow() + UPLOAD_SESSION_IDLE_MS + 1_000;
+    // Advance system time past the idle threshold so getActiveUploadSessions prunes it.
+    jest.useFakeTimers();
+    jest.setSystemTime(Date.now() + UPLOAD_SESSION_IDLE_MS + 1_000);
     try {
       expect(getActiveUploadSessions().some((s) => s.peerNodeId === 'd4'.repeat(16))).toBe(false);
     } finally {
-      Date.now = realNow;
+      jest.useRealTimers();
     }
   });
 });

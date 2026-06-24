@@ -49,7 +49,9 @@ function DownloadRow({ transfer, onAction }: { transfer: Transfer; onAction: () 
 
   return (
     <li className={`${styles.row} ${working ? styles.rowWorking : ''}`}>
-      <span className={`${styles.stateBar} ${styles[`state${transfer.state}`]}`} />
+      <span className={`${styles.stateBar} ${styles[`state${transfer.state}`]}`}>
+        <span className={styles.srOnly}>{transfer.state.toLowerCase()}</span>
+      </span>
 
       <span className={styles.rowName} title={transfer.filename}>
         {transfer.filename}
@@ -139,7 +141,9 @@ function DownloadRow({ transfer, onAction }: { transfer: Transfer; onAction: () 
 function UploadRow({ upload }: { upload: Upload }) {
   return (
     <li className={styles.row}>
-      <span className={`${styles.stateBar} ${styles.stateUPLOADING}`} />
+      <span className={`${styles.stateBar} ${styles.stateUPLOADING}`}>
+        <span className={styles.srOnly}>uploading</span>
+      </span>
       <span className={styles.rowName} title={upload.filename}>
         {upload.filename}
       </span>

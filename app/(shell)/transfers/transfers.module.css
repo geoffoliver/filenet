@@ -92,6 +92,11 @@
   background: var(--color-success);
 }
 
+/* Visually hidden but available to screen readers */
+.srOnly {
+  @apply sr-only;
+}
+
 /* Filename — takes available space */
 .rowName {
   @apply flex-1 truncate font-medium text-[var(--text-primary)] min-w-0;
