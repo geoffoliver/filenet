@@ -62,6 +62,102 @@ function scheduleUploadFlush(friendId: string, prisma: PrismaClient): void {
   );
 }
 
+// ---------------------------------------------------------------------------
+// Live upload session tracking — in-memory, shown in the Transfers UI
+// ---------------------------------------------------------------------------
+
+const UPLOAD_SPEED_WINDOW_MS = 5_000;
+export const UPLOAD_SESSION_IDLE_MS = 30_000;
+
+const SPEED_BUCKET_MS = 500; // coalesce samples into fixed-width buckets
+
+interface SpeedSample {
+  time: number; // bucket start (floored to SPEED_BUCKET_MS)
+  bytes: number;
+}
+
+interface ActiveUploadSession {
+  sha256: string;
+  filename: string;
+  size: bigint;
+  friendId: string;
+  peerNodeId: string;
+  bytesServed: bigint;
+  startedAt: number;
+  lastActivityAt: number;
+  speedSamples: SpeedSample[];
+}
+
+const activeUploadSessions = new Map<string, ActiveUploadSession>();
+
+function pruneIdleUploadSessions(): void {
+  const now = Date.now();
+  for (const [id, s] of activeUploadSessions) {
+    if (now - s.lastActivityAt >= UPLOAD_SESSION_IDLE_MS) {
+      activeUploadSessions.delete(id);
+    }
+  }
+}
+
+// Prune idle sessions on a background timer so expiry fires even when
+// /api/uploads is never polled (headless servers won't have a UI polling it).
+setInterval(pruneIdleUploadSessions, Math.round(UPLOAD_SESSION_IDLE_MS / 2)).unref();
+
+function recordUploadBytes(session: ActiveUploadSession, bytes: number): void {
+  const now = Date.now();
+  const bucket = Math.floor(now / SPEED_BUCKET_MS) * SPEED_BUCKET_MS;
+  const last = session.speedSamples[session.speedSamples.length - 1];
+  if (last && last.time === bucket) {
+    last.bytes += bytes;
+  } else {
+    session.speedSamples.push({ time: bucket, bytes });
+  }
+  const cutoff = now - UPLOAD_SPEED_WINDOW_MS;
+  const firstValid = session.speedSamples.findIndex((s) => s.time >= cutoff);
+  if (firstValid === -1) session.speedSamples = [];
+  else if (firstValid > 0) session.speedSamples.splice(0, firstValid);
+}
+
+function calcUploadSpeed(session: ActiveUploadSession): number {
+  const now = Date.now();
+  const cutoff = now - UPLOAD_SPEED_WINDOW_MS;
+  const valid = session.speedSamples.filter((s) => s.time >= cutoff);
+  if (valid.length === 0) return 0;
+  const windowMs = now - valid[0].time;
+  if (windowMs < 100) return 0;
+  const totalBytes = valid.reduce((sum, r) => sum + r.bytes, 0);
+  return Math.round((totalBytes / windowMs) * 1000);
+}
+
+export type ActiveUploadInfo = {
+  id: string;
+  sha256: string;
+  filename: string;
+  size: string;
+  peerNodeId: string;
+  bytesServed: string;
+  speedBps: number;
+};
+
+export function getActiveUploadSessions(): ActiveUploadInfo[] {
+  pruneIdleUploadSessions();
+  const results: ActiveUploadInfo[] = [];
+  for (const [id, s] of activeUploadSessions) {
+    results.push({
+      id,
+      sha256: s.sha256,
+      filename: s.filename,
+      size: String(s.size),
+      peerNodeId: s.peerNodeId,
+      bytesServed: String(s.bytesServed),
+      speedBps: calcUploadSpeed(s),
+    });
+  }
+  return results;
+}
+
+// ---------------------------------------------------------------------------
+
 // Pending download-side chunk callbacks keyed by transferId
 const pendingChunks = new Map<
   string,
@@ -148,6 +244,28 @@ export async function handleChunkRequest(
         if (isFirstChunk) acc.newFileCount++;
         pendingUploads.set(friend.id, acc);
         scheduleUploadFlush(friend.id, prisma);
+
+        // Update live upload session for Transfers UI
+        const now = Date.now();
+        const bucket = Math.floor(now / SPEED_BUCKET_MS) * SPEED_BUCKET_MS;
+        const existing = activeUploadSessions.get(dedupKey);
+        if (existing) {
+          existing.bytesServed += BigInt(bytesRead);
+          existing.lastActivityAt = now;
+          recordUploadBytes(existing, bytesRead);
+        } else {
+          activeUploadSessions.set(dedupKey, {
+            sha256: msg.sha256,
+            filename: file.filename,
+            size: file.size,
+            friendId: friend.id,
+            peerNodeId: senderNodeId,
+            bytesServed: BigInt(bytesRead),
+            startedAt: now,
+            lastActivityAt: now,
+            speedSamples: [{ time: bucket, bytes: bytesRead }],
+          });
+        }
       }
     } finally {
       await fh.close();
@@ -249,6 +367,12 @@ export async function dispatchTransferMessage(
 // Friend lifecycle helpers
 // ---------------------------------------------------------------------------
 
+export function clearActiveUploadSessionsForPeer(peerNodeId: string): void {
+  for (const [key, session] of activeUploadSessions) {
+    if (session.peerNodeId === peerNodeId) activeUploadSessions.delete(key);
+  }
+}
+
 export function cancelUploadFlushForFriend(friendId: string): void {
   const timer = pendingUploadTimers.get(friendId);
   if (timer) {
@@ -256,6 +380,9 @@ export function cancelUploadFlushForFriend(friendId: string): void {
     pendingUploadTimers.delete(friendId);
   }
   pendingUploads.delete(friendId);
+  for (const key of activeUploadSessions.keys()) {
+    if (key.startsWith(`${friendId}:`)) activeUploadSessions.delete(key);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -268,6 +395,7 @@ export function resetPendingForTesting(): void {
   pendingUploads.clear();
   pendingUploadTimers.forEach((t) => clearTimeout(t));
   pendingUploadTimers.clear();
+  activeUploadSessions.clear();
   lastTransferId = '';
 }
 

@@ -5,11 +5,11 @@ import {
   handleMessage,
   handleOpen,
 } from './peer';
+import { clearActiveUploadSessionsForPeer, dispatchTransferMessage } from './transfer-protocol';
 import { connectToPeer, getConnectedPeer, unregisterPeer } from './connections';
 import { getOrCreateSettings, parseSharedFolders } from './config';
 import { createManagementFetch } from './management';
 import { createPrismaClient } from './db';
-import { dispatchTransferMessage } from './transfer-protocol';
 import { getOrCreateIdentity } from './identity';
 import { pauseAllActiveDownloads } from './download-manager';
 import { startPeriodicRescan } from './indexer';
@@ -124,7 +124,10 @@ Bun.serve<PeerData>({
       const state = ws.data.state;
       if (state.phase === 'authenticated') {
         const current = getConnectedPeer(state.peerNodeId);
-        if (current && (current.ws as unknown) === ws) unregisterPeer(state.peerNodeId);
+        if (current && (current.ws as unknown) === ws) {
+          unregisterPeer(state.peerNodeId);
+          clearActiveUploadSessionsForPeer(state.peerNodeId);
+        }
       }
     },
   },

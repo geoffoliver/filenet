@@ -177,6 +177,10 @@ export async function mockTransfers(page: Page, transfers = TRANSFERS) {
   });
 }
 
+export async function mockUploads(page: Page, uploads: object[] = []) {
+  await page.route('/api/uploads', (route) => route.fulfill({ json: uploads }));
+}
+
 export async function mockSearch(
   page: Page,
   results: { files: object[]; total: number; network?: object[] } = {
@@ -215,6 +219,7 @@ export async function mockBaseApp(page: Page) {
   await mockStats(page);
   await mockFriends(page);
   await mockTransfers(page);
+  await mockUploads(page);
   await mockConversations(page);
   await mockEnvConfig(page);
   await mockMe(page);

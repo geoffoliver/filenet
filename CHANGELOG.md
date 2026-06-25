@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Transfers view overhaul** — Napster-style split pane with resizable drag handle; downloads pane (top) and uploads pane (bottom); dense table-style rows showing inline progress bar, bytes received/total, speed, ETA, and source count; status bar at bottom showing concurrent download/upload counts; "Clear Finished" button; live upload session tracking (in-memory, per peer/file, 30 s idle expiry) exposed via new `GET /api/uploads` endpoint
+
 - **Search download feedback** — after clicking Download in search results, the button polls `/api/transfers` every 2 s and reflects live state: Starting… → Queued → 42% → Done ✓; re-enables on failure or cancellation so the user can retry
 
 - **Peer reconnect loop** — the server now automatically re-dials `ACCEPTED` and `OUTGOING_PENDING` friends every 30 seconds so dropped connections re-establish and offline peers are retried without user action

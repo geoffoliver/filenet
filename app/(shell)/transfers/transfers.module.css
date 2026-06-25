@@ -1,166 +1,172 @@
 @reference 'tailwindcss';
 
-.page {
-  @apply w-full
-    max-w-3xl
-    mx-auto
-    px-8
-    py-10;
-}
+/* ── Page — fills the shell's <main> ────────────────────────────────────────── */
 
-.pageTitle {
-  @apply text-2xl
-    font-semibold
-    text-[var(--text-primary)]
-    mb-8;
+.page {
+  @apply flex flex-col overflow-hidden;
+  height: calc(100vh - var(--navbar-height));
 }
 
 .loadError {
-  @apply text-sm
-    text-[var(--color-danger)]
-    mb-6;
+  @apply flex-none text-sm text-[var(--color-danger)] px-4 py-2;
 }
 
-/* ── Panes ────────────────────────────────────────────────────────────────── */
+/* ── Panes ─────────────────────────────────────────────────────────────────── */
 
 .pane {
-  @apply mb-10;
+  @apply flex flex-col overflow-hidden min-h-0;
+}
+
+.paneHeader {
+  @apply flex-none flex items-center justify-between px-4 py-2 border-b border-[var(--border)];
+}
+
+.paneHeaderRight {
+  @apply flex items-center gap-2;
+}
+
+.clearError {
+  @apply text-xs text-[var(--color-danger)];
 }
 
 .paneTitle {
-  @apply text-base
-    font-semibold
-    text-[var(--text-primary)]
-    mb-3;
+  @apply text-sm font-semibold text-[var(--text-secondary)] uppercase tracking-wide;
+}
+
+/* Rows container scrolls inside the pane */
+.list {
+  @apply list-none p-0 m-0 overflow-y-auto flex-1;
 }
 
 .empty {
-  @apply text-sm
-    text-[var(--text-muted)];
+  @apply text-sm text-[var(--text-muted)] px-4 py-3;
 }
 
-/* ── Row ──────────────────────────────────────────────────────────────────── */
+/* ── Drag handle ───────────────────────────────────────────────────────────── */
 
-.list {
-  @apply list-none
-    p-0
-    m-0
-    flex
-    flex-col
-    gap-2;
+.handle {
+  @apply flex-none h-[6px] cursor-ns-resize bg-[var(--border)] hover:bg-[var(--color-primary)] transition-colors duration-150 outline-none;
 }
+
+.handle:focus-visible {
+  @apply bg-[var(--color-primary)];
+  outline: 2px solid var(--color-primary);
+  outline-offset: 1px;
+}
+
+/* ── Row ───────────────────────────────────────────────────────────────────── */
 
 .row {
-  @apply flex
-    flex-col
-    gap-2
-    px-4
-    py-3
-    rounded-[var(--radius-md)]
-    border
-    border-[var(--border)]
-    bg-[var(--bg-surface)];
+  @apply flex items-center gap-3 px-4 py-2 text-sm border-b border-[var(--border)] hover:bg-[var(--bg-elevated)] transition-colors duration-75;
+  min-height: 40px;
 }
 
-.rowTop {
-  @apply flex
-    items-center
-    justify-between
-    gap-2;
+.rowWorking {
+  @apply opacity-60;
 }
 
-.rowName {
-  @apply text-sm
-    font-medium
-    text-[var(--text-primary)]
-    truncate
-    flex-1;
-}
-
-/* ── State badge ──────────────────────────────────────────────────────────── */
-
-.stateBadge {
-  @apply inline-block
-    px-1.5
-    py-0.5
-    rounded
-    text-xs
-    font-medium
-    flex-shrink-0;
-}
-
-.stateDOWNLOADING {
-  @apply bg-[var(--color-primary)]
-    text-white;
+/* Colored left stripe indicating state */
+.stateBar {
+  @apply flex-none w-[3px] self-stretch rounded-full;
 }
 
 .statePENDING {
-  @apply bg-[var(--bg-elevated)]
-    text-[var(--text-muted)];
+  background: var(--text-muted);
 }
-
+.stateDOWNLOADING {
+  background: var(--color-primary);
+}
 .statePAUSED {
-  @apply bg-[var(--bg-elevated)]
-    text-[var(--text-secondary)];
+  background: var(--text-secondary);
 }
-
 .stateCOMPLETED {
-  @apply bg-green-600
-    text-white;
+  background: var(--color-success);
 }
-
 .stateFAILED {
-  @apply bg-[var(--color-danger)]
-    text-white;
+  background: var(--color-danger);
 }
-
 .stateCANCELLED {
-  @apply bg-[var(--bg-elevated)]
-    text-[var(--text-muted)];
+  background: var(--bg-elevated);
+}
+.stateUPLOADING {
+  background: var(--color-success);
 }
 
-/* ── Progress bar ─────────────────────────────────────────────────────────── */
+/* Visually hidden but available to screen readers */
+.srOnly {
+  @apply sr-only;
+}
 
-.progressBar {
-  @apply w-full
-    h-1.5
-    rounded-full
-    bg-[var(--bg-elevated)]
-    overflow-hidden;
+/* Filename — takes available space */
+.rowName {
+  @apply flex-1 truncate font-medium text-[var(--text-primary)] min-w-0;
+}
+
+/* Progress area — fixed width, contains track + percent */
+.rowProgress {
+  @apply flex-none flex items-center gap-2;
+  width: 160px;
+}
+
+.progressTrack {
+  @apply flex-1 h-[5px] rounded-full bg-[var(--bg-elevated)] overflow-hidden;
 }
 
 .progressFill {
-  @apply h-full
-    rounded-full
-    bg-[var(--color-primary)]
-    transition-[width];
+  @apply h-full rounded-full bg-[var(--color-primary)] transition-[width] duration-300;
 }
 
-/* ── Meta row ─────────────────────────────────────────────────────────────── */
-
-.rowMeta {
-  @apply flex
-    flex-wrap
-    gap-x-4
-    gap-y-0.5
-    text-xs
-    text-[var(--text-muted)];
+.pct {
+  @apply flex-none text-xs text-[var(--text-secondary)] tabular-nums;
+  width: 34px;
+  text-align: right;
 }
 
-.rowError {
-  @apply text-xs
-    text-[var(--color-danger)];
+/* Fixed-width stat columns */
+.rowBytes {
+  @apply flex-none text-xs text-[var(--text-muted)] tabular-nums;
+  width: 148px;
 }
 
-/* ── Action buttons ───────────────────────────────────────────────────────── */
+.rowSpeed {
+  @apply flex-none text-xs text-[var(--text-muted)] tabular-nums text-right;
+  width: 72px;
+}
 
+.rowEta {
+  @apply flex-none text-xs text-[var(--text-muted)] tabular-nums;
+  width: 60px;
+}
+
+.rowSources {
+  @apply flex-none text-xs text-[var(--text-muted)] truncate;
+  width: 56px;
+}
+
+/* Actions */
 .rowActions {
-  @apply flex
-    items-center
-    gap-2;
+  @apply flex-none flex items-center gap-1.5;
+  min-width: 80px;
+}
+
+.rowActions .btn {
+  @apply px-2 py-1 text-xs;
 }
 
 .confirmText {
-  @apply text-sm
-    text-[var(--text-secondary)];
+  @apply text-xs text-[var(--text-secondary)] whitespace-nowrap;
+}
+
+.rowError {
+  @apply flex-none text-xs text-[var(--color-danger)];
+}
+
+/* ── Status bar ────────────────────────────────────────────────────────────── */
+
+.statusBar {
+  @apply flex-none flex items-center gap-3 px-4 py-1.5 border-t border-[var(--border)] text-xs text-[var(--text-muted)] bg-[var(--bg-surface)];
+}
+
+.statusDivider {
+  @apply text-[var(--border-strong)];
 }

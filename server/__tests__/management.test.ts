@@ -1206,6 +1206,25 @@ describe('DELETE /api/transfers/:id', () => {
 });
 
 // ---------------------------------------------------------------------------
+// GET /api/uploads
+// ---------------------------------------------------------------------------
+
+describe('GET /api/uploads', () => {
+  it('returns an empty array when no uploads are active', async () => {
+    const res = await makeHandler()(req('/api/uploads'));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual([]);
+  });
+
+  it('returns 405 for non-GET requests', async () => {
+    for (const method of ['POST', 'PUT', 'PATCH', 'DELETE']) {
+      const res = await makeHandler()(req('/api/uploads', { method }));
+      expect(res.status).toBe(405);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
 // GET /api/conversations
 // ---------------------------------------------------------------------------
 

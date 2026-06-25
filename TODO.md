@@ -142,11 +142,11 @@
 
 ### Transfers
 
-- [ ] **Overhaul** — Napster-style split pane (downloads top, uploads bottom) with a resizable drag handle between the two panes
-- [ ] Table-style rows: filename, file size (X of Y), peer name/node, status, speed, inline progress bar, rate, time left
-- [ ] Upload rows — files currently being served to peers (requires `feature/upload-tracking` backend to be merged first)
-- [ ] Status bar at the bottom: "Concurrent Downloads: N | Concurrent Uploads: N"
-- [ ] "Clear Finished" button (removes completed/failed rows from both panes)
+- [x] **Overhaul** — Napster-style split pane (downloads top, uploads bottom) with a resizable drag handle between the two panes
+- [x] Table-style rows: filename, file size (X of Y), peer name/node, status, speed, inline progress bar, rate, time left
+- [x] Upload rows — files currently being served to peers; tracked in-memory, auto-expire after 30 s idle; exposed via `GET /api/uploads`
+- [x] Status bar at the bottom: "Concurrent Downloads: N | Concurrent Uploads: N"
+- [x] "Clear Finished" button (removes completed/failed rows from both panes)
 - [x] Download controls: pause, resume, cancel (in-progress only)
 - [x] Cancel confirmation + partial file cleanup
 - [x] Manual dismiss of completed downloads
