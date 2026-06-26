@@ -1,11 +1,14 @@
+import { randomUUID } from 'node:crypto';
+
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'bun:test';
 import { existsSync, unlinkSync } from 'fs';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
-import { execSync } from 'child_process';
+import { eq } from 'drizzle-orm';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
+import { type Db, applyMigrations, createDb } from '../db';
 import {
   cancelDownload,
   getTransfers,
@@ -13,26 +16,21 @@ import {
   resumeDownload,
   startDownload,
 } from '../download-manager';
-import type { PrismaClient } from '@prisma/client';
+import { downloads, friends } from '../schema';
 import type { RequestChunkFn } from '../download-manager';
-import { createPrismaClient } from '../db';
 
 const TEST_DB_URL = 'file:./data/test-download-manager.db';
-let prisma: PrismaClient;
+let db: Db;
 let tmpDir: string;
 
 function sha256(buf: Buffer): string {
   return createHash('sha256').update(buf).digest('hex');
 }
 
-// Build a mock requestChunkFn that serves chunks from a Buffer
 function makeChunkServer(content: Buffer): RequestChunkFn {
-  return async (_nodeId, _sha256, offset, length) => {
-    return content.subarray(offset, offset + length);
-  };
+  return async (_nodeId, _sha256, offset, length) => content.subarray(offset, offset + length);
 }
 
-// Build a mock requestChunkFn that introduces a per-chunk delay
 function makeSlowChunkServer(content: Buffer, delayMs: number): RequestChunkFn {
   return async (_nodeId, _sha256, offset, length) => {
     await new Promise<void>((resolve) => setTimeout(resolve, delayMs));
@@ -40,35 +38,45 @@ function makeSlowChunkServer(content: Buffer, delayMs: number): RequestChunkFn {
   };
 }
 
-// Build a mock requestChunkFn that always fails
 function makeFailingChunkServer(reason = 'peer error'): RequestChunkFn {
   return async () => {
     throw new Error(reason);
   };
 }
 
+async function waitForState(dlId: string, maxMs = 2000) {
+  let dl = db.select().from(downloads).where(eq(downloads.id, dlId)).get()!;
+  const start = Date.now();
+  while (
+    dl.state !== 'COMPLETED' &&
+    dl.state !== 'FAILED' &&
+    dl.state !== 'CANCELLED' &&
+    Date.now() - start < maxMs
+  ) {
+    await Bun.sleep(50);
+    dl = db.select().from(downloads).where(eq(downloads.id, dlId)).get()!;
+  }
+  return dl;
+}
+
 beforeAll(async () => {
-  execSync(`bunx prisma db push --url "${TEST_DB_URL}"`, { stdio: 'pipe' });
-  prisma = createPrismaClient(TEST_DB_URL);
+  db = createDb(TEST_DB_URL);
+  applyMigrations(db);
   tmpDir = await mkdtemp(join(tmpdir(), 'filenet-dl-mgr-'));
 });
 
 afterAll(async () => {
-  await prisma.$disconnect();
+  db.$client.close();
   await rm(tmpDir, { recursive: true, force: true });
   try {
     unlinkSync('./data/test-download-manager.db');
   } catch {}
 });
 
-beforeEach(async () => {
-  await prisma.download.deleteMany();
-  await prisma.friend.deleteMany();
+beforeEach(() => {
+  db.delete(downloads).run();
+  db.delete(friends).run();
 });
-
-// ---------------------------------------------------------------------------
-// startDownload
-// ---------------------------------------------------------------------------
 
 describe('startDownload', () => {
   it('creates a Download record and completes when all chunks are served', async () => {
@@ -78,7 +86,7 @@ describe('startDownload', () => {
     await mkdir(downloadFolder, { recursive: true });
 
     const id = await startDownload(
-      prisma,
+      db,
       {
         sha256: hash,
         filename: 'fox.txt',
@@ -89,16 +97,9 @@ describe('startDownload', () => {
       },
       makeChunkServer(content),
     );
-
     expect(typeof id).toBe('string');
 
-    // Wait for completion (polling, max 2s)
-    let dl = await prisma.download.findUniqueOrThrow({ where: { id } });
-    for (let i = 0; i < 40 && dl.state !== 'COMPLETED' && dl.state !== 'FAILED'; i++) {
-      await Bun.sleep(50);
-      dl = await prisma.download.findUniqueOrThrow({ where: { id } });
-    }
-
+    const dl = await waitForState(id);
     expect(dl.state).toBe('COMPLETED');
     expect(dl.finalPath).toBeTruthy();
     expect(existsSync(dl.finalPath!)).toBe(true);
@@ -108,14 +109,13 @@ describe('startDownload', () => {
 
   it('verifies SHA-256 and marks FAILED if content is corrupted', async () => {
     const content = Buffer.from('real content');
-    const wrongHash = 'f'.repeat(64);
     const downloadFolder = join(tmpDir, 'dl-corrupt');
     await mkdir(downloadFolder, { recursive: true });
 
     const id = await startDownload(
-      prisma,
+      db,
       {
-        sha256: wrongHash,
+        sha256: 'f'.repeat(64),
         filename: 'bad.txt',
         size: BigInt(content.length),
         mimeType: null,
@@ -124,27 +124,20 @@ describe('startDownload', () => {
       },
       makeChunkServer(content),
     );
-
-    let dl = await prisma.download.findUniqueOrThrow({ where: { id } });
-    for (let i = 0; i < 40 && dl.state !== 'COMPLETED' && dl.state !== 'FAILED'; i++) {
-      await Bun.sleep(50);
-      dl = await prisma.download.findUniqueOrThrow({ where: { id } });
-    }
-
+    const dl = await waitForState(id);
     expect(dl.state).toBe('FAILED');
     expect(dl.error).toMatch(/sha-256/i);
   });
 
   it('marks FAILED when no sources respond', async () => {
     const content = Buffer.from('whatever');
-    const hash = sha256(content);
     const downloadFolder = join(tmpDir, 'dl-nosource');
     await mkdir(downloadFolder, { recursive: true });
 
     const id = await startDownload(
-      prisma,
+      db,
       {
-        sha256: hash,
+        sha256: sha256(content),
         filename: 'fail.txt',
         size: BigInt(content.length),
         mimeType: null,
@@ -153,28 +146,20 @@ describe('startDownload', () => {
       },
       makeFailingChunkServer('connection refused'),
     );
-
-    let dl = await prisma.download.findUniqueOrThrow({ where: { id } });
-    for (let i = 0; i < 40 && dl.state !== 'COMPLETED' && dl.state !== 'FAILED'; i++) {
-      await Bun.sleep(50);
-      dl = await prisma.download.findUniqueOrThrow({ where: { id } });
-    }
-
+    const dl = await waitForState(id);
     expect(dl.state).toBe('FAILED');
   });
 
   it('deduplicates the final filename if a file already exists', async () => {
     const content = Buffer.from('duplicate file content');
-    const hash = sha256(content);
     const downloadFolder = join(tmpDir, 'dl-dedup');
     await mkdir(downloadFolder, { recursive: true });
-    // Pre-create a file with the same name
     await writeFile(join(downloadFolder, 'dupe.txt'), 'existing');
 
     const id = await startDownload(
-      prisma,
+      db,
       {
-        sha256: hash,
+        sha256: sha256(content),
         filename: 'dupe.txt',
         size: BigInt(content.length),
         mimeType: null,
@@ -183,81 +168,52 @@ describe('startDownload', () => {
       },
       makeChunkServer(content),
     );
-
-    let dl = await prisma.download.findUniqueOrThrow({ where: { id } });
-    for (let i = 0; i < 40 && dl.state !== 'COMPLETED' && dl.state !== 'FAILED'; i++) {
-      await Bun.sleep(50);
-      dl = await prisma.download.findUniqueOrThrow({ where: { id } });
-    }
-
+    const dl = await waitForState(id);
     expect(dl.state).toBe('COMPLETED');
     expect(dl.finalPath).not.toBe(join(downloadFolder, 'dupe.txt'));
     expect(existsSync(dl.finalPath!)).toBe(true);
   });
 });
 
-// ---------------------------------------------------------------------------
-// cancelDownload
-// ---------------------------------------------------------------------------
-
 describe('cancelDownload', () => {
   it('marks the download as CANCELLED', async () => {
-    const content = Buffer.alloc(1024 * 1024 * 3, 0x42); // 3 MB — slow enough to cancel
-    const hash = sha256(content);
+    const content = Buffer.alloc(1024 * 1024 * 3, 0x42);
     const downloadFolder = join(tmpDir, 'dl-cancel');
     await mkdir(downloadFolder, { recursive: true });
 
-    // Slow chunk server so we can cancel mid-flight
-    let cancelledOk = false;
-    const slowServer: RequestChunkFn = async (_p, _s, offset, length) => {
-      await Bun.sleep(200);
-      return content.subarray(offset, offset + length);
-    };
-
     const id = await startDownload(
-      prisma,
+      db,
       {
-        sha256: hash,
+        sha256: sha256(content),
         filename: 'big.bin',
         size: BigInt(content.length),
         mimeType: null,
         sources: ['fake-node'],
         downloadFolder,
       },
-      slowServer,
+      makeSlowChunkServer(content, 200),
     );
 
-    // Give it a moment to start, then cancel
     await Bun.sleep(50);
-    cancelledOk = await cancelDownload(prisma, id);
+    const cancelledOk = await cancelDownload(db, id);
     expect(cancelledOk).toBe(true);
 
-    const dl = await prisma.download.findUniqueOrThrow({ where: { id } });
+    const dl = db.select().from(downloads).where(eq(downloads.id, id)).get()!;
     expect(dl.state).toBe('CANCELLED');
-    // Temp file should be gone
-    if (dl.tmpPath) {
-      expect(existsSync(dl.tmpPath)).toBe(false);
-    }
+    if (dl.tmpPath) expect(existsSync(dl.tmpPath)).toBe(false);
   });
 });
 
-// ---------------------------------------------------------------------------
-// pauseDownload / resumeDownload
-// ---------------------------------------------------------------------------
-
 describe('pauseDownload / resumeDownload', () => {
   it('returns false without modifying state when record is already CANCELLED', async () => {
-    // Covers the initial guard: resumeDownload rejects outright if the DB record
-    // is not in PAUSED state when the call begins.
     const content = Buffer.from('toctou test content here for resume cancel race');
-    const hash = sha256(content);
     const folder = join(tmpDir, 'dl-toctou');
     await mkdir(folder, { recursive: true });
 
     const id = await startDownload(
-      prisma,
+      db,
       {
-        sha256: hash,
+        sha256: sha256(content),
         filename: 'toctou.txt',
         size: BigInt(content.length),
         mimeType: null,
@@ -267,29 +223,31 @@ describe('pauseDownload / resumeDownload', () => {
       makeSlowChunkServer(content, 200),
     );
 
-    await pauseDownload(prisma, id);
-    const afterPause = await prisma.download.findUniqueOrThrow({ where: { id } });
+    await pauseDownload(db, id);
+    const afterPause = db.select().from(downloads).where(eq(downloads.id, id)).get()!;
     expect(afterPause.state).toBe('PAUSED');
 
-    await prisma.download.update({ where: { id }, data: { state: 'CANCELLED' } });
+    db.update(downloads)
+      .set({ state: 'CANCELLED', updatedAt: new Date() })
+      .where(eq(downloads.id, id))
+      .run();
 
-    const result = await resumeDownload(prisma, id);
+    const result = await resumeDownload(db, id);
     expect(result).toBe(false);
 
-    const record = await prisma.download.findUniqueOrThrow({ where: { id } });
+    const record = db.select().from(downloads).where(eq(downloads.id, id)).get()!;
     expect(record.state).toBe('CANCELLED');
   });
 
   it('can pause and then resume to completion', async () => {
     const content = Buffer.from('pause and resume content here');
-    const hash = sha256(content);
     const downloadFolder = join(tmpDir, 'dl-pause');
     await mkdir(downloadFolder, { recursive: true });
 
     const id = await startDownload(
-      prisma,
+      db,
       {
-        sha256: hash,
+        sha256: sha256(content),
         filename: 'pause.txt',
         size: BigInt(content.length),
         mimeType: null,
@@ -299,53 +257,47 @@ describe('pauseDownload / resumeDownload', () => {
       makeChunkServer(content),
     );
 
-    // Pause immediately (download may already be done for tiny files)
-    await pauseDownload(prisma, id);
-    const paused = await prisma.download.findUniqueOrThrow({ where: { id } });
-    // Either PAUSED or COMPLETED (tiny file may finish before pause)
+    await pauseDownload(db, id);
+    const paused = db.select().from(downloads).where(eq(downloads.id, id)).get()!;
     expect(['PAUSED', 'COMPLETED']).toContain(paused.state);
 
     if (paused.state === 'PAUSED') {
-      await resumeDownload(prisma, id, makeChunkServer(content));
-      let dl = await prisma.download.findUniqueOrThrow({ where: { id } });
-      for (let i = 0; i < 40 && dl.state !== 'COMPLETED' && dl.state !== 'FAILED'; i++) {
-        await Bun.sleep(50);
-        dl = await prisma.download.findUniqueOrThrow({ where: { id } });
-      }
+      await resumeDownload(db, id, makeChunkServer(content));
+      const dl = await waitForState(id);
       expect(dl.state).toBe('COMPLETED');
     }
   });
 });
 
-// ---------------------------------------------------------------------------
-// getTransfers
-// ---------------------------------------------------------------------------
-
-// ---------------------------------------------------------------------------
-// Friend download counters
-// ---------------------------------------------------------------------------
-
 describe('friend download counters', () => {
-  it('increments downloadCount and downloadTotalBytes for ACCEPTED friends in sources', async () => {
-    const friend = await prisma.friend.create({
-      data: {
-        name: 'Alice',
-        nodeId: 'counter-alice',
-        address: '10.0.1.1',
+  function insertFriend(nodeId: string, status: string) {
+    const now = new Date();
+    return db
+      .insert(friends)
+      .values({
+        id: randomUUID(),
+        name: nodeId,
+        nodeId,
+        address: `10.0.1.${Math.floor(Math.random() * 200) + 10}`,
         port: 7734,
-        status: 'ACCEPTED',
-      },
-    });
+        status: status as any,
+        addedAt: now,
+        updatedAt: now,
+      })
+      .returning()
+      .get()!;
+  }
 
+  it('increments downloadCount and downloadTotalBytes for ACCEPTED friends in sources', async () => {
+    const friend = insertFriend('counter-alice', 'ACCEPTED');
     const content = Buffer.from('hello counter');
-    const hash = sha256(content);
     const folder = join(tmpDir, 'counter-basic');
     await mkdir(folder, { recursive: true });
 
     const id = await startDownload(
-      prisma,
+      db,
       {
-        sha256: hash,
+        sha256: sha256(content),
         filename: 'counter.txt',
         size: BigInt(content.length),
         mimeType: null,
@@ -354,79 +306,49 @@ describe('friend download counters', () => {
       },
       makeChunkServer(content),
     );
-
-    let dl = await prisma.download.findUniqueOrThrow({ where: { id } });
-    for (let i = 0; i < 40 && dl.state !== 'COMPLETED' && dl.state !== 'FAILED'; i++) {
-      await Bun.sleep(50);
-      dl = await prisma.download.findUniqueOrThrow({ where: { id } });
-    }
+    const dl = await waitForState(id);
     expect(dl.state).toBe('COMPLETED');
 
-    const updated = await prisma.friend.findUniqueOrThrow({ where: { id: friend.id } });
+    const updated = db.select().from(friends).where(eq(friends.id, friend.id)).get()!;
     expect(updated.downloadCount).toBe(1);
     expect(updated.downloadTotalBytes).toBe(BigInt(content.length));
   });
 
   it('credits a friend only once even if their nodeId appears twice in sources', async () => {
-    const friend = await prisma.friend.create({
-      data: {
-        name: 'Bob',
-        nodeId: 'counter-bob',
-        address: '10.0.1.2',
-        port: 7734,
-        status: 'ACCEPTED',
-      },
-    });
-
+    const friend = insertFriend('counter-bob', 'ACCEPTED');
     const content = Buffer.from('dedup test');
-    const hash = sha256(content);
     const folder = join(tmpDir, 'counter-dedup');
     await mkdir(folder, { recursive: true });
 
     const id = await startDownload(
-      prisma,
+      db,
       {
-        sha256: hash,
+        sha256: sha256(content),
         filename: 'dedup.txt',
         size: BigInt(content.length),
         mimeType: null,
-        sources: ['counter-bob', 'counter-bob'], // duplicate
+        sources: ['counter-bob', 'counter-bob'],
         downloadFolder: folder,
       },
       makeChunkServer(content),
     );
-
-    let dl = await prisma.download.findUniqueOrThrow({ where: { id } });
-    for (let i = 0; i < 40 && dl.state !== 'COMPLETED' && dl.state !== 'FAILED'; i++) {
-      await Bun.sleep(50);
-      dl = await prisma.download.findUniqueOrThrow({ where: { id } });
-    }
+    const dl = await waitForState(id);
     expect(dl.state).toBe('COMPLETED');
 
-    const updated = await prisma.friend.findUniqueOrThrow({ where: { id: friend.id } });
+    const updated = db.select().from(friends).where(eq(friends.id, friend.id)).get()!;
     expect(updated.downloadCount).toBe(1);
   });
 
   it('does not increment counters for non-ACCEPTED friends', async () => {
-    const pending = await prisma.friend.create({
-      data: {
-        name: 'Pending Carol',
-        nodeId: 'counter-carol',
-        address: '10.0.1.3',
-        port: 7734,
-        status: 'INCOMING_PENDING',
-      },
-    });
-
+    const pending = insertFriend('counter-carol', 'INCOMING_PENDING');
     const content = Buffer.from('pending test');
-    const hash = sha256(content);
     const folder = join(tmpDir, 'counter-pending');
     await mkdir(folder, { recursive: true });
 
     const id = await startDownload(
-      prisma,
+      db,
       {
-        sha256: hash,
+        sha256: sha256(content),
         filename: 'pending.txt',
         size: BigInt(content.length),
         mimeType: null,
@@ -435,39 +357,23 @@ describe('friend download counters', () => {
       },
       makeChunkServer(content),
     );
-
-    let dl = await prisma.download.findUniqueOrThrow({ where: { id } });
-    for (let i = 0; i < 40 && dl.state !== 'COMPLETED' && dl.state !== 'FAILED'; i++) {
-      await Bun.sleep(50);
-      dl = await prisma.download.findUniqueOrThrow({ where: { id } });
-    }
+    const dl = await waitForState(id);
     expect(dl.state).toBe('COMPLETED');
 
-    const notUpdated = await prisma.friend.findUniqueOrThrow({ where: { id: pending.id } });
+    const notUpdated = db.select().from(friends).where(eq(friends.id, pending.id)).get()!;
     expect(notUpdated.downloadCount).toBe(0);
   });
 
   it('does not increment counters when download fails', async () => {
-    const friend = await prisma.friend.create({
-      data: {
-        name: 'Dave',
-        nodeId: 'counter-dave',
-        address: '10.0.1.4',
-        port: 7734,
-        status: 'ACCEPTED',
-      },
-    });
-
+    const friend = insertFriend('counter-dave', 'ACCEPTED');
     const content = Buffer.from('fail test');
-    const realHash = sha256(content);
-    const wrongHash = 'f'.repeat(64);
     const folder = join(tmpDir, 'counter-fail');
     await mkdir(folder, { recursive: true });
 
     const id = await startDownload(
-      prisma,
+      db,
       {
-        sha256: wrongHash, // wrong hash → FAILED after download
+        sha256: 'f'.repeat(64),
         filename: 'fail.txt',
         size: BigInt(content.length),
         mimeType: null,
@@ -476,16 +382,10 @@ describe('friend download counters', () => {
       },
       makeChunkServer(content),
     );
-
-    let dl = await prisma.download.findUniqueOrThrow({ where: { id } });
-    for (let i = 0; i < 40 && dl.state !== 'COMPLETED' && dl.state !== 'FAILED'; i++) {
-      await Bun.sleep(50);
-      dl = await prisma.download.findUniqueOrThrow({ where: { id } });
-    }
+    const dl = await waitForState(id);
     expect(dl.state).toBe('FAILED');
-    void realHash; // used for documentation
 
-    const notUpdated = await prisma.friend.findUniqueOrThrow({ where: { id: friend.id } });
+    const notUpdated = db.select().from(friends).where(eq(friends.id, friend.id)).get()!;
     expect(notUpdated.downloadCount).toBe(0);
   });
 });
@@ -493,14 +393,13 @@ describe('friend download counters', () => {
 describe('getTransfers', () => {
   it('returns all downloads with progress info', async () => {
     const content = Buffer.from('stats test');
-    const hash = sha256(content);
     const downloadFolder = join(tmpDir, 'dl-stats');
     await mkdir(downloadFolder, { recursive: true });
 
     await startDownload(
-      prisma,
+      db,
       {
-        sha256: hash,
+        sha256: sha256(content),
         filename: 'stats.txt',
         size: BigInt(content.length),
         mimeType: null,
@@ -510,10 +409,10 @@ describe('getTransfers', () => {
       makeChunkServer(content),
     );
 
-    const transfers = await getTransfers(prisma);
+    const transfers = await getTransfers(db);
     expect(transfers.length).toBeGreaterThanOrEqual(1);
     const t = transfers[0];
-    expect(t.sha256).toBe(hash);
+    expect(t.sha256).toBe(sha256(content));
     expect(t.filename).toBe('stats.txt');
     expect(typeof t.progress).toBe('number');
     expect(t.progress).toBeGreaterThanOrEqual(0);

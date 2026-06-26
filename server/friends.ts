@@ -1,8 +1,14 @@
+import { randomUUID } from 'node:crypto';
 import { timingSafeEqual } from 'node:crypto';
 
-import type { Friend, FriendStatus, Prisma, PrismaClient, Settings } from '@prisma/client';
+import { asc, eq } from 'drizzle-orm';
 
 import { ConflictError, NotFoundError } from './errors';
+import type { Friend, FriendStatus, Settings } from './schema';
+import type { Db } from './db';
+import { friends } from './schema';
+
+export type { Friend, FriendStatus };
 
 export type AddOutgoingFriendParams = {
   name: string;
@@ -19,27 +25,32 @@ export type IncomingFriendRequestParams = {
   port: number;
 };
 
-export async function addOutgoingFriend(
-  prisma: PrismaClient,
-  params: AddOutgoingFriendParams,
-): Promise<Friend> {
-  const existing = await prisma.friend.findFirst({
-    where: { address: params.address, port: params.port },
-  });
-  if (existing)
+export async function addOutgoingFriend(db: Db, params: AddOutgoingFriendParams): Promise<Friend> {
+  const existing = db.select().from(friends).where(eq(friends.address, params.address)).get();
+  // Check address+port match specifically
+  const exactMatch = existing && existing.port === params.port ? existing : null;
+  if (exactMatch)
     throw new ConflictError(`Already have a friend at ${params.address}:${params.port}`);
+
+  const now = new Date();
   try {
-    return await prisma.friend.create({
-      data: {
+    const row = db
+      .insert(friends)
+      .values({
+        id: randomUUID(),
         name: params.name,
         address: params.address,
         port: params.port,
         status: 'OUTGOING_PENDING',
         remotePassword: params.password ?? null,
-      },
-    });
+        addedAt: now,
+        updatedAt: now,
+      })
+      .returning()
+      .get();
+    return row!;
   } catch (err) {
-    if (err instanceof Error && 'code' in err && (err as { code: string }).code === 'P2002') {
+    if (err instanceof Error && err.message.includes('UNIQUE constraint failed')) {
       throw new ConflictError(`Already have a friend at ${params.address}:${params.port}`);
     }
     throw err;
@@ -47,111 +58,113 @@ export async function addOutgoingFriend(
 }
 
 export async function handleIncomingFriendRequest(
-  prisma: PrismaClient,
+  db: Db,
   params: IncomingFriendRequestParams,
 ): Promise<Friend> {
-  const byNodeId = await prisma.friend.findUnique({ where: { nodeId: params.nodeId } });
+  const byNodeId = db.select().from(friends).where(eq(friends.nodeId, params.nodeId)).get();
   if (byNodeId) {
     const isStale =
       byNodeId.name !== params.name ||
       byNodeId.address !== params.address ||
       byNodeId.port !== params.port;
     if (!isStale) return byNodeId;
-    return prisma.friend.update({
-      where: { id: byNodeId.id },
-      data: { name: params.name, address: params.address, port: params.port },
-    });
+    const updated = db
+      .update(friends)
+      .set({ name: params.name, address: params.address, port: params.port, updatedAt: new Date() })
+      .where(eq(friends.id, byNodeId.id))
+      .returning()
+      .get();
+    return updated!;
   }
 
-  // If we have an outgoing record for the same address+port, upgrade it rather than create a duplicate.
-  const byAddress = await prisma.friend.findFirst({
-    where: { address: params.address, port: params.port },
-  });
-  if (byAddress) {
-    if (byAddress.status === 'BLOCKED') return byAddress;
-    return prisma.friend.update({
-      where: { id: byAddress.id },
-      data: {
+  // If we have an outgoing record for the same address+port, upgrade it.
+  const byAddress = db.select().from(friends).where(eq(friends.address, params.address)).get();
+  const byAddressAndPort = byAddress && byAddress.port === params.port ? byAddress : null;
+  if (byAddressAndPort) {
+    if (byAddressAndPort.status === 'BLOCKED') return byAddressAndPort;
+    const updated = db
+      .update(friends)
+      .set({
         nodeId: params.nodeId,
         publicKey: params.publicKey,
         name: params.name,
         status: 'INCOMING_PENDING',
         acceptedAt: null,
         remotePassword: null,
-      },
-    });
+        updatedAt: new Date(),
+      })
+      .where(eq(friends.id, byAddressAndPort.id))
+      .returning()
+      .get();
+    return updated!;
   }
 
-  return prisma.friend.create({
-    data: {
+  const now = new Date();
+  const row = db
+    .insert(friends)
+    .values({
+      id: randomUUID(),
       name: params.name,
       nodeId: params.nodeId,
       publicKey: params.publicKey,
       address: params.address,
       port: params.port,
       status: 'INCOMING_PENDING',
-    },
-  });
+      addedAt: now,
+      updatedAt: now,
+    })
+    .returning()
+    .get();
+  return row!;
 }
 
-export async function acceptFriendRequest(
-  prisma: PrismaClient | Prisma.TransactionClient,
-  friendId: string,
-): Promise<Friend> {
-  const friend = await prisma.friend.findUnique({ where: { id: friendId } });
+// Accepts a Db or a Drizzle transaction (same interface)
+export async function acceptFriendRequest(db: Db, friendId: string): Promise<Friend> {
+  const friend = db.select().from(friends).where(eq(friends.id, friendId)).get();
   if (!friend) throw new NotFoundError(`Friend ${friendId} not found`);
   if (friend.status === 'ACCEPTED') return friend;
   if (friend.status === 'BLOCKED') throw new ConflictError(`Cannot accept a BLOCKED friend`);
-  return prisma.friend.update({
-    where: { id: friendId },
-    data: {
+  const updated = db
+    .update(friends)
+    .set({
       status: 'ACCEPTED',
       acceptedAt: friend.acceptedAt ?? new Date(),
       remotePassword: null,
-    },
-  });
+      updatedAt: new Date(),
+    })
+    .where(eq(friends.id, friendId))
+    .returning()
+    .get();
+  return updated!;
 }
 
-export async function rejectFriendRequest(prisma: PrismaClient, friendId: string): Promise<void> {
-  const friend = await prisma.friend.findUnique({ where: { id: friendId } });
+export async function rejectFriendRequest(db: Db, friendId: string): Promise<void> {
+  const friend = db.select().from(friends).where(eq(friends.id, friendId)).get();
   if (!friend) throw new NotFoundError(`Friend ${friendId} not found`);
   if (friend.status !== 'INCOMING_PENDING' && friend.status !== 'OUTGOING_PENDING') {
     throw new ConflictError(`Cannot reject a friend with status ${friend.status}`);
   }
-  await prisma.friend.delete({ where: { id: friendId } });
+  db.delete(friends).where(eq(friends.id, friendId)).run();
 }
 
-export async function removeFriend(prisma: PrismaClient, friendId: string): Promise<void> {
-  const friend = await prisma.friend.findUnique({ where: { id: friendId } });
+export async function removeFriend(db: Db, friendId: string): Promise<void> {
+  const friend = db.select().from(friends).where(eq(friends.id, friendId)).get();
   if (!friend) throw new NotFoundError(`Friend ${friendId} not found`);
-  await prisma.friend.delete({ where: { id: friendId } });
+  db.delete(friends).where(eq(friends.id, friendId)).run();
 }
 
-export async function getFriends(prisma: PrismaClient, status?: FriendStatus): Promise<Friend[]> {
-  return prisma.friend.findMany({
-    where: status ? { status } : undefined,
-    orderBy: { addedAt: 'asc' },
-  });
+export async function getFriends(db: Db, status?: FriendStatus): Promise<Friend[]> {
+  const query = db.select().from(friends).orderBy(asc(friends.addedAt));
+  if (status) return query.where(eq(friends.status, status)).all();
+  return query.all();
 }
 
-export function shouldAutoAccept(
-  settings: Settings,
-  providedPassword: string | undefined,
-): boolean {
-  if (settings.autoAcceptFromAnyone) return true;
-  // When a password is configured, always run the timing-safe comparison regardless
-  // of whether the caller supplied a password. This prevents distinguishing "wrong
-  // password" from "no password provided" by timing within this branch.
-  if (settings.invitePassword !== null) {
-    // Use a NUL-byte sentinel for an omitted password so it can never compare
-    // equal to a configured empty-string password (both would otherwise be
-    // zero-length buffers that pad identically and pass timingSafeEqual).
-    // Check byte lengths before allocating — Buffer.byteLength does not allocate.
-    // Reject oversized inputs to prevent a huge configured password forcing large
-    // Buffer.alloc on every friend request.
+export function shouldAutoAccept(s: Settings, providedPassword: string | undefined): boolean {
+  if (s.autoAcceptFromAnyone) return true;
+  if (s.invitePassword !== null) {
     const MAX_PASSWORD_BYTES = 1024;
     const rawA = providedPassword !== undefined ? providedPassword : '\0';
-    const rawB = settings.invitePassword;
+    const rawB = s.invitePassword;
     if (
       Buffer.byteLength(rawA) > MAX_PASSWORD_BYTES ||
       Buffer.byteLength(rawB) > MAX_PASSWORD_BYTES
@@ -164,8 +177,6 @@ export function shouldAutoAccept(
     const paddedB = Buffer.alloc(len);
     a.copy(paddedA);
     b.copy(paddedB);
-    // timingSafeEqual runs first so it always executes in constant time; the length
-    // check is a non-secret integer comparison and is safe as a final AND condition.
     if (timingSafeEqual(paddedA, paddedB) && a.length === b.length) return true;
   }
   return false;

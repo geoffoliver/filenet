@@ -1,7 +1,9 @@
-import type { PrismaClient } from '@prisma/client';
+import { inArray } from 'drizzle-orm';
 
 import type { ConnectPeerFn } from './management';
+import type { Db } from './db';
 import type { Identity } from './identity';
+import { friends } from './schema';
 import { getConnectedPeer } from './connections';
 import { getOrCreateSettings } from './config';
 
@@ -27,26 +29,30 @@ export function resetDialingForTesting(): void {
  * friend that is not currently in the connected-peers map.
  */
 export async function reconnectOnce(
-  prisma: PrismaClient,
+  db: Db,
   identity: Identity,
   connectPeer: ConnectPeerFn,
 ): Promise<void> {
-  const [settings, friends] = await Promise.all([
-    getOrCreateSettings(prisma),
-    prisma.friend.findMany({
-      where: { status: { in: ['ACCEPTED', 'OUTGOING_PENDING'] } },
-    }),
+  const [settingsRow, friendRows] = await Promise.all([
+    getOrCreateSettings(db),
+    Promise.resolve(
+      db
+        .select()
+        .from(friends)
+        .where(inArray(friends.status, ['ACCEPTED', 'OUTGOING_PENDING']))
+        .all(),
+    ),
   ]);
 
   // Prune loggedFailures entries for friends that were removed or changed
   // address/port — without this the set grows forever on long-running nodes,
   // since the success path (the only other removal) can never fire for them.
-  const currentKeys = new Set(friends.map((f) => `${f.address}:${f.port}`));
+  const currentKeys = new Set(friendRows.map((f) => `${f.address}:${f.port}`));
   for (const key of loggedFailures) {
     if (!currentKeys.has(key)) loggedFailures.delete(key);
   }
 
-  for (const friend of friends) {
+  for (const friend of friendRows) {
     // Already connected — nothing to do
     if (friend.nodeId && getConnectedPeer(friend.nodeId)) continue;
 
@@ -54,22 +60,15 @@ export async function reconnectOnce(
     // A connection attempt is already in-flight for this address — skip
     if (dialing.has(key)) continue;
 
-    // OUTGOING_PENDING means we want to send a friend-request after the handshake.
-    // Fall back to our nodeId when no display name is set — matches the management
-    // API's initial dial. (friend.name is the REMOTE peer's name, not ours.)
-    // Include the stored invite password so offline peers with invitePassword
-    // auto-accept can still auto-accept on retried connections.
     const friendRequest =
       friend.status === 'OUTGOING_PENDING'
         ? {
-            name: settings.name.trim() || identity.nodeId,
+            name: settingsRow.name.trim() || identity.nodeId,
             ...(friend.remotePassword !== null && { password: friend.remotePassword }),
           }
         : undefined;
 
     dialing.add(key);
-    // Promise.resolve().then() guards against connectPeer throwing synchronously,
-    // which would otherwise skip .finally() and leave the key stuck in `dialing`.
     Promise.resolve()
       .then(() => connectPeer(friend.address, friend.port, friendRequest))
       .then(() => {
@@ -89,7 +88,7 @@ export async function reconnectOnce(
 }
 
 export function startReconnectLoop(
-  prisma: PrismaClient,
+  db: Db,
   identity: Identity,
   connectPeer: ConnectPeerFn,
   intervalMs = RECONNECT_INTERVAL_MS,
@@ -99,7 +98,7 @@ export function startReconnectLoop(
   function tick(): void {
     if (running) return;
     running = true;
-    reconnectOnce(prisma, identity, connectPeer)
+    reconnectOnce(db, identity, connectPeer)
       .catch((err) => console.error('[reconnect] tick error:', err))
       .finally(() => {
         running = false;

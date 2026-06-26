@@ -1,10 +1,13 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, jest } from 'bun:test';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
-import { execSync } from 'child_process';
 import { join } from 'node:path';
+import { randomUUID } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { unlinkSync } from 'fs';
 
+import { eq } from 'drizzle-orm';
+
+import { type Db, applyMigrations, createDb } from '../db';
 import {
   UPLOAD_SESSION_IDLE_MS,
   cancelUploadFlushForFriend,
@@ -18,14 +21,13 @@ import {
   requestChunk,
   resetPendingForTesting,
 } from '../transfer-protocol';
+import { friends, sharedFiles } from '../schema';
 import type { ConnectedPeer } from '../connections';
 import type { InnerMessage } from '../types';
-import type { PrismaClient } from '@prisma/client';
-import { createPrismaClient } from '../db';
 import { indexFile } from '../indexer';
 
 const TEST_DB_URL = 'file:./data/test-transfer-protocol.db';
-let prisma: PrismaClient;
+let db: Db;
 let tmpDir: string;
 
 function makePeer(nodeId: string): ConnectedPeer {
@@ -40,22 +42,22 @@ function makePeer(nodeId: string): ConnectedPeer {
 }
 
 beforeAll(async () => {
-  execSync(`bunx prisma db push --url "${TEST_DB_URL}"`, { stdio: 'pipe' });
-  prisma = createPrismaClient(TEST_DB_URL);
+  db = createDb(TEST_DB_URL);
+  applyMigrations(db);
   tmpDir = await mkdtemp(join(tmpdir(), 'filenet-transfer-proto-'));
 });
 
 afterAll(async () => {
-  await prisma.$disconnect();
+  db.$client.close();
   await rm(tmpDir, { recursive: true, force: true });
   try {
     unlinkSync('./data/test-transfer-protocol.db');
   } catch {}
 });
 
-beforeEach(async () => {
-  await prisma.sharedFile.deleteMany();
-  await prisma.friend.deleteMany();
+beforeEach(() => {
+  db.delete(sharedFiles).run();
+  db.delete(friends).run();
   resetPendingForTesting();
 });
 
@@ -68,18 +70,21 @@ describe('handleChunkRequest', () => {
     const content = Buffer.from('hello world this is test content');
     const filePath = join(tmpDir, 'serve-test.txt');
     await writeFile(filePath, content);
-    await indexFile(prisma, filePath);
-    const file = await prisma.sharedFile.findFirstOrThrow({ where: { path: filePath } });
+    await indexFile(db, filePath);
+    const file = db.select().from(sharedFiles).where(eq(sharedFiles.path, filePath)).get()!;
 
-    await prisma.friend.create({
-      data: {
+    db.insert(friends)
+      .values({
+        id: randomUUID(),
+        addedAt: new Date(),
+        updatedAt: new Date(),
         name: 'Peer',
         address: '1.1.1.1',
         port: 7734,
         nodeId: 'a'.repeat(32),
         status: 'ACCEPTED',
-      },
-    });
+      })
+      .run();
 
     const received: InnerMessage[] = [];
     await handleChunkRequest(
@@ -91,7 +96,7 @@ describe('handleChunkRequest', () => {
         length: content.length,
       },
       'a'.repeat(32),
-      prisma,
+      db,
       (msg) => received.push(msg),
     );
 
@@ -108,24 +113,27 @@ describe('handleChunkRequest', () => {
     const content = Buffer.from('ABCDEFGHIJ');
     const filePath = join(tmpDir, 'range-test.bin');
     await writeFile(filePath, content);
-    await indexFile(prisma, filePath);
-    const file = await prisma.sharedFile.findFirstOrThrow({ where: { path: filePath } });
+    await indexFile(db, filePath);
+    const file = db.select().from(sharedFiles).where(eq(sharedFiles.path, filePath)).get()!;
 
-    await prisma.friend.create({
-      data: {
+    db.insert(friends)
+      .values({
+        id: randomUUID(),
+        addedAt: new Date(),
+        updatedAt: new Date(),
         name: 'Peer',
         address: '2.2.2.2',
         port: 7734,
         nodeId: 'b'.repeat(32),
         status: 'ACCEPTED',
-      },
-    });
+      })
+      .run();
 
     const received: InnerMessage[] = [];
     await handleChunkRequest(
       { type: 'chunk-request', transferId: 'tid-range', sha256: file.sha256, offset: 3, length: 4 },
       'b'.repeat(32),
-      prisma,
+      db,
       (msg) => received.push(msg),
     );
 
@@ -136,15 +144,18 @@ describe('handleChunkRequest', () => {
   });
 
   it('sends chunk-error for unknown sha256', async () => {
-    await prisma.friend.create({
-      data: {
+    db.insert(friends)
+      .values({
+        id: randomUUID(),
+        addedAt: new Date(),
+        updatedAt: new Date(),
         name: 'Peer',
         address: '3.3.3.3',
         port: 7734,
         nodeId: 'c'.repeat(32),
         status: 'ACCEPTED',
-      },
-    });
+      })
+      .run();
 
     const received: InnerMessage[] = [];
     await handleChunkRequest(
@@ -156,7 +167,7 @@ describe('handleChunkRequest', () => {
         length: 100,
       },
       'c'.repeat(32),
-      prisma,
+      db,
       (msg) => received.push(msg),
     );
 
@@ -172,24 +183,27 @@ describe('handleChunkRequest', () => {
     const content = Buffer.from('short'); // 5 bytes
     const filePath = join(tmpDir, 'bounds-test.bin');
     await writeFile(filePath, content);
-    await indexFile(prisma, filePath);
-    const file = await prisma.sharedFile.findFirstOrThrow({ where: { path: filePath } });
+    await indexFile(db, filePath);
+    const file = db.select().from(sharedFiles).where(eq(sharedFiles.path, filePath)).get()!;
 
-    await prisma.friend.create({
-      data: {
+    db.insert(friends)
+      .values({
+        id: randomUUID(),
+        addedAt: new Date(),
+        updatedAt: new Date(),
         name: 'Peer',
         address: '5.5.5.5',
         port: 7734,
         nodeId: 'd'.repeat(32),
         status: 'ACCEPTED',
-      },
-    });
+      })
+      .run();
 
     const received: InnerMessage[] = [];
     await handleChunkRequest(
       { type: 'chunk-request', transferId: 'tid-oob', sha256: file.sha256, offset: 3, length: 10 },
       'd'.repeat(32),
-      prisma,
+      db,
       (msg) => received.push(msg),
     );
 
@@ -204,18 +218,21 @@ describe('handleChunkRequest', () => {
     const content = Buffer.from('original content here');
     const filePath = join(tmpDir, 'stale-index-test.txt');
     await writeFile(filePath, content);
-    await indexFile(prisma, filePath);
-    const file = await prisma.sharedFile.findFirstOrThrow({ where: { path: filePath } });
+    await indexFile(db, filePath);
+    const file = db.select().from(sharedFiles).where(eq(sharedFiles.path, filePath)).get()!;
 
-    await prisma.friend.create({
-      data: {
+    db.insert(friends)
+      .values({
+        id: randomUUID(),
+        addedAt: new Date(),
+        updatedAt: new Date(),
         name: 'Peer',
         address: '9.9.9.9',
         port: 7734,
         nodeId: '1'.repeat(32),
         status: 'ACCEPTED',
-      },
-    });
+      })
+      .run();
 
     // Truncate the file on disk — DB still records the original size
     await writeFile(filePath, Buffer.alloc(0));
@@ -230,7 +247,7 @@ describe('handleChunkRequest', () => {
         length: content.length,
       },
       '1'.repeat(32),
-      prisma,
+      db,
       (msg) => received.push(msg),
     );
 
@@ -245,18 +262,23 @@ describe('handleChunkRequest', () => {
     const content = Buffer.from('cancel test content');
     const filePath = join(tmpDir, 'cancel-flush-test.txt');
     await writeFile(filePath, content);
-    await indexFile(prisma, filePath);
-    const file = await prisma.sharedFile.findFirstOrThrow({ where: { path: filePath } });
+    await indexFile(db, filePath);
+    const file = db.select().from(sharedFiles).where(eq(sharedFiles.path, filePath)).get()!;
 
-    const friend = await prisma.friend.create({
-      data: {
+    const friend = db
+      .insert(friends)
+      .values({
+        id: randomUUID(),
+        addedAt: new Date(),
+        updatedAt: new Date(),
         name: 'Peer',
         address: '2.2.2.2',
         port: 7734,
         nodeId: '2'.repeat(32),
         status: 'ACCEPTED',
-      },
-    });
+      })
+      .returning()
+      .get()!;
 
     await handleChunkRequest(
       {
@@ -267,15 +289,15 @@ describe('handleChunkRequest', () => {
         length: content.length,
       },
       '2'.repeat(32),
-      prisma,
+      db,
       () => {},
     );
 
     cancelUploadFlushForFriend(friend.id);
 
     // flushUploadStatsForTesting finds nothing pending and returns without writing
-    await flushUploadStatsForTesting(friend.id, prisma);
-    const updated = await prisma.friend.findUniqueOrThrow({ where: { id: friend.id } });
+    await flushUploadStatsForTesting(friend.id, db);
+    const updated = db.select().from(friends).where(eq(friends.id, friend.id)).get()!;
     expect(updated.uploadTotalBytes).toBe(0n);
     expect(updated.uploadCount).toBe(0);
   });
@@ -284,18 +306,23 @@ describe('handleChunkRequest', () => {
     const content = Buffer.from('upload tracking test');
     const filePath = join(tmpDir, 'upload-bytes-test.txt');
     await writeFile(filePath, content);
-    await indexFile(prisma, filePath);
-    const file = await prisma.sharedFile.findFirstOrThrow({ where: { path: filePath } });
+    await indexFile(db, filePath);
+    const file = db.select().from(sharedFiles).where(eq(sharedFiles.path, filePath)).get()!;
 
-    const friend = await prisma.friend.create({
-      data: {
+    const friend = db
+      .insert(friends)
+      .values({
+        id: randomUUID(),
+        addedAt: new Date(),
+        updatedAt: new Date(),
         name: 'Peer',
         address: '6.6.6.6',
         port: 7734,
         nodeId: 'e'.repeat(32),
         status: 'ACCEPTED',
-      },
-    });
+      })
+      .returning()
+      .get()!;
 
     const received: InnerMessage[] = [];
     await handleChunkRequest(
@@ -307,12 +334,12 @@ describe('handleChunkRequest', () => {
         length: content.length,
       },
       'e'.repeat(32),
-      prisma,
+      db,
       (msg) => received.push(msg),
     );
 
-    await flushUploadStatsForTesting(friend.id, prisma);
-    const updated = await prisma.friend.findUniqueOrThrow({ where: { id: friend.id } });
+    await flushUploadStatsForTesting(friend.id, db);
+    const updated = db.select().from(friends).where(eq(friends.id, friend.id)).get()!;
     expect(updated.uploadTotalBytes).toBe(BigInt(content.length));
     expect(updated.uploadCount).toBe(1);
   });
@@ -321,18 +348,23 @@ describe('handleChunkRequest', () => {
     const content = Buffer.from('ABCDEFGHIJ');
     const filePath = join(tmpDir, 'upload-count-test.bin');
     await writeFile(filePath, content);
-    await indexFile(prisma, filePath);
-    const file = await prisma.sharedFile.findFirstOrThrow({ where: { path: filePath } });
+    await indexFile(db, filePath);
+    const file = db.select().from(sharedFiles).where(eq(sharedFiles.path, filePath)).get()!;
 
-    const friend = await prisma.friend.create({
-      data: {
+    const friend = db
+      .insert(friends)
+      .values({
+        id: randomUUID(),
+        addedAt: new Date(),
+        updatedAt: new Date(),
         name: 'Peer',
         address: '7.7.7.7',
         port: 7734,
         nodeId: 'f'.repeat(32),
         status: 'ACCEPTED',
-      },
-    });
+      })
+      .returning()
+      .get()!;
 
     // Serve two separate chunks of the same file to the same peer
     for (const offset of [0, 5]) {
@@ -345,13 +377,13 @@ describe('handleChunkRequest', () => {
           length: 5,
         },
         'f'.repeat(32),
-        prisma,
+        db,
         () => {},
       );
     }
 
-    await flushUploadStatsForTesting(friend.id, prisma);
-    const updated = await prisma.friend.findUniqueOrThrow({ where: { id: friend.id } });
+    await flushUploadStatsForTesting(friend.id, db);
+    const updated = db.select().from(friends).where(eq(friends.id, friend.id)).get()!;
     expect(updated.uploadCount).toBe(1);
     expect(updated.uploadTotalBytes).toBe(BigInt(10));
   });
@@ -363,20 +395,25 @@ describe('handleChunkRequest', () => {
     const pathB = join(tmpDir, 'multi-file-b.bin');
     await writeFile(pathA, contentA);
     await writeFile(pathB, contentB);
-    await indexFile(prisma, pathA);
-    await indexFile(prisma, pathB);
-    const fileA = await prisma.sharedFile.findFirstOrThrow({ where: { path: pathA } });
-    const fileB = await prisma.sharedFile.findFirstOrThrow({ where: { path: pathB } });
+    await indexFile(db, pathA);
+    await indexFile(db, pathB);
+    const fileA = db.select().from(sharedFiles).where(eq(sharedFiles.path, pathA)).get()!;
+    const fileB = db.select().from(sharedFiles).where(eq(sharedFiles.path, pathB)).get()!;
 
-    const friend = await prisma.friend.create({
-      data: {
+    const friend = db
+      .insert(friends)
+      .values({
+        id: randomUUID(),
+        addedAt: new Date(),
+        updatedAt: new Date(),
         name: 'Peer',
         address: '8.8.8.8',
         port: 7734,
         nodeId: '0'.repeat(32),
         status: 'ACCEPTED',
-      },
-    });
+      })
+      .returning()
+      .get()!;
 
     // Serve one chunk from each of two different files to the same peer
     for (const [sha256, content] of [
@@ -392,13 +429,13 @@ describe('handleChunkRequest', () => {
           length: content.length,
         },
         '0'.repeat(32),
-        prisma,
+        db,
         () => {},
       );
     }
 
-    await flushUploadStatsForTesting(friend.id, prisma);
-    const updated = await prisma.friend.findUniqueOrThrow({ where: { id: friend.id } });
+    await flushUploadStatsForTesting(friend.id, db);
+    const updated = db.select().from(friends).where(eq(friends.id, friend.id)).get()!;
     expect(updated.uploadCount).toBe(2);
     expect(updated.uploadTotalBytes).toBe(BigInt(contentA.length + contentB.length));
   });
@@ -414,7 +451,7 @@ describe('handleChunkRequest', () => {
         length: 100,
       },
       'unknown-node',
-      prisma,
+      db,
       (msg) => received.push(msg),
     );
 
@@ -490,18 +527,21 @@ describe('getActiveUploadSessions', () => {
     const content = Buffer.from('live session content');
     const filePath = join(tmpDir, 'live-session.txt');
     await writeFile(filePath, content);
-    await indexFile(prisma, filePath);
-    const file = await prisma.sharedFile.findFirstOrThrow({ where: { path: filePath } });
+    await indexFile(db, filePath);
+    const file = db.select().from(sharedFiles).where(eq(sharedFiles.path, filePath)).get()!;
 
-    await prisma.friend.create({
-      data: {
+    db.insert(friends)
+      .values({
+        id: randomUUID(),
+        addedAt: new Date(),
+        updatedAt: new Date(),
         name: 'Peer',
         address: '11.0.0.1',
         port: 7734,
         nodeId: 'a1'.repeat(16),
         status: 'ACCEPTED',
-      },
-    });
+      })
+      .run();
 
     await handleChunkRequest(
       {
@@ -512,7 +552,7 @@ describe('getActiveUploadSessions', () => {
         length: content.length,
       },
       'a1'.repeat(16),
-      prisma,
+      db,
       () => {},
     );
 
@@ -529,18 +569,21 @@ describe('getActiveUploadSessions', () => {
     const content = Buffer.from('0123456789');
     const filePath = join(tmpDir, 'multi-chunk-session.bin');
     await writeFile(filePath, content);
-    await indexFile(prisma, filePath);
-    const file = await prisma.sharedFile.findFirstOrThrow({ where: { path: filePath } });
+    await indexFile(db, filePath);
+    const file = db.select().from(sharedFiles).where(eq(sharedFiles.path, filePath)).get()!;
 
-    await prisma.friend.create({
-      data: {
+    db.insert(friends)
+      .values({
+        id: randomUUID(),
+        addedAt: new Date(),
+        updatedAt: new Date(),
         name: 'Peer',
         address: '11.0.0.2',
         port: 7734,
         nodeId: 'b2'.repeat(16),
         status: 'ACCEPTED',
-      },
-    });
+      })
+      .run();
 
     for (let i = 0; i < 3; i++) {
       await handleChunkRequest(
@@ -552,7 +595,7 @@ describe('getActiveUploadSessions', () => {
           length: 5,
         },
         'b2'.repeat(16),
-        prisma,
+        db,
         () => {},
       );
     }
@@ -567,18 +610,23 @@ describe('getActiveUploadSessions', () => {
     const content = Buffer.from('cancel session test');
     const filePath = join(tmpDir, 'cancel-session.txt');
     await writeFile(filePath, content);
-    await indexFile(prisma, filePath);
-    const file = await prisma.sharedFile.findFirstOrThrow({ where: { path: filePath } });
+    await indexFile(db, filePath);
+    const file = db.select().from(sharedFiles).where(eq(sharedFiles.path, filePath)).get()!;
 
-    const friend = await prisma.friend.create({
-      data: {
+    const friend = db
+      .insert(friends)
+      .values({
+        id: randomUUID(),
+        addedAt: new Date(),
+        updatedAt: new Date(),
         name: 'Peer',
         address: '11.0.0.3',
         port: 7734,
         nodeId: 'c3'.repeat(16),
         status: 'ACCEPTED',
-      },
-    });
+      })
+      .returning()
+      .get()!;
 
     await handleChunkRequest(
       {
@@ -589,7 +637,7 @@ describe('getActiveUploadSessions', () => {
         length: content.length,
       },
       'c3'.repeat(16),
-      prisma,
+      db,
       () => {},
     );
 
@@ -604,28 +652,34 @@ describe('getActiveUploadSessions', () => {
     const content = Buffer.from('peer disconnect test');
     const filePath = join(tmpDir, 'peer-disconnect-session.txt');
     await writeFile(filePath, content);
-    await indexFile(prisma, filePath);
-    const file = await prisma.sharedFile.findFirstOrThrow({ where: { path: filePath } });
+    await indexFile(db, filePath);
+    const file = db.select().from(sharedFiles).where(eq(sharedFiles.path, filePath)).get()!;
 
     // Two friends, same file — only the disconnecting peer's session should be removed.
-    await prisma.friend.create({
-      data: {
+    db.insert(friends)
+      .values({
+        id: randomUUID(),
+        addedAt: new Date(),
+        updatedAt: new Date(),
         name: 'Peer E5',
         address: '11.0.0.5',
         port: 7734,
         nodeId: 'e5'.repeat(16),
         status: 'ACCEPTED',
-      },
-    });
-    await prisma.friend.create({
-      data: {
+      })
+      .run();
+    db.insert(friends)
+      .values({
+        id: randomUUID(),
+        addedAt: new Date(),
+        updatedAt: new Date(),
         name: 'Peer F6',
         address: '11.0.0.6',
         port: 7734,
         nodeId: 'f6'.repeat(16),
         status: 'ACCEPTED',
-      },
-    });
+      })
+      .run();
 
     for (const nodeId of ['e5'.repeat(16), 'f6'.repeat(16)]) {
       await handleChunkRequest(
@@ -637,7 +691,7 @@ describe('getActiveUploadSessions', () => {
           length: content.length,
         },
         nodeId,
-        prisma,
+        db,
         () => {},
       );
     }
@@ -655,18 +709,21 @@ describe('getActiveUploadSessions', () => {
     const content = Buffer.from('expiry test content');
     const filePath = join(tmpDir, 'expiry-session.txt');
     await writeFile(filePath, content);
-    await indexFile(prisma, filePath);
-    const file = await prisma.sharedFile.findFirstOrThrow({ where: { path: filePath } });
+    await indexFile(db, filePath);
+    const file = db.select().from(sharedFiles).where(eq(sharedFiles.path, filePath)).get()!;
 
-    await prisma.friend.create({
-      data: {
+    db.insert(friends)
+      .values({
+        id: randomUUID(),
+        addedAt: new Date(),
+        updatedAt: new Date(),
         name: 'Peer',
         address: '11.0.0.4',
         port: 7734,
         nodeId: 'd4'.repeat(16),
         status: 'ACCEPTED',
-      },
-    });
+      })
+      .run();
 
     await handleChunkRequest(
       {
@@ -677,7 +734,7 @@ describe('getActiveUploadSessions', () => {
         length: content.length,
       },
       'd4'.repeat(16),
-      prisma,
+      db,
       () => {},
     );
 

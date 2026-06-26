@@ -1,7 +1,10 @@
 import { open } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 
-import type { PrismaClient } from '@prisma/client';
+import { and, eq, sql } from 'drizzle-orm';
+
+import { friends, sharedFiles } from './schema';
+import type { Db } from './db';
 
 import type {
   ChunkErrorMessage,
@@ -35,10 +38,7 @@ const pendingUploads = new Map<string, UploadAccumulator>();
 const pendingUploadTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const UPLOAD_FLUSH_MS = 2_000;
 
-function scheduleUploadFlush(friendId: string, prisma: PrismaClient): void {
-  // Throttle: only schedule if no timer is already pending for this friend.
-  // Unlike debounce, this guarantees the flush fires within UPLOAD_FLUSH_MS
-  // even under sustained chunk traffic.
+function scheduleUploadFlush(friendId: string, db: Db): void {
   if (pendingUploadTimers.has(friendId)) return;
   pendingUploadTimers.set(
     friendId,
@@ -47,17 +47,20 @@ function scheduleUploadFlush(friendId: string, prisma: PrismaClient): void {
       const pending = pendingUploads.get(friendId);
       if (!pending) return;
       pendingUploads.delete(friendId);
-      prisma.friend
-        .update({
-          where: { id: friendId },
-          data: {
-            uploadTotalBytes: { increment: pending.bytes },
+      try {
+        db.update(friends)
+          .set({
+            uploadTotalBytes: sql`${friends.uploadTotalBytes} + ${pending.bytes}`,
             ...(pending.newFileCount > 0
-              ? { uploadCount: { increment: pending.newFileCount } }
+              ? { uploadCount: sql`${friends.uploadCount} + ${pending.newFileCount}` }
               : {}),
-          },
-        })
-        .catch((err: unknown) => console.error('Failed to flush upload stats:', err));
+            updatedAt: new Date(),
+          })
+          .where(eq(friends.id, friendId))
+          .run();
+      } catch (err: unknown) {
+        console.error('Failed to flush upload stats:', err);
+      }
     }, UPLOAD_FLUSH_MS),
   );
 }
@@ -174,15 +177,17 @@ let lastTransferId = '';
 export async function handleChunkRequest(
   msg: ChunkRequestMessage,
   senderNodeId: string,
-  prisma: PrismaClient,
+  db: Db,
   sendResponse: (msg: InnerMessage) => void,
 ): Promise<void> {
-  const friend = await prisma.friend.findFirst({
-    where: { nodeId: senderNodeId, status: 'ACCEPTED' },
-  });
+  const friend = db
+    .select()
+    .from(friends)
+    .where(and(eq(friends.nodeId, senderNodeId), eq(friends.status, 'ACCEPTED')))
+    .get();
   if (!friend) return; // not an accepted friend — drop
 
-  const file = await prisma.sharedFile.findFirst({ where: { sha256: msg.sha256 } });
+  const file = db.select().from(sharedFiles).where(eq(sharedFiles.sha256, msg.sha256)).get();
   if (!file) {
     sendResponse({
       type: 'chunk-error',
@@ -243,7 +248,7 @@ export async function handleChunkRequest(
         acc.bytes += BigInt(bytesRead);
         if (isFirstChunk) acc.newFileCount++;
         pendingUploads.set(friend.id, acc);
-        scheduleUploadFlush(friend.id, prisma);
+        scheduleUploadFlush(friend.id, db);
 
         // Update live upload session for Transfers UI
         const now = Date.now();
@@ -342,14 +347,14 @@ export function handleChunkError(msg: ChunkErrorMessage): void {
 export async function dispatchTransferMessage(
   msg: InnerMessage,
   senderNodeId: string,
-  prisma: PrismaClient,
+  db: Db,
 ): Promise<void> {
   if (msg.type === 'chunk-request') {
     const result = ChunkRequestMessageSchema.safeParse(msg);
     if (!result.success) return;
     const peer = getConnectedPeer(senderNodeId);
     if (!peer) return;
-    await handleChunkRequest(result.data, senderNodeId, prisma, (response) =>
+    await handleChunkRequest(result.data, senderNodeId, db, (response) =>
       sendToPeer(peer, response),
     );
   } else if (msg.type === 'chunk-response') {
@@ -399,10 +404,7 @@ export function resetPendingForTesting(): void {
   lastTransferId = '';
 }
 
-export async function flushUploadStatsForTesting(
-  friendId: string,
-  prisma: PrismaClient,
-): Promise<void> {
+export async function flushUploadStatsForTesting(friendId: string, db: Db): Promise<void> {
   const timer = pendingUploadTimers.get(friendId);
   if (timer) {
     clearTimeout(timer);
@@ -411,13 +413,16 @@ export async function flushUploadStatsForTesting(
   const pending = pendingUploads.get(friendId);
   if (!pending) return;
   pendingUploads.delete(friendId);
-  await prisma.friend.update({
-    where: { id: friendId },
-    data: {
-      uploadTotalBytes: { increment: pending.bytes },
-      ...(pending.newFileCount > 0 ? { uploadCount: { increment: pending.newFileCount } } : {}),
-    },
-  });
+  db.update(friends)
+    .set({
+      uploadTotalBytes: sql`${friends.uploadTotalBytes} + ${pending.bytes}`,
+      ...(pending.newFileCount > 0
+        ? { uploadCount: sql`${friends.uploadCount} + ${pending.newFileCount}` }
+        : {}),
+      updatedAt: new Date(),
+    })
+    .where(eq(friends.id, friendId))
+    .run();
 }
 
 export function getLastTransferIdForTesting(): string {

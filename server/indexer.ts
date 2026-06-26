@@ -2,10 +2,14 @@ import { basename, join, sep } from 'node:path';
 import { lstat, readdir } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
+import { randomUUID } from 'node:crypto';
 
-import type { PrismaClient, SharedFile } from '@prisma/client';
+import { SQL, and, eq, like, lt, or, sql } from 'drizzle-orm';
 
+import type { Db } from './db';
+import type { SharedFile } from './schema';
 import { extractMetadata } from './metadata';
+import { sharedFiles } from './schema';
 
 export async function hashFile(path: string): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -43,7 +47,6 @@ export async function* scanDirectory(
       const code = (err as NodeJS.ErrnoException).code;
       if (code === 'ENOENT') continue;
       if (code === 'EACCES' || code === 'ENOTDIR') {
-        // Can't read metadata — protect both this path and any descendants it may have
         inaccessibleDirs?.add(fullPath);
         continue;
       }
@@ -59,13 +62,12 @@ export async function* scanDirectory(
 }
 
 export async function indexFile(
-  prisma: PrismaClient,
+  db: Db,
   path: string,
   lastSeenAt: Date = new Date(),
 ): Promise<SharedFile> {
   const s = await lstat(path, { bigint: true });
   if (!s.isFile()) {
-    // Path is no longer a regular file (e.g. replaced by a symlink) — treat as gone
     const err = new Error(`not a regular file: ${path}`) as NodeJS.ErrnoException;
     err.code = 'ENOENT';
     throw err;
@@ -73,26 +75,38 @@ export async function indexFile(
   const size = s.size;
   const fileModifiedAt = new Date(Number(s.mtimeMs));
 
-  // Fast path: if size and mtime match, touch lastSeenAt without re-hashing
-  const hit = await prisma.sharedFile.updateMany({
-    where: { path, size, fileModifiedAt },
-    data: { lastSeenAt },
-  });
-  if (hit.count > 0) {
-    return prisma.sharedFile.findUniqueOrThrow({ where: { path } });
+  // Fast path: size + mtime match — just touch lastSeenAt without re-hashing
+  const fastHit = db
+    .update(sharedFiles)
+    .set({ lastSeenAt })
+    .where(
+      and(
+        eq(sharedFiles.path, path),
+        eq(sharedFiles.size, size),
+        eq(sharedFiles.fileModifiedAt, fileModifiedAt),
+      ),
+    )
+    .returning({ id: sharedFiles.id })
+    .all();
+  if (fastHit.length > 0) {
+    const row = db.select().from(sharedFiles).where(eq(sharedFiles.path, path)).get();
+    if (!row) throw new Error(`indexFile: fast-path update succeeded but row not found: ${path}`);
+    return row;
   }
 
-  // File is new or content changed — full re-index
+  // Full re-index
   const sha256 = await hashFile(path);
   const mimeType = Bun.file(path).type || null;
   const metaObj = await extractMetadata(path);
   const metadata = metaObj ? JSON.stringify(metaObj) : null;
   const filename = basename(path);
+  const now = new Date();
 
-  return prisma.sharedFile.upsert({
-    where: { path },
-    create: { path, filename, size, sha256, mimeType, metadata, fileModifiedAt, lastSeenAt },
-    update: {
+  const row = db
+    .insert(sharedFiles)
+    .values({
+      id: randomUUID(),
+      path,
       filename,
       size,
       sha256,
@@ -100,46 +114,73 @@ export async function indexFile(
       metadata,
       fileModifiedAt,
       lastSeenAt,
-      indexedAt: new Date(),
-    },
-  });
+      indexedAt: now,
+      updatedAt: now,
+    })
+    .onConflictDoUpdate({
+      target: sharedFiles.path,
+      set: {
+        filename,
+        size,
+        sha256,
+        mimeType,
+        metadata,
+        fileModifiedAt,
+        lastSeenAt,
+        indexedAt: now,
+        updatedAt: now,
+      },
+    })
+    .returning()
+    .get();
+  return row!;
 }
 
 export async function removeStaleEntries(
-  prisma: PrismaClient,
+  db: Db,
   scanStart: Date,
   protectedRoots: string[] = [],
 ): Promise<number> {
-  const { count } = await prisma.sharedFile.deleteMany({
-    where:
-      protectedRoots.length === 0
-        ? { lastSeenAt: { lt: scanStart } }
-        : {
-            lastSeenAt: { lt: scanStart },
-            NOT: {
-              OR: protectedRoots.flatMap((root) => {
-                const normalized = root.endsWith(sep) ? root.slice(0, -1) : root;
-                return [{ path: normalized }, { path: { startsWith: normalized + sep } }];
-              }),
-            },
-          },
+  // Build exclusion clauses for each protected root:
+  // either exact match or path starts with root + separator.
+  const exclusionClauses: SQL[] = protectedRoots.flatMap((root) => {
+    const normalized = root.endsWith(sep) ? root.slice(0, -1) : root;
+    return [
+      eq(sharedFiles.path, normalized),
+      like(sharedFiles.path, `${normalized}${sep}%`),
+    ] as SQL[];
   });
-  return count;
+
+  const where =
+    exclusionClauses.length > 0
+      ? and(lt(sharedFiles.lastSeenAt, scanStart), sql`NOT (${or(...exclusionClauses)})`)
+      : lt(sharedFiles.lastSeenAt, scanStart);
+
+  const deleted = db.delete(sharedFiles).where(where).returning({ id: sharedFiles.id }).all();
+  return deleted.length;
 }
 
-// 35791 * 60_000 ms = 2_147_460_000 ms, just under setTimeout's 32-bit signed limit (2_147_483_647)
+// 35791 * 60_000 ms = 2_147_460_000 ms, just under setTimeout's 32-bit signed limit
 const MAX_RESCAN_INTERVAL_MINUTES = 35791;
 
 let scanning = false;
+// Monotonically-increasing scan clock: ensures each scan's timestamp strictly
+// exceeds any lastSeenAt written by a previous scan, even within the same ms.
+let lastScanMs = 0;
+function nextScanStart(): Date {
+  const t = Math.max(Date.now(), lastScanMs + 1);
+  lastScanMs = t;
+  return new Date(t);
+}
 
 export async function scanAndIndex(
-  prisma: PrismaClient,
+  db: Db,
   folders: string[],
 ): Promise<{ indexed: number; removed: number; skipped: boolean }> {
   if (scanning) return { indexed: 0, removed: 0, skipped: true };
   scanning = true;
   try {
-    const scanStart = new Date();
+    const scanStart = nextScanStart();
     const seen = new Set<string>();
     let indexed = 0;
     const inaccessibleRoots: string[] = [];
@@ -148,14 +189,12 @@ export async function scanAndIndex(
       try {
         const folderStat = await lstat(folder);
         if (!folderStat.isDirectory()) {
-          // Regular file, symlink, or other non-directory — preserve its entries
           inaccessibleRoots.push(folder);
           continue;
         }
       } catch (err) {
         const code = (err as NodeJS.ErrnoException).code;
         if (code === 'ENOENT' || code === 'EACCES' || code === 'ENOTDIR') {
-          // Folder is unavailable — preserve its indexed entries
           inaccessibleRoots.push(folder);
           continue;
         }
@@ -169,28 +208,25 @@ export async function scanAndIndex(
           if (seen.has(path)) continue;
           seen.add(path);
           try {
-            await indexFile(prisma, path, scanStart);
+            await indexFile(db, path, scanStart);
             indexed++;
           } catch (err) {
             const code = (err as NodeJS.ErrnoException).code;
             if (code === 'ENOENT') {
               // File vanished between discovery and indexing — treat as stale
             } else if (code === 'EACCES' || code === 'ENOTDIR') {
-              // Temporarily unreadable — preserve the existing record
               inaccessibleRoots.push(path);
             } else {
               throw err;
             }
           }
         }
-        // Protect files in subdirectories that became unreadable during the scan
         for (const dir of inaccessibleSubDirs) {
           inaccessibleRoots.push(dir);
         }
       } catch (err) {
         const code = (err as NodeJS.ErrnoException).code;
         if (code === 'ENOENT' || code === 'EACCES' || code === 'ENOTDIR') {
-          // Root became unreadable after lstat passed — preserve its indexed entries
           inaccessibleRoots.push(folder);
         } else {
           throw err;
@@ -198,7 +234,7 @@ export async function scanAndIndex(
       }
     }
 
-    const removed = await removeStaleEntries(prisma, scanStart, inaccessibleRoots);
+    const removed = await removeStaleEntries(db, scanStart, inaccessibleRoots);
     return { indexed, removed, skipped: false };
   } finally {
     scanning = false;
@@ -206,7 +242,7 @@ export async function scanAndIndex(
 }
 
 export function startPeriodicRescan(
-  prisma: PrismaClient,
+  db: Db,
   getFolders: () => Promise<string[]>,
   getIntervalMinutes: () => Promise<number>,
 ): () => void {
@@ -217,7 +253,7 @@ export function startPeriodicRescan(
     if (stopped) return;
     try {
       const folders = await getFolders();
-      await scanAndIndex(prisma, folders);
+      await scanAndIndex(db, folders);
     } catch (err) {
       console.error('Periodic rescan failed:', err);
     }
@@ -231,7 +267,6 @@ export function startPeriodicRescan(
       intervalMinutes = await getIntervalMinutes();
     } catch (err) {
       console.error('Failed to read rescan interval:', err);
-      // Fall through with intervalMinutes = 0, scheduling a retry below
     }
     if (stopped) return;
     if (
@@ -239,7 +274,6 @@ export function startPeriodicRescan(
       intervalMinutes <= 0 ||
       intervalMinutes > MAX_RESCAN_INTERVAL_MINUTES
     ) {
-      // Disabled, invalid, or would overflow setTimeout's 32-bit ms limit — re-check in 1 minute
       timerId = setTimeout(
         () => scheduleNext().catch((err) => console.error('Periodic rescan schedule failed:', err)),
         60_000,

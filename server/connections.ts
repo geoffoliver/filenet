@@ -1,4 +1,4 @@
-import type { PrismaClient } from '@prisma/client';
+import { and, eq, inArray } from 'drizzle-orm';
 
 import type { FriendRequestMessage, FriendVouchRequestMessage, InnerMessage } from './types';
 import { acceptFriendRequest, handleIncomingFriendRequest, shouldAutoAccept } from './friends';
@@ -11,8 +11,10 @@ import {
   generateEphemeralKeypair,
   processHelloAck,
 } from './handshake';
+import type { Db } from './db';
 import { FriendResponseMessageSchema } from './schemas';
 import type { Identity } from './identity';
+import { friends } from './schema';
 import { getOrCreateSettings } from './config';
 
 export type ConnectedPeer = {
@@ -79,14 +81,15 @@ export function getAllConnectedPeers(): ConnectedPeer[] {
   return Array.from(peers.values());
 }
 
-export async function getAcceptedConnectedPeers(prisma: PrismaClient): Promise<ConnectedPeer[]> {
+export async function getAcceptedConnectedPeers(db: Db): Promise<ConnectedPeer[]> {
   const connected = getAllConnectedPeers();
   if (connected.length === 0) return [];
   const nodeIds = connected.map((p) => p.peerNodeId);
-  const accepted = await prisma.friend.findMany({
-    where: { status: 'ACCEPTED', nodeId: { in: nodeIds } },
-    select: { nodeId: true },
-  });
+  const accepted = db
+    .select({ nodeId: friends.nodeId })
+    .from(friends)
+    .where(and(eq(friends.status, 'ACCEPTED'), inArray(friends.nodeId, nodeIds)))
+    .all();
   const acceptedSet = new Set(accepted.map((f) => f.nodeId as string));
   return connected.filter((p) => acceptedSet.has(p.peerNodeId));
 }
@@ -99,16 +102,10 @@ export function sendToPeer(peer: ConnectedPeer, msg: InnerMessage): void {
 // Friends-of-friends vouch protocol
 // ---------------------------------------------------------------------------
 
-// Hard cap: prevents a flood of inbound friend-requests from exhausting memory
-// via unbounded pendingVouches entries + timers.
 export const MAX_PENDING_VOUCHES = 500;
 
 type PendingVouch = {
-  // Peers we actually sent a vouch-request to; only responses from members of
-  // this set are accepted, preventing unsolicited/spoofed vouches.
   queriedPeerIds: Set<string>;
-  // Tracks which queried peers have already responded, so a single malicious
-  // peer cannot decrement remainingPeers multiple times and force an early false.
   respondedPeerIds: Set<string>;
   remainingPeers: number;
   timer: ReturnType<typeof setTimeout>;
@@ -132,14 +129,7 @@ export async function queryVouch(
   timeoutMs = 3_000,
 ): Promise<boolean> {
   if (peers.length === 0) return false;
-
-  // Guard: reject concurrent queries for the same candidateNodeId. Overwriting
-  // the map entry would corrupt the first query's state (its timer would later
-  // delete the second entry and strand the second promise). The first query will
-  // determine the outcome; the duplicate is left for manual review.
   if (pendingVouches.has(candidateNodeId)) return false;
-
-  // Guard: prevent memory exhaustion from a flood of simultaneous friend-requests.
   if (pendingVouches.size >= MAX_PENDING_VOUCHES) return false;
 
   return new Promise<boolean>((promiseResolve) => {
@@ -187,9 +177,7 @@ export async function queryVouch(
 export function resolveVouch(fromNodeId: string, candidateNodeId: string, vouched: boolean): void {
   const pending = pendingVouches.get(candidateNodeId);
   if (!pending) return;
-  if (!pending.queriedPeerIds.has(fromNodeId)) return; // unsolicited — ignore
-  // Deduplicate responses: a single peer sending vouched=false multiple times
-  // must not drain remainingPeers and force an early false before honest peers respond.
+  if (!pending.queriedPeerIds.has(fromNodeId)) return;
   if (pending.respondedPeerIds.has(fromNodeId)) return;
   pending.respondedPeerIds.add(fromNodeId);
 
@@ -212,7 +200,7 @@ export const HANDSHAKE_TIMEOUT_MS = 15_000;
 
 export async function connectToPeer(
   identity: Identity,
-  prisma: PrismaClient,
+  db: Db,
   address: string,
   port: number,
   localPort: number,
@@ -233,10 +221,6 @@ export async function connectToPeer(
     let handshakeDone = false;
     let timedOut = false;
 
-    // A peer that accepts the TCP/WS connection but never completes the handshake
-    // would leave this promise pending forever — and with it, any caller state
-    // (e.g. the reconnect loop's in-flight dial set). Reject first (the close
-    // reason does not reliably propagate to the local onclose event), then close.
     const handshakeTimer = setTimeout(() => {
       if (!handshakeDone) {
         timedOut = true;
@@ -250,9 +234,6 @@ export async function connectToPeer(
     };
 
     ws.onmessage = async (event) => {
-      // A hello-ack can already be queued when the timeout fires; processing it
-      // would register the peer and send a friend-request on a connection the
-      // caller has already seen rejected. Drop everything after the timeout.
       if (timedOut) return;
       try {
         const wire = decodeMessage(
@@ -276,18 +257,19 @@ export async function connectToPeer(
             port,
           );
 
-          // Mark handshake done immediately so onclose won't spuriously reject
-          // if the socket closes while we're doing the DB write below.
           handshakeDone = true;
           clearTimeout(handshakeTimer);
 
-          // Match any OUTGOING_PENDING at this address regardless of whether nodeId
-          // was already set — a peer that reinstalled has a new nodeId and the old
-          // value must be replaced so getConnectedPeer() resolves correctly.
-          await prisma.friend.updateMany({
-            where: { address, port, status: 'OUTGOING_PENDING' },
-            data: { nodeId: wire.nodeId, publicKey: wire.publicKey },
-          });
+          db.update(friends)
+            .set({ nodeId: wire.nodeId, publicKey: wire.publicKey, updatedAt: new Date() })
+            .where(
+              and(
+                eq(friends.address, address),
+                eq(friends.port, port),
+                eq(friends.status, 'OUTGOING_PENDING'),
+              ),
+            )
+            .run();
 
           if (friendRequest) {
             const msg: FriendRequestMessage = {
@@ -305,7 +287,7 @@ export async function connectToPeer(
 
         if (wire.type === 'encrypted' && sessionKey) {
           const msg = decryptMessage(wire, sessionKey);
-          await handleOutboundMessage(identity, prisma, msg, {
+          await handleOutboundMessage(identity, db, msg, {
             nodeId: peerNodeId!,
             publicKey: peerPublicKey!,
             address,
@@ -315,19 +297,14 @@ export async function connectToPeer(
             try {
               await onMessage(peerNodeId, msg);
             } catch (err) {
-              // A transient error in the optional message hook (e.g. DB blip) must not
-              // tear down an otherwise healthy connection.
               console.error(`onMessage error from peer ${address}:${port}:`, err);
             }
           }
         }
       } catch (err) {
         if (peerNodeId) closeAndUnregisterPeer(peerNodeId);
-        reject(err); // no-op if already resolved; handles pre- and mid-setup failures
+        reject(err);
         if (!handshakeDone) {
-          // Reuse timedOut as a general "drop further messages" flag so that a
-          // hello-ack queued behind the bad frame doesn't register a peer or
-          // send a friend-request after the caller has already seen a failure.
           clearTimeout(handshakeTimer);
           timedOut = true;
           ws.close(1000, 'Pre-handshake error');
@@ -354,7 +331,7 @@ export async function connectToPeer(
 
 async function handleOutboundMessage(
   _identity: Identity,
-  prisma: PrismaClient,
+  db: Db,
   msg: InnerMessage,
   peer: { nodeId: string; publicKey: Buffer; address: string; port: number },
 ): Promise<void> {
@@ -362,23 +339,26 @@ async function handleOutboundMessage(
     const result = FriendResponseMessageSchema.safeParse(msg);
     if (!result.success) return;
     const { accepted, name } = result.data;
-    const existing = await prisma.friend.findFirst({
-      where: { address: peer.address, port: peer.port },
-    });
+    const existing = db
+      .select()
+      .from(friends)
+      .where(and(eq(friends.address, peer.address), eq(friends.port, peer.port)))
+      .get();
     if (!existing) return;
 
     if (accepted) {
-      await acceptFriendRequest(prisma, existing.id);
-      await prisma.friend.update({
-        where: { id: existing.id },
-        data: {
+      await acceptFriendRequest(db, existing.id);
+      db.update(friends)
+        .set({
           nodeId: peer.nodeId,
           publicKey: peer.publicKey.toString('base64'),
           ...(name ? { name } : {}),
-        },
-      });
+          updatedAt: new Date(),
+        })
+        .where(eq(friends.id, existing.id))
+        .run();
     } else {
-      await prisma.friend.delete({ where: { id: existing.id } });
+      db.delete(friends).where(eq(friends.id, existing.id)).run();
       closeAndUnregisterPeer(peer.nodeId);
     }
   }
@@ -386,16 +366,16 @@ async function handleOutboundMessage(
 
 export async function handleInboundFriendRequest(
   _identity: Identity,
-  prisma: PrismaClient,
+  db: Db,
   msg: FriendRequestMessage,
   peer: { nodeId: string; publicKey: Buffer; address: string; port: number },
   sendResponse: (msg: InnerMessage) => void,
   vouchTimeoutMs = 3_000,
 ): Promise<void> {
-  const settings = await getOrCreateSettings(prisma);
-  let autoAccept = shouldAutoAccept(settings, msg.password);
+  const settingsRow = await getOrCreateSettings(db);
+  let autoAccept = shouldAutoAccept(settingsRow, msg.password);
 
-  const friend = await handleIncomingFriendRequest(prisma, {
+  const friend = await handleIncomingFriendRequest(db, {
     nodeId: peer.nodeId,
     publicKey: peer.publicKey.toString('base64'),
     name: msg.name,
@@ -405,9 +385,8 @@ export async function handleInboundFriendRequest(
 
   if (friend.status === 'BLOCKED') return;
 
-  if (!autoAccept && settings.autoAcceptFromFriendsOfFriends) {
-    const allAccepted = await getAcceptedConnectedPeers(prisma);
-    // Exclude the requesting peer itself — it can't vouch for itself
+  if (!autoAccept && settingsRow.autoAcceptFromFriendsOfFriends) {
+    const allAccepted = await getAcceptedConnectedPeers(db);
     const vouchPeers = allAccepted.filter((p) => p.peerNodeId !== peer.nodeId);
     if (vouchPeers.length > 0) {
       autoAccept = await queryVouch(peer.nodeId, vouchPeers, sendToPeer, vouchTimeoutMs);
@@ -415,9 +394,8 @@ export async function handleInboundFriendRequest(
   }
 
   if (autoAccept) {
-    await acceptFriendRequest(prisma, friend.id);
-    const name = settings.name.trim().slice(0, 200) || undefined;
+    await acceptFriendRequest(db, friend.id);
+    const name = settingsRow.name.trim().slice(0, 200) || undefined;
     sendResponse({ type: 'friend-response', accepted: true, name });
   }
-  // No response when queued for manual review — the user will accept/reject via the UI.
 }

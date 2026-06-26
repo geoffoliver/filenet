@@ -3,18 +3,22 @@ import { resolve } from 'node:path';
 import { stat } from 'node:fs/promises';
 
 import type { BunFile } from 'bun';
-import type { PrismaClient } from '@prisma/client';
+import { asc } from 'drizzle-orm';
 
+import type { Db } from './db';
 import type { TransferStats } from './types';
+import { postDownloadScripts } from './schema';
 
 export async function runPostDownloadScripts(
-  prisma: PrismaClient,
+  db: Db,
   finalPath: string,
   stats: TransferStats,
 ): Promise<void> {
-  const scripts = await prisma.postDownloadScript.findMany({
-    orderBy: [{ order: 'asc' }, { id: 'asc' }],
-  });
+  const scripts = db
+    .select()
+    .from(postDownloadScripts)
+    .orderBy(asc(postDownloadScripts.order), asc(postDownloadScripts.id))
+    .all();
   if (scripts.length === 0) return;
 
   let file: BunFile = Bun.file(finalPath);

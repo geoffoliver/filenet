@@ -1,6 +1,8 @@
 import crypto from 'crypto';
+import { randomUUID } from 'node:crypto';
 
-import type { PrismaClient } from '@prisma/client';
+import type { Db } from './db';
+import { identity as identityTable } from './schema';
 
 export type Identity = {
   nodeId: string;
@@ -25,20 +27,21 @@ export function deriveNodeId(publicKeyDer: Buffer): string {
   return crypto.createHash('sha256').update(publicKeyDer).digest('hex').slice(0, 32);
 }
 
-export async function saveIdentity(identity: Identity, prisma: PrismaClient): Promise<void> {
-  await prisma.identity.upsert({
-    where: { nodeId: identity.nodeId },
-    create: {
-      nodeId: identity.nodeId,
-      publicKey: identity.publicKey.toString('base64'),
-      privateKey: identity.privateKey.toString('base64'),
-    },
-    update: {},
-  });
+export async function saveIdentity(id: Identity, db: Db): Promise<void> {
+  db.insert(identityTable)
+    .values({
+      id: randomUUID(),
+      nodeId: id.nodeId,
+      publicKey: id.publicKey.toString('base64'),
+      privateKey: id.privateKey.toString('base64'),
+      createdAt: new Date(),
+    })
+    .onConflictDoNothing()
+    .run();
 }
 
-export async function loadIdentity(prisma: PrismaClient): Promise<Identity | null> {
-  const record = await prisma.identity.findFirst();
+export async function loadIdentity(db: Db): Promise<Identity | null> {
+  const record = db.select().from(identityTable).get();
   if (!record) return null;
   return {
     nodeId: record.nodeId,
@@ -47,10 +50,10 @@ export async function loadIdentity(prisma: PrismaClient): Promise<Identity | nul
   };
 }
 
-export async function getOrCreateIdentity(prisma: PrismaClient): Promise<Identity> {
-  const existing = await loadIdentity(prisma);
+export async function getOrCreateIdentity(db: Db): Promise<Identity> {
+  const existing = await loadIdentity(db);
   if (existing) return existing;
-  const identity = generateIdentity();
-  await saveIdentity(identity, prisma);
-  return identity;
+  const id = generateIdentity();
+  await saveIdentity(id, db);
+  return id;
 }

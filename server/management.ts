@@ -9,12 +9,11 @@ function truncateToBytes(str: string, maxBytes: number): string {
   const buf = Buffer.from(str, 'utf8');
   if (buf.length <= maxBytes) return str;
   let end = maxBytes;
-  // Walk back over any UTF-8 continuation bytes (0x80–0xBF) to find a boundary.
   while (end > 0 && (buf[end] & 0xc0) === 0x80) end--;
   return buf.subarray(0, end).toString('utf8');
 }
 
-import type { PrismaClient, SharedFile } from '@prisma/client';
+import { and, count, desc, eq, lt, max, sum } from 'drizzle-orm';
 
 import {
   AddFriendBodySchema,
@@ -44,13 +43,23 @@ import {
 } from './download-manager';
 import { cancelUploadFlushForFriend, getActiveUploadSessions } from './transfer-protocol';
 import {
+  conversations,
+  downloads,
+  friends,
+  messages,
+  postDownloadScripts,
+  sharedFiles,
+} from './schema';
+import {
   getEnvConfig,
   getOrCreateSettings,
   parseSharedFolders,
   sanitizeSettings,
   updateSettings,
 } from './config';
+import type { Db } from './db';
 import type { Identity } from './identity';
+import type { SharedFile } from './schema';
 import { dmConversationId } from './chat';
 import { initiateNetworkSearch } from './search-protocol';
 import { scanAndIndex } from './indexer';
@@ -79,8 +88,8 @@ function toSharedFileDto(file: SharedFile): SharedFileDto {
     mimeType: file.mimeType,
     metadata: file.metadata,
     fileModifiedAt: file.fileModifiedAt?.toISOString() ?? null,
-    indexedAt: file.indexedAt.toISOString(),
-    updatedAt: file.updatedAt.toISOString(),
+    indexedAt: file.indexedAt!.toISOString(),
+    updatedAt: file.updatedAt!.toISOString(),
   };
 }
 
@@ -92,13 +101,13 @@ export type ConnectPeerFn = (
 
 export type ManagementDeps = {
   identity: Identity;
-  prisma: PrismaClient;
+  db: Db;
   connectPeer: ConnectPeerFn;
   networkSearch?: typeof initiateNetworkSearch;
 };
 
 export function createManagementFetch(deps: ManagementDeps): (req: Request) => Promise<Response> {
-  const { identity, prisma, connectPeer, networkSearch = initiateNetworkSearch } = deps;
+  const { identity, db, connectPeer, networkSearch = initiateNetworkSearch } = deps;
 
   return async function fetch(req: Request): Promise<Response> {
     const url = new URL(req.url);
@@ -110,8 +119,8 @@ export function createManagementFetch(deps: ManagementDeps): (req: Request) => P
 
       if (url.pathname === '/api/friends') {
         if (req.method === 'GET') {
-          const friends = await getFriends(prisma);
-          const enriched = friends.map(
+          const friendList = await getFriends(db);
+          const enriched = friendList.map(
             ({
               downloadCount,
               downloadTotalBytes,
@@ -122,8 +131,6 @@ export function createManagementFetch(deps: ManagementDeps): (req: Request) => P
             }) => ({
               ...f,
               online: f.nodeId ? !!getConnectedPeer(f.nodeId) : false,
-              // Only surface counters for ACCEPTED friends — historical data must not
-              // be exposed if the friendship status has since changed.
               downloads:
                 f.status === 'ACCEPTED'
                   ? { count: downloadCount, totalSize: String(downloadTotalBytes) }
@@ -143,15 +150,12 @@ export function createManagementFetch(deps: ManagementDeps): (req: Request) => P
             return new Response(result.error.issues[0].message, { status: 400 });
           }
           const { name, address, port, password } = result.data;
-          const friend = await addOutgoingFriend(prisma, { name, address, port, password });
-          const settings = await getOrCreateSettings(prisma);
-          // Promise.resolve().then() normalises sync throws (e.g. invalid URL for
-          // IPv6 addresses before the bracket fix) into rejected promises so a
-          // crash in connectPeer never turns the 201 response into a 500.
+          const friend = await addOutgoingFriend(db, { name, address, port, password });
+          const settingsRow = await getOrCreateSettings(db);
           Promise.resolve()
             .then(() =>
               connectPeer(address, port, {
-                name: settings.name.trim() || identity.nodeId,
+                name: settingsRow.name.trim() || identity.nodeId,
                 password,
               }),
             )
@@ -192,29 +196,25 @@ export function createManagementFetch(deps: ManagementDeps): (req: Request) => P
           const { action } = result.data;
 
           if (action === 'accept') {
-            const pending = await prisma.friend.findUnique({ where: { id } });
+            const pending = db.select().from(friends).where(eq(friends.id, id)).get();
             if (!pending) return new Response(`Friend ${id} not found`, { status: 404 });
             if (pending.status !== 'INCOMING_PENDING') {
               return new Response(`Cannot accept a friend with status ${pending.status}`, {
                 status: 409,
               });
             }
-            const updated = await acceptFriendRequest(prisma, id);
-            const settings = await getOrCreateSettings(prisma);
-            const localName = settings.name || null;
+            const updated = await acceptFriendRequest(db, id);
+            const settingsRow = await getOrCreateSettings(db);
+            const localName = settingsRow.name || null;
             if (updated.nodeId) {
               const peer = getConnectedPeer(updated.nodeId);
               if (peer) {
                 try {
                   notifyFriendAccepted(peer, localName);
-                } catch {
-                  // peer disconnected between lookup and send
-                }
+                } catch {}
               } else {
                 connectPeer(updated.address, updated.port)
-                  .then((p) => {
-                    notifyFriendAccepted(p, localName);
-                  })
+                  .then((p) => notifyFriendAccepted(p, localName))
                   .catch((err: unknown) => {
                     console.error(`Failed to dial back ${updated.address}:${updated.port}:`, err);
                   });
@@ -237,17 +237,15 @@ export function createManagementFetch(deps: ManagementDeps): (req: Request) => P
           }
 
           if (action === 'reject') {
-            const friend = await prisma.friend.findUnique({ where: { id } });
+            const friend = db.select().from(friends).where(eq(friends.id, id)).get();
             if (!friend) return new Response(`Friend ${id} not found`, { status: 404 });
-            await rejectFriendRequest(prisma, id);
+            await rejectFriendRequest(db, id);
             if (friend.nodeId) {
               const peer = getConnectedPeer(friend.nodeId);
               if (peer) {
                 try {
                   notifyFriendRejected(peer);
-                } catch {
-                  // peer disconnected between lookup and send
-                }
+                } catch {}
               }
               closeAndUnregisterPeer(friend.nodeId);
             }
@@ -256,11 +254,11 @@ export function createManagementFetch(deps: ManagementDeps): (req: Request) => P
         }
 
         if (req.method === 'DELETE') {
-          const toDelete = await prisma.friend.findUnique({ where: { id } });
+          const toDelete = db.select().from(friends).where(eq(friends.id, id)).get();
           if (!toDelete) return new Response(`Friend ${id} not found`, { status: 404 });
           cancelUploadFlushForFriend(id);
           if (toDelete.nodeId) closeAndUnregisterPeer(toDelete.nodeId);
-          await prisma.friend.delete({ where: { id } });
+          db.delete(friends).where(eq(friends.id, id)).run();
           return new Response(null, { status: 204 });
         }
       }
@@ -268,10 +266,6 @@ export function createManagementFetch(deps: ManagementDeps): (req: Request) => P
       if (url.pathname === '/api/fs' && req.method === 'GET') {
         const home = homedir();
         const rawPath = url.searchParams.get('path');
-        // Reject relative input outright — resolving it against the server's cwd
-        // would silently browse the app directory, and the resulting path could
-        // get persisted into settings. resolve() then normalizes trailing
-        // slashes and ".."/"." segments so the response is always canonical.
         if (rawPath && !isAbsolute(rawPath)) {
           return new Response('Path must be absolute', { status: 400 });
         }
@@ -284,7 +278,6 @@ export function createManagementFetch(deps: ManagementDeps): (req: Request) => P
             .filter((e) => e.isDirectory() && !e.name.startsWith('.'))
             .map((e) => ({ name: e.name, path: join(target, e.name) }))
             .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
-          // dirname(root) === root on every platform ('/' on POSIX, 'C:\\' on Windows)
           const parentDir = dirname(target);
           const parent = parentDir === target ? null : parentDir;
           return Response.json({ path: target, parent, home, entries });
@@ -299,8 +292,8 @@ export function createManagementFetch(deps: ManagementDeps): (req: Request) => P
 
       if (url.pathname === '/api/settings') {
         if (req.method === 'GET') {
-          const settings = await getOrCreateSettings(prisma);
-          return Response.json(sanitizeSettings(settings));
+          const settingsRow = await getOrCreateSettings(db);
+          return Response.json(sanitizeSettings(settingsRow));
         }
 
         if (req.method === 'PATCH') {
@@ -308,9 +301,6 @@ export function createManagementFetch(deps: ManagementDeps): (req: Request) => P
           if (!result.success) {
             return new Response(result.error.issues[0].message, { status: 400 });
           }
-          // Env-controlled paths must be enforced here, not just hidden in the UI —
-          // otherwise a direct API call could permanently diverge the DB from the
-          // env config (env values only seed the DB on first launch).
           const env = getEnvConfig();
           if (result.data.sharedFolders !== undefined && env.sharedFolders.length > 0) {
             return new Response(
@@ -324,7 +314,7 @@ export function createManagementFetch(deps: ManagementDeps): (req: Request) => P
               { status: 409 },
             );
           }
-          const updated = await updateSettings(prisma, result.data);
+          const updated = await updateSettings(db, result.data);
           return Response.json(sanitizeSettings(updated));
         }
       }
@@ -335,9 +325,9 @@ export function createManagementFetch(deps: ManagementDeps): (req: Request) => P
           return new Response(result.error.issues[0].message, { status: 400 });
         }
         const { q, type, limit, offset, network } = result.data;
-        const localSearchPromise = searchFiles(prisma, { query: q, type, limit, offset });
+        const localSearchPromise = searchFiles(db, { query: q, type, limit, offset });
         const networkResultsPromise = network
-          ? getAcceptedConnectedPeers(prisma).then((peers) =>
+          ? getAcceptedConnectedPeers(db).then((peers) =>
               networkSearch(identity, peers, { query: q, fileType: type }),
             )
           : Promise.resolve([]);
@@ -353,36 +343,44 @@ export function createManagementFetch(deps: ManagementDeps): (req: Request) => P
       }
 
       if (url.pathname === '/api/stats' && req.method === 'GET') {
-        const [fileAgg, friendTotal, onlineFriends, downloadAgg] = await Promise.all([
-          prisma.sharedFile.aggregate({ _count: true, _sum: { size: true } }),
-          prisma.friend.count({ where: { status: 'ACCEPTED' } }),
-          getAcceptedConnectedPeers(prisma),
-          prisma.download.aggregate({
-            _count: true,
-            _sum: { size: true },
-            where: { state: 'COMPLETED' },
-          }),
+        const [fileStats, friendCount, onlineFriends, downloadStats] = await Promise.all([
+          Promise.resolve(
+            db
+              .select({ count: count(), totalSize: sum(sharedFiles.size) })
+              .from(sharedFiles)
+              .get(),
+          ),
+          Promise.resolve(
+            db.select({ count: count() }).from(friends).where(eq(friends.status, 'ACCEPTED')).get(),
+          ),
+          getAcceptedConnectedPeers(db),
+          Promise.resolve(
+            db
+              .select({ count: count(), totalSize: sum(downloads.size) })
+              .from(downloads)
+              .where(eq(downloads.state, 'COMPLETED'))
+              .get(),
+          ),
         ]);
         return Response.json({
           sharedFiles: {
-            count: fileAgg._count,
-            totalSize: String(fileAgg._sum.size ?? 0n),
+            count: fileStats?.count ?? 0,
+            totalSize: String(fileStats?.totalSize ?? 0),
           },
           friends: {
-            total: friendTotal,
+            total: friendCount?.count ?? 0,
             online: onlineFriends.length,
           },
           downloads: {
-            count: downloadAgg._count,
-            totalSize: String(downloadAgg._sum.size ?? 0n),
+            count: downloadStats?.count ?? 0,
+            totalSize: String(downloadStats?.totalSize ?? 0),
           },
         });
       }
 
       if (url.pathname === '/api/transfers') {
         if (req.method === 'GET') {
-          const transfers = await getTransfers(prisma);
-          return Response.json(transfers);
+          return Response.json(await getTransfers(db));
         }
 
         if (req.method === 'POST') {
@@ -397,8 +395,6 @@ export function createManagementFetch(deps: ManagementDeps): (req: Request) => P
             mimeType?: string | null;
             sources: unknown[];
           };
-          // Trim sources once up front so both validation and usage work off the
-          // same values without calling .trim() twice per entry.
           const trimmedSources = Array.isArray(sources)
             ? sources.map((s) => (typeof s === 'string' ? s.trim() : s))
             : sources;
@@ -422,12 +418,12 @@ export function createManagementFetch(deps: ManagementDeps): (req: Request) => P
           if (BigInt(size) > BigInt(Number.MAX_SAFE_INTEGER)) {
             return new Response('File size too large', { status: 400 });
           }
-          const settings = await getOrCreateSettings(prisma);
-          const downloadFolder = settings.downloadFolder;
+          const settingsRow = await getOrCreateSettings(db);
+          const downloadFolder = settingsRow.downloadFolder;
           if (!downloadFolder) {
             return new Response('Download folder not configured', { status: 422 });
           }
-          const id = await startDownload(prisma, {
+          const id = await startDownload(db, {
             sha256,
             filename: truncateToBytes(filename.trim(), 200),
             size: BigInt(size),
@@ -457,19 +453,19 @@ export function createManagementFetch(deps: ManagementDeps): (req: Request) => P
           }
           const { action } = body as { action?: string };
           if (action === 'pause') {
-            const ok = await pauseDownload(prisma, id);
+            const ok = await pauseDownload(db, id);
             return ok
               ? new Response(null, { status: 204 })
               : new Response('Not pausable', { status: 409 });
           }
           if (action === 'resume') {
-            const ok = await resumeDownload(prisma, id);
+            const ok = await resumeDownload(db, id);
             return ok
               ? new Response(null, { status: 204 })
               : new Response('Not resumable', { status: 409 });
           }
           if (action === 'cancel') {
-            const ok = await cancelDownload(prisma, id);
+            const ok = await cancelDownload(db, id);
             return ok
               ? new Response(null, { status: 204 })
               : new Response('Not cancellable', { status: 409 });
@@ -478,23 +474,25 @@ export function createManagementFetch(deps: ManagementDeps): (req: Request) => P
         }
 
         if (req.method === 'DELETE') {
-          const record = await prisma.download.findUnique({ where: { id } });
+          const record = db.select().from(downloads).where(eq(downloads.id, id)).get();
           if (!record) return new Response('Not found', { status: 404 });
           if (record.state === 'DOWNLOADING' || record.state === 'PAUSED') {
             return new Response('Cannot delete an active download — cancel it first', {
               status: 409,
             });
           }
-          await prisma.download.delete({ where: { id } });
+          db.delete(downloads).where(eq(downloads.id, id)).run();
           return new Response(null, { status: 204 });
         }
       }
 
       if (url.pathname === '/api/scripts') {
         if (req.method === 'GET') {
-          const scripts = await prisma.postDownloadScript.findMany({
-            orderBy: [{ order: 'asc' }, { id: 'asc' }],
-          });
+          const scripts = db
+            .select()
+            .from(postDownloadScripts)
+            .orderBy(postDownloadScripts.order, postDownloadScripts.id)
+            .all();
           return Response.json(scripts);
         }
 
@@ -505,14 +503,21 @@ export function createManagementFetch(deps: ManagementDeps): (req: Request) => P
           }
           const { path } = result.data;
           try {
-            const script = await prisma.$transaction(async (tx) => {
-              const agg = await tx.postDownloadScript.aggregate({ _max: { order: true } });
-              const nextOrder = (agg._max.order ?? -1) + 1;
-              return tx.postDownloadScript.create({ data: { path, order: nextOrder } });
+            const script = db.transaction((tx) => {
+              const agg = tx
+                .select({ maxOrder: max(postDownloadScripts.order) })
+                .from(postDownloadScripts)
+                .get();
+              const nextOrder = (agg?.maxOrder ?? -1) + 1;
+              return tx
+                .insert(postDownloadScripts)
+                .values({ id: randomUUID(), path, order: nextOrder, createdAt: new Date() })
+                .returning()
+                .get();
             });
             return Response.json(script, { status: 201 });
           } catch (err) {
-            if (err instanceof Error && 'code' in err && (err as { code: string }).code === 'P2002')
+            if (err instanceof Error && err.message.includes('UNIQUE constraint failed'))
               return new Response('Script already exists', { status: 409 });
             throw err;
           }
@@ -530,50 +535,68 @@ export function createManagementFetch(deps: ManagementDeps): (req: Request) => P
           if (!result.success) {
             return new Response(result.error.issues[0].message, { status: 400 });
           }
-          const script = await prisma.postDownloadScript.findUnique({ where: { id } });
+          const script = db
+            .select()
+            .from(postDownloadScripts)
+            .where(eq(postDownloadScripts.id, id))
+            .get();
           if (!script) return new Response('Script not found', { status: 404 });
 
-          const neighbor = await prisma.postDownloadScript.findFirst({
-            where:
-              result.data.direction === 'up'
-                ? { order: { lt: script.order } }
-                : { order: { gt: script.order } },
-            orderBy:
-              result.data.direction === 'up'
-                ? [{ order: 'desc' }, { id: 'desc' }]
-                : [{ order: 'asc' }, { id: 'asc' }],
-          });
-          if (!neighbor) return new Response(null, { status: 204 });
+          const neighborRow = (() => {
+            if (result.data.direction === 'up') {
+              return db
+                .select()
+                .from(postDownloadScripts)
+                .where(lt(postDownloadScripts.order, script.order))
+                .orderBy(desc(postDownloadScripts.order), desc(postDownloadScripts.id))
+                .get();
+            }
+            const all = db
+              .select()
+              .from(postDownloadScripts)
+              .orderBy(postDownloadScripts.order, postDownloadScripts.id)
+              .all();
+            const idx = all.findIndex((s) => s.id === id);
+            return idx >= 0 && idx < all.length - 1 ? all[idx + 1] : undefined;
+          })();
 
-          await prisma.$transaction([
-            prisma.postDownloadScript.update({
-              where: { id: script.id },
-              data: { order: neighbor.order },
-            }),
-            prisma.postDownloadScript.update({
-              where: { id: neighbor.id },
-              data: { order: script.order },
-            }),
-          ]);
+          if (!neighborRow) return new Response(null, { status: 204 });
 
-          const updated = await prisma.postDownloadScript.findMany({
-            orderBy: [{ order: 'asc' }, { id: 'asc' }],
+          db.transaction((tx) => {
+            tx.update(postDownloadScripts)
+              .set({ order: neighborRow.order })
+              .where(eq(postDownloadScripts.id, script.id))
+              .run();
+            tx.update(postDownloadScripts)
+              .set({ order: script.order })
+              .where(eq(postDownloadScripts.id, neighborRow.id))
+              .run();
           });
+
+          const updated = db
+            .select()
+            .from(postDownloadScripts)
+            .orderBy(postDownloadScripts.order, postDownloadScripts.id)
+            .all();
           return Response.json(updated);
         }
 
         if (req.method === 'DELETE') {
-          const script = await prisma.postDownloadScript.findUnique({ where: { id } });
+          const script = db
+            .select()
+            .from(postDownloadScripts)
+            .where(eq(postDownloadScripts.id, id))
+            .get();
           if (!script) return new Response('Script not found', { status: 404 });
-          await prisma.postDownloadScript.delete({ where: { id } });
+          db.delete(postDownloadScripts).where(eq(postDownloadScripts.id, id)).run();
           return new Response(null, { status: 204 });
         }
       }
 
       if (url.pathname === '/api/rescan' && req.method === 'POST') {
-        const settings = await getOrCreateSettings(prisma);
-        const folders = parseSharedFolders(settings.sharedFolders);
-        const result = await scanAndIndex(prisma, folders);
+        const settingsRow = await getOrCreateSettings(db);
+        const folders = parseSharedFolders(settingsRow.sharedFolders);
+        const result = await scanAndIndex(db, folders);
         if (result.skipped) {
           return new Response('Scan already in progress', { status: 409 });
         }
@@ -584,11 +607,39 @@ export function createManagementFetch(deps: ManagementDeps): (req: Request) => P
 
       if (url.pathname === '/api/conversations') {
         if (req.method === 'GET') {
-          const conversations = await prisma.conversation.findMany({
-            include: { messages: { orderBy: { sentAt: 'desc' }, take: 1 } },
-            orderBy: { updatedAt: 'desc' },
-          });
-          return Response.json(conversations);
+          const convRows = db
+            .select()
+            .from(conversations)
+            .orderBy(desc(conversations.updatedAt))
+            .all();
+          const convIds = convRows.map((c) => c.id);
+
+          // Fetch all messages for listed conversations, keep only the most recent per conv
+          const allRecentMsgs =
+            convIds.length > 0
+              ? (() => {
+                  // One query per conv is fine at this scale; conversations list is short
+                  const result: Record<string, typeof messages.$inferSelect> = {};
+                  for (const convId of convIds) {
+                    const msg = db
+                      .select()
+                      .from(messages)
+                      .where(eq(messages.conversationId, convId))
+                      .orderBy(desc(messages.sentAt))
+                      .limit(1)
+                      .get();
+                    if (msg) result[convId] = msg;
+                  }
+                  return result;
+                })()
+              : {};
+
+          return Response.json(
+            convRows.map((c) => ({
+              ...c,
+              messages: allRecentMsgs[c.id] ? [allRecentMsgs[c.id]] : [],
+            })),
+          );
         }
 
         if (req.method === 'POST') {
@@ -598,47 +649,71 @@ export function createManagementFetch(deps: ManagementDeps): (req: Request) => P
           }
           const { name, peerNodeId } = body as { name?: string; peerNodeId?: string };
 
-          // Open or create a DM conversation
           if (typeof peerNodeId === 'string' && peerNodeId.trim()) {
-            const isFriend = await prisma.friend.findFirst({
-              where: { nodeId: peerNodeId.trim(), status: 'ACCEPTED' },
-            });
+            const isFriend = db
+              .select()
+              .from(friends)
+              .where(and(eq(friends.nodeId, peerNodeId.trim()), eq(friends.status, 'ACCEPTED')))
+              .get();
             if (!isFriend) {
               return new Response('peerNodeId must be an accepted friend', { status: 403 });
             }
             const convId = dmConversationId(identity.nodeId, peerNodeId.trim());
-            const conv = await prisma.conversation.upsert({
-              where: { id: convId },
-              create: { id: convId, type: 'DM' },
-              update: {},
-              include: { messages: { orderBy: { sentAt: 'desc' }, take: 1 } },
-            });
-            return Response.json(conv, { status: 200 });
+            const now = new Date();
+            const conv = db
+              .insert(conversations)
+              .values({ id: convId, type: 'DM', createdAt: now, updatedAt: now })
+              .onConflictDoNothing()
+              .returning()
+              .get();
+            const existing =
+              conv ?? db.select().from(conversations).where(eq(conversations.id, convId)).get();
+            const latestMsg = db
+              .select()
+              .from(messages)
+              .where(eq(messages.conversationId, convId))
+              .orderBy(desc(messages.sentAt))
+              .limit(1)
+              .get();
+            return Response.json(
+              { ...existing, messages: latestMsg ? [latestMsg] : [] },
+              { status: 200 },
+            );
           }
 
-          // Create a new group conversation
           if (typeof name !== 'string' || !name.trim()) {
             return new Response('either peerNodeId or name is required', { status: 400 });
           }
           const convId = `group:${randomUUID()}`;
-          const conv = await prisma.conversation.create({
-            data: { id: convId, type: 'GROUP', name: truncateToBytes(name.trim(), 200) },
-            include: { messages: { orderBy: { sentAt: 'desc' }, take: 1 } },
-          });
-          return Response.json(conv, { status: 201 });
+          const now = new Date();
+          const conv = db
+            .insert(conversations)
+            .values({
+              id: convId,
+              type: 'GROUP',
+              name: truncateToBytes(name.trim(), 200),
+              createdAt: now,
+              updatedAt: now,
+            })
+            .returning()
+            .get();
+          return Response.json({ ...conv, messages: [] }, { status: 201 });
         }
       }
 
       if (url.pathname.startsWith('/api/conversations/')) {
         const rest = url.pathname.slice('/api/conversations/'.length);
 
-        // GET /api/conversations/:id/messages
         if (rest.endsWith('/messages') && req.method === 'GET') {
           const convId = rest.slice(0, -'/messages'.length);
           if (!convId || convId.includes('/')) {
             return new Response('Invalid conversation id', { status: 400 });
           }
-          const convExists = await prisma.conversation.findUnique({ where: { id: convId } });
+          const convExists = db
+            .select()
+            .from(conversations)
+            .where(eq(conversations.id, convId))
+            .get();
           if (!convExists) return new Response('Conversation not found', { status: 404 });
           const limitParam = url.searchParams.get('limit');
           const beforeParam = url.searchParams.get('before');
@@ -650,21 +725,20 @@ export function createManagementFetch(deps: ManagementDeps): (req: Request) => P
               return new Response('Invalid before date', { status: 400 });
             }
           }
-          // Fetch newest N descending, then reverse so the client receives
-          // chronological order. This ensures `limit` returns the most recent
-          // messages rather than the oldest ones.
-          const messages = await prisma.message.findMany({
-            where: {
-              conversationId: convId,
-              ...(beforeDate ? { sentAt: { lt: beforeDate } } : {}),
-            },
-            orderBy: { sentAt: 'desc' },
-            take: limit,
-          });
-          return Response.json(messages.reverse());
+          const msgRows = db
+            .select()
+            .from(messages)
+            .where(
+              beforeDate
+                ? and(eq(messages.conversationId, convId), lt(messages.sentAt, beforeDate))
+                : eq(messages.conversationId, convId),
+            )
+            .orderBy(desc(messages.sentAt))
+            .limit(limit)
+            .all();
+          return Response.json(msgRows.reverse());
         }
 
-        // POST /api/conversations/:id/messages
         if (rest.endsWith('/messages') && req.method === 'POST') {
           const convId = rest.slice(0, -'/messages'.length);
           if (!convId || convId.includes('/')) {
@@ -683,7 +757,7 @@ export function createManagementFetch(deps: ManagementDeps): (req: Request) => P
             return new Response('Message too long', { status: 400 });
           }
 
-          const conv = await prisma.conversation.findUnique({ where: { id: convId } });
+          const conv = db.select().from(conversations).where(eq(conversations.id, convId)).get();
           if (!conv) return new Response('Conversation not found', { status: 404 });
 
           let dmPartnerId: string | undefined;
@@ -696,9 +770,11 @@ export function createManagementFetch(deps: ManagementDeps): (req: Request) => P
             if (!dmPartnerId || dmConversationId(identity.nodeId, dmPartnerId) !== convId) {
               return new Response('Invalid DM conversation id', { status: 400 });
             }
-            const isFriend = await prisma.friend.findFirst({
-              where: { nodeId: dmPartnerId, status: 'ACCEPTED' },
-            });
+            const isFriend = db
+              .select()
+              .from(friends)
+              .where(and(eq(friends.nodeId, dmPartnerId), eq(friends.status, 'ACCEPTED')))
+              .get();
             if (!isFriend) {
               return new Response('DM partner is no longer an accepted friend', { status: 403 });
             }
@@ -706,24 +782,25 @@ export function createManagementFetch(deps: ManagementDeps): (req: Request) => P
 
           const messageId = randomUUID();
           const sentAt = new Date();
-          const msg = await prisma.$transaction(async (tx) => {
-            const created = await tx.message.create({
-              data: {
+          const msg = db.transaction((tx) => {
+            const created = tx
+              .insert(messages)
+              .values({
                 id: messageId,
                 conversationId: convId,
                 fromNodeId: identity.nodeId,
                 body: text,
                 sentAt,
-              },
-            });
-            await tx.conversation.update({
-              where: { id: convId },
-              data: { updatedAt: sentAt },
-            });
+              })
+              .returning()
+              .get();
+            tx.update(conversations)
+              .set({ updatedAt: sentAt })
+              .where(eq(conversations.id, convId))
+              .run();
             return created;
           });
 
-          // Broadcast to peers
           const chatWireMsg = {
             type: 'chat-message' as const,
             messageId,
@@ -742,12 +819,8 @@ export function createManagementFetch(deps: ManagementDeps): (req: Request) => P
               } catch {}
             }
           } else {
-            // Group chats are network-wide by design: every connected friend
-            // receives the message and auto-joins the room, mirroring the
-            // "rooms shared across the entire network" spec requirement.
-            // Broadcast errors are non-fatal — the message is already committed.
             try {
-              const peers = await getAcceptedConnectedPeers(prisma);
+              const peers = await getAcceptedConnectedPeers(db);
               for (const peer of peers) {
                 try {
                   sendToPeer(peer, chatWireMsg);
@@ -761,15 +834,16 @@ export function createManagementFetch(deps: ManagementDeps): (req: Request) => P
           return Response.json(msg, { status: 201 });
         }
 
-        // DELETE /api/conversations/:id
         const convId = rest;
         if (!convId || convId.includes('/')) {
           return new Response('Invalid conversation id', { status: 400 });
         }
         if (req.method === 'DELETE') {
-          const conv = await prisma.conversation.findUnique({ where: { id: convId } });
+          const conv = db.select().from(conversations).where(eq(conversations.id, convId)).get();
           if (!conv) return new Response('Conversation not found', { status: 404 });
-          await prisma.conversation.delete({ where: { id: convId } });
+          // Cascade: delete messages first, then conversation
+          db.delete(messages).where(eq(messages.conversationId, convId)).run();
+          db.delete(conversations).where(eq(conversations.id, convId)).run();
           return new Response(null, { status: 204 });
         }
       }

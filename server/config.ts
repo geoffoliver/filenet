@@ -1,4 +1,7 @@
-import type { PrismaClient, Settings } from '@prisma/client';
+import { eq } from 'drizzle-orm';
+
+import { type Settings, settings } from './schema';
+import type { Db } from './db';
 
 const SETTINGS_ID = 'singleton';
 
@@ -44,8 +47,8 @@ export type SafeSettings = Omit<Settings, 'invitePassword' | 'sharedFolders'> & 
   sharedFolders: string[];
 };
 
-export function sanitizeSettings(settings: Settings): SafeSettings {
-  const { invitePassword, sharedFolders, ...rest } = settings;
+export function sanitizeSettings(s: Settings): SafeSettings {
+  const { invitePassword, sharedFolders, ...rest } = s;
   return {
     ...rest,
     hasInvitePassword: invitePassword !== null,
@@ -72,36 +75,38 @@ export function parseSharedFolders(raw: string): string[] {
   }
 }
 
-export async function getSettings(prisma: PrismaClient): Promise<Settings | null> {
-  return prisma.settings.findUnique({ where: { id: SETTINGS_ID } });
+export async function getSettings(db: Db): Promise<Settings | null> {
+  return db.select().from(settings).where(eq(settings.id, SETTINGS_ID)).get() ?? null;
 }
 
-export async function getOrCreateSettings(prisma: PrismaClient): Promise<Settings> {
+export async function getOrCreateSettings(db: Db): Promise<Settings> {
   const envFolders = envSharedFolders();
   const envDownload = envDownloadFolder();
-  return prisma.settings.upsert({
-    where: { id: SETTINGS_ID },
-    create: {
+  const row = db
+    .insert(settings)
+    .values({
       id: SETTINGS_ID,
       ...(envFolders.length > 0 ? { sharedFolders: JSON.stringify(envFolders) } : {}),
       ...(envDownload ? { downloadFolder: envDownload } : {}),
-    },
-    update: {},
-  });
+    })
+    .onConflictDoNothing()
+    .returning()
+    .get();
+  if (row) return row;
+  return db.select().from(settings).where(eq(settings.id, SETTINGS_ID)).get()!;
 }
 
-export async function updateSettings(
-  prisma: PrismaClient,
-  patch: SettingsPatch,
-): Promise<Settings> {
+export async function updateSettings(db: Db, patch: SettingsPatch): Promise<Settings> {
   const { sharedFolders, ...rest } = patch;
   const data: Partial<Settings> = { ...rest };
   if (sharedFolders !== undefined) {
     data.sharedFolders = JSON.stringify([...new Set(sharedFolders)]);
   }
-  return prisma.settings.upsert({
-    where: { id: SETTINGS_ID },
-    create: { id: SETTINGS_ID, ...data },
-    update: data,
-  });
+  const row = db
+    .insert(settings)
+    .values({ id: SETTINGS_ID, ...data })
+    .onConflictDoUpdate({ target: settings.id, set: data })
+    .returning()
+    .get();
+  return row!;
 }

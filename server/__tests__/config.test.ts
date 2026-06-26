@@ -1,8 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'bun:test';
-import type { PrismaClient } from '@prisma/client';
-import { execSync } from 'child_process';
 import { unlinkSync } from 'fs';
 
+import { type Db, applyMigrations, createDb } from '../db';
 import {
   getOrCreateSettings,
   getSettings,
@@ -10,122 +9,123 @@ import {
   sanitizeSettings,
   updateSettings,
 } from '../config';
-import { createPrismaClient } from '../db';
+import { count } from 'drizzle-orm';
+import { settings } from '../schema';
 
 const TEST_DB_URL = 'file:./data/test-config.db';
-let prisma: PrismaClient;
+let db: Db;
 
 beforeAll(() => {
-  execSync(`bunx prisma db push --url "${TEST_DB_URL}"`, { stdio: 'pipe' });
-  prisma = createPrismaClient(TEST_DB_URL);
+  db = createDb(TEST_DB_URL);
+  applyMigrations(db);
 });
 
-afterAll(async () => {
-  await prisma.$disconnect();
+afterAll(() => {
+  db.$client.close();
   try {
     unlinkSync('./data/test-config.db');
   } catch {}
 });
 
-beforeEach(async () => {
-  await prisma.settings.deleteMany();
+beforeEach(() => {
+  db.delete(settings).run();
 });
 
 describe('getSettings', () => {
   it('returns null when no settings exist', async () => {
-    const result = await getSettings(prisma);
+    const result = await getSettings(db);
     expect(result).toBeNull();
   });
 });
 
 describe('getOrCreateSettings', () => {
   it('creates settings with defaults when none exist', async () => {
-    const settings = await getOrCreateSettings(prisma);
-    expect(settings.name).toBe('');
-    expect(settings.invitePassword).toBeNull();
-    expect(settings.autoAcceptFromAnyone).toBe(false);
-    expect(settings.autoAcceptFromFriendsOfFriends).toBe(false);
+    const s = await getOrCreateSettings(db);
+    expect(s.name).toBe('');
+    expect(s.invitePassword).toBeNull();
+    expect(s.autoAcceptFromAnyone).toBe(false);
+    expect(s.autoAcceptFromFriendsOfFriends).toBe(false);
   });
 
   it('returns the same settings on subsequent calls', async () => {
-    const first = await getOrCreateSettings(prisma);
-    const second = await getOrCreateSettings(prisma);
+    const first = await getOrCreateSettings(db);
+    const second = await getOrCreateSettings(db);
     expect(second.id).toBe(first.id);
   });
 
   it('returns the same id across concurrent calls (singleton)', async () => {
     const [a, b, c] = await Promise.all([
-      getOrCreateSettings(prisma),
-      getOrCreateSettings(prisma),
-      getOrCreateSettings(prisma),
+      getOrCreateSettings(db),
+      getOrCreateSettings(db),
+      getOrCreateSettings(db),
     ]);
     expect(a.id).toBe(b.id);
     expect(b.id).toBe(c.id);
-    const count = await prisma.settings.count();
-    expect(count).toBe(1);
+    const row = db.select({ total: count() }).from(settings).get();
+    expect(row?.total).toBe(1);
   });
 });
 
 describe('updateSettings', () => {
   it('updates specific fields without touching others', async () => {
-    await getOrCreateSettings(prisma);
-    const updated = await updateSettings(prisma, { name: 'Alice', autoAcceptFromAnyone: true });
+    await getOrCreateSettings(db);
+    const updated = await updateSettings(db, { name: 'Alice', autoAcceptFromAnyone: true });
     expect(updated.name).toBe('Alice');
     expect(updated.autoAcceptFromAnyone).toBe(true);
     expect(updated.autoAcceptFromFriendsOfFriends).toBe(false);
   });
 
   it('stores and retrieves invite password', async () => {
-    await getOrCreateSettings(prisma);
-    const updated = await updateSettings(prisma, { invitePassword: 'secret123' });
+    await getOrCreateSettings(db);
+    const updated = await updateSettings(db, { invitePassword: 'secret123' });
     expect(updated.invitePassword).toBe('secret123');
   });
 
   it('clears invite password when set to null', async () => {
-    await getOrCreateSettings(prisma);
-    await updateSettings(prisma, { invitePassword: 'secret123' });
-    const cleared = await updateSettings(prisma, { invitePassword: null });
+    await getOrCreateSettings(db);
+    await updateSettings(db, { invitePassword: 'secret123' });
+    const cleared = await updateSettings(db, { invitePassword: null });
     expect(cleared.invitePassword).toBeNull();
   });
 });
 
 describe('sanitizeSettings', () => {
   it('omits invitePassword and adds hasInvitePassword: false when not set', async () => {
-    const settings = await getOrCreateSettings(prisma);
-    const safe = sanitizeSettings(settings);
+    const s = await getOrCreateSettings(db);
+    const safe = sanitizeSettings(s);
     expect('invitePassword' in safe).toBe(false);
     expect(safe.hasInvitePassword).toBe(false);
   });
 
   it('reports hasInvitePassword: true when a password is set', async () => {
-    const settings = await updateSettings(prisma, { invitePassword: 'secret' });
-    const safe = sanitizeSettings(settings);
+    const s = await updateSettings(db, { invitePassword: 'secret' });
+    const safe = sanitizeSettings(s);
     expect('invitePassword' in safe).toBe(false);
     expect(safe.hasInvitePassword).toBe(true);
   });
 
   it('exposes sharedFolders as a string array', async () => {
-    const settings = await updateSettings(prisma, { sharedFolders: ['/a', '/b'] });
-    const safe = sanitizeSettings(settings);
+    const s = await updateSettings(db, { sharedFolders: ['/a', '/b'] });
+    const safe = sanitizeSettings(s);
     expect(safe.sharedFolders).toEqual(['/a', '/b']);
   });
 
   it('defaults sharedFolders to empty array', async () => {
-    const settings = await getOrCreateSettings(prisma);
-    const safe = sanitizeSettings(settings);
+    const s = await getOrCreateSettings(db);
+    const safe = sanitizeSettings(s);
     expect(safe.sharedFolders).toEqual([]);
   });
 });
 
 describe('updateSettings — sharedFolders and downloadFolder', () => {
   it('stores and retrieves sharedFolders as a string array', async () => {
-    const updated = await updateSettings(prisma, { sharedFolders: ['/music', '/videos'] });
+    const updated = await updateSettings(db, { sharedFolders: ['/music', '/videos'] });
     const safe = sanitizeSettings(updated);
     expect(safe.sharedFolders).toEqual(['/music', '/videos']);
   });
 
   it('deduplicates sharedFolders on write', async () => {
-    const updated = await updateSettings(prisma, {
+    const updated = await updateSettings(db, {
       sharedFolders: ['/music', '/videos', '/music'],
     });
     const safe = sanitizeSettings(updated);
@@ -133,31 +133,31 @@ describe('updateSettings — sharedFolders and downloadFolder', () => {
   });
 
   it('stores and retrieves downloadFolder', async () => {
-    const updated = await updateSettings(prisma, { downloadFolder: '/downloads' });
+    const updated = await updateSettings(db, { downloadFolder: '/downloads' });
     expect(updated.downloadFolder).toBe('/downloads');
   });
 
   it('clears downloadFolder when set to null', async () => {
-    await updateSettings(prisma, { downloadFolder: '/downloads' });
-    const cleared = await updateSettings(prisma, { downloadFolder: null });
+    await updateSettings(db, { downloadFolder: '/downloads' });
+    const cleared = await updateSettings(db, { downloadFolder: null });
     expect(cleared.downloadFolder).toBeNull();
   });
 });
 
 describe('updateSettings — rescanIntervalMinutes', () => {
   it('defaults to 0', async () => {
-    const settings = await getOrCreateSettings(prisma);
-    expect(settings.rescanIntervalMinutes).toBe(0);
+    const s = await getOrCreateSettings(db);
+    expect(s.rescanIntervalMinutes).toBe(0);
   });
 
   it('stores and retrieves a positive interval', async () => {
-    const updated = await updateSettings(prisma, { rescanIntervalMinutes: 60 });
+    const updated = await updateSettings(db, { rescanIntervalMinutes: 60 });
     expect(updated.rescanIntervalMinutes).toBe(60);
   });
 
   it('resets to 0 to disable periodic rescan', async () => {
-    await updateSettings(prisma, { rescanIntervalMinutes: 30 });
-    const cleared = await updateSettings(prisma, { rescanIntervalMinutes: 0 });
+    await updateSettings(db, { rescanIntervalMinutes: 30 });
+    const cleared = await updateSettings(db, { rescanIntervalMinutes: 0 });
     expect(cleared.rescanIntervalMinutes).toBe(0);
   });
 });

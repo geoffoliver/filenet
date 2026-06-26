@@ -1,4 +1,8 @@
-import { Prisma, type PrismaClient, type SharedFile } from '@prisma/client';
+import { SQL, and, asc, count, like, or } from 'drizzle-orm';
+
+import type { Db } from './db';
+import type { SharedFile } from './schema';
+import { sharedFiles } from './schema';
 
 export type FileType = 'all' | 'audio' | 'video' | 'image' | 'document' | 'ebook';
 
@@ -16,81 +20,71 @@ export type SearchResult = {
 };
 
 export async function searchFiles(
-  prisma: PrismaClient,
+  db: Db,
   params: SearchParams & { skipTotal: true },
 ): Promise<{ files: SharedFile[] }>;
+export async function searchFiles(db: Db, params: SearchParams): Promise<SearchResult>;
 export async function searchFiles(
-  prisma: PrismaClient,
-  params: SearchParams,
-): Promise<SearchResult>;
-export async function searchFiles(
-  prisma: PrismaClient,
+  db: Db,
   params: SearchParams,
 ): Promise<SearchResult | { files: SharedFile[] }> {
   const { type = 'all', limit = 50, offset = 0 } = params;
   const query = params.query.trim();
 
-  const conditions: Prisma.SharedFileWhereInput[] = [];
+  const clauses: (SQL | undefined)[] = [];
 
   if (query) {
-    // SQLite LIKE '%q%' is case-insensitive for ASCII but prevents index use.
-    // For large collections, migrate to SQLite FTS5 via a virtual table.
-    conditions.push({
-      OR: [
-        { filename: { contains: query } },
-        { path: { contains: query } },
-        { metadata: { contains: query } },
-      ],
-    });
+    const q = `%${query}%`;
+    clauses.push(
+      or(like(sharedFiles.filename, q), like(sharedFiles.path, q), like(sharedFiles.metadata, q)),
+    );
   }
 
-  const mimeFilter = getMimeFilter(type);
-  if (mimeFilter) conditions.push(mimeFilter);
+  const mimeClause = getMimeClause(type);
+  if (mimeClause) clauses.push(mimeClause);
 
-  const where: Prisma.SharedFileWhereInput = conditions.length > 0 ? { AND: conditions } : {};
+  const where = clauses.length > 0 ? and(...clauses) : undefined;
 
-  const findMany = prisma.sharedFile.findMany({
-    where,
-    take: limit,
-    skip: offset,
-    orderBy: [{ filename: 'asc' }, { id: 'asc' }],
-  });
+  const baseQuery = db
+    .select()
+    .from(sharedFiles)
+    .orderBy(asc(sharedFiles.filename), asc(sharedFiles.id))
+    .limit(limit)
+    .offset(offset);
 
-  if (params.skipTotal) {
-    return { files: await findMany };
-  }
+  const files = where ? baseQuery.where(where).all() : baseQuery.all();
 
-  const [files, total] = await Promise.all([findMany, prisma.sharedFile.count({ where })]);
+  if (params.skipTotal) return { files };
+
+  const countQuery = db.select({ total: count() }).from(sharedFiles);
+  const { total } = where ? countQuery.where(where).get()! : countQuery.get()!;
+
   return { files, total };
 }
 
-function getMimeFilter(type: FileType): Prisma.SharedFileWhereInput | null {
+function getMimeClause(type: FileType): SQL | undefined {
   switch (type) {
     case 'audio':
-      return { mimeType: { startsWith: 'audio/' } };
+      return like(sharedFiles.mimeType, 'audio/%');
     case 'video':
-      return { mimeType: { startsWith: 'video/' } };
+      return like(sharedFiles.mimeType, 'video/%');
     case 'image':
-      return { mimeType: { startsWith: 'image/' } };
+      return like(sharedFiles.mimeType, 'image/%');
     case 'document':
-      return {
-        OR: [
-          { mimeType: { startsWith: 'text/' } },
-          { mimeType: { startsWith: 'application/pdf' } },
-          { mimeType: { startsWith: 'application/msword' } },
-          { mimeType: { startsWith: 'application/vnd.openxmlformats' } },
-          { mimeType: { startsWith: 'application/vnd.oasis' } },
-        ],
-      };
+      return or(
+        like(sharedFiles.mimeType, 'text/%'),
+        like(sharedFiles.mimeType, 'application/pdf%'),
+        like(sharedFiles.mimeType, 'application/msword%'),
+        like(sharedFiles.mimeType, 'application/vnd.openxmlformats%'),
+        like(sharedFiles.mimeType, 'application/vnd.oasis%'),
+      );
     case 'ebook':
-      return {
-        OR: [
-          { mimeType: { startsWith: 'application/epub' } },
-          { mimeType: { contains: 'mobi' } },
-          { mimeType: { contains: 'ebook' } },
-        ],
-      };
+      return or(
+        like(sharedFiles.mimeType, 'application/epub%'),
+        like(sharedFiles.mimeType, '%mobi%'),
+        like(sharedFiles.mimeType, '%ebook%'),
+      );
     default:
-      return null;
+      return undefined;
   }
 }
