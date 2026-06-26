@@ -1864,7 +1864,7 @@ describe('GET /api/conversations/:id/messages', () => {
     expect(res.status).toBe(400);
   });
 
-  it('clamps negative limit to 1 — does not pass a negative take to Prisma', async () => {
+  it('clamps negative limit to 1', async () => {
     db
       .insert(conversations)
       .values({

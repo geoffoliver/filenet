@@ -84,7 +84,7 @@ The application will let users write scripts that can run after a download has c
 - Runtime: Bun
 - Framework: NextJS 16
 - Styling: Tailwind v4
-- Database: Prisma/SQLite
+- Database: Drizzle ORM/SQLite
 
 # Coding Rules
 

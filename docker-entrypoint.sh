@@ -1,12 +1,8 @@
 #!/bin/sh
 set -e
 
-# Apply any pending schema changes to the database on every startup.
-# --skip-generate is safe here because Prisma client was already generated
-# at build time.
-bunx prisma db push --url "${DATABASE_URL:-file:./data/filenet.db}"
-
 # Start the P2P + management server in the background.
+# Drizzle migrations are applied automatically at startup.
 bun server/index.ts &
 SERVER_PID=$!
 

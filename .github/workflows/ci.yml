@@ -21,9 +21,6 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
-      - name: Generate Prisma client
-        run: bunx prisma generate
-
       - name: Lint
         run: bunx eslint --max-warnings=0
 
