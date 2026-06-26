@@ -841,9 +841,10 @@ export function createManagementFetch(deps: ManagementDeps): (req: Request) => P
         if (req.method === 'DELETE') {
           const conv = db.select().from(conversations).where(eq(conversations.id, convId)).get();
           if (!conv) return new Response('Conversation not found', { status: 404 });
-          // Cascade: delete messages first, then conversation
-          db.delete(messages).where(eq(messages.conversationId, convId)).run();
-          db.delete(conversations).where(eq(conversations.id, convId)).run();
+          db.transaction((tx) => {
+            tx.delete(messages).where(eq(messages.conversationId, convId)).run();
+            tx.delete(conversations).where(eq(conversations.id, convId)).run();
+          });
           return new Response(null, { status: 204 });
         }
       }

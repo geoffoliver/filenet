@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 
-import { SQL, and, eq, like, lt, or, sql } from 'drizzle-orm';
+import { SQL, and, eq, lt, or, sql } from 'drizzle-orm';
 
 import type { Db } from './db';
 import type { SharedFile } from './schema';
@@ -145,9 +145,10 @@ export async function removeStaleEntries(
   // either exact match or path starts with root + separator.
   const exclusionClauses: SQL[] = protectedRoots.flatMap((root) => {
     const normalized = root.endsWith(sep) ? root.slice(0, -1) : root;
+    const escaped = normalized.replace(/[%_\\]/g, (c) => `\\${c}`);
     return [
       eq(sharedFiles.path, normalized),
-      like(sharedFiles.path, `${normalized}${sep}%`),
+      sql`${sharedFiles.path} LIKE ${escaped + sep + '%'} ESCAPE '\\'`,
     ] as SQL[];
   });
 

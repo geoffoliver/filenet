@@ -347,16 +347,20 @@ async function handleOutboundMessage(
     if (!existing) return;
 
     if (accepted) {
-      await acceptFriendRequest(db, existing.id);
-      db.update(friends)
-        .set({
-          nodeId: peer.nodeId,
-          publicKey: peer.publicKey.toString('base64'),
-          ...(name ? { name } : {}),
-          updatedAt: new Date(),
-        })
-        .where(eq(friends.id, existing.id))
-        .run();
+      db.transaction((tx) => {
+        const txDb = tx as unknown as Db;
+        acceptFriendRequest(txDb, existing.id);
+        txDb
+          .update(friends)
+          .set({
+            nodeId: peer.nodeId,
+            publicKey: peer.publicKey.toString('base64'),
+            ...(name ? { name } : {}),
+            updatedAt: new Date(),
+          })
+          .where(eq(friends.id, existing.id))
+          .run();
+      });
     } else {
       db.delete(friends).where(eq(friends.id, existing.id)).run();
       closeAndUnregisterPeer(peer.nodeId);
