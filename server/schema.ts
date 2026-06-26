@@ -13,6 +13,9 @@ const bigInt = customType<{ data: bigint; driverData: number | bigint }>({
     return 'integer';
   },
   fromDriver(val) {
+    if (typeof val === 'bigint') return val;
+    if (!Number.isSafeInteger(val as number))
+      throw new Error(`bigint column received unsafe integer ${val} — value would be lossy`);
     return BigInt(val as number);
   },
   toDriver(val) {

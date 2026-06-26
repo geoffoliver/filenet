@@ -271,8 +271,8 @@ describe('acceptFriendRequest', () => {
     expect(second.acceptedAt?.getTime()).toBe(first.acceptedAt?.getTime());
   });
 
-  it('throws if friend does not exist', async () => {
-    await expect(acceptFriendRequest(db, 'nonexistent-id')).rejects.toThrow();
+  it('throws if friend does not exist', () => {
+    expect(() => acceptFriendRequest(db, 'nonexistent-id')).toThrow();
   });
 
   it('throws when trying to accept a BLOCKED friend', async () => {
@@ -288,7 +288,7 @@ describe('acceptFriendRequest', () => {
       .set({ status: 'BLOCKED', updatedAt: new Date() })
       .where(eq(friends.id, friend.id))
       .run();
-    await expect(acceptFriendRequest(db, friend.id)).rejects.toThrow();
+    expect(() => acceptFriendRequest(db, friend.id)).toThrow();
   });
 
   it('is a no-op when called on an already-ACCEPTED friend', async () => {

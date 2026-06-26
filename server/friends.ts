@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { timingSafeEqual } from 'node:crypto';
 
-import { asc, eq } from 'drizzle-orm';
+import { and, asc, eq } from 'drizzle-orm';
 
 import { ConflictError, NotFoundError } from './errors';
 import type { Friend, FriendStatus, Settings } from './schema';
@@ -26,10 +26,12 @@ export type IncomingFriendRequestParams = {
 };
 
 export async function addOutgoingFriend(db: Db, params: AddOutgoingFriendParams): Promise<Friend> {
-  const existing = db.select().from(friends).where(eq(friends.address, params.address)).get();
-  // Check address+port match specifically
-  const exactMatch = existing && existing.port === params.port ? existing : null;
-  if (exactMatch)
+  const existing = db
+    .select()
+    .from(friends)
+    .where(and(eq(friends.address, params.address), eq(friends.port, params.port)))
+    .get();
+  if (existing)
     throw new ConflictError(`Already have a friend at ${params.address}:${params.port}`);
 
   const now = new Date();
@@ -78,8 +80,11 @@ export async function handleIncomingFriendRequest(
   }
 
   // If we have an outgoing record for the same address+port, upgrade it.
-  const byAddress = db.select().from(friends).where(eq(friends.address, params.address)).get();
-  const byAddressAndPort = byAddress && byAddress.port === params.port ? byAddress : null;
+  const byAddressAndPort = db
+    .select()
+    .from(friends)
+    .where(and(eq(friends.address, params.address), eq(friends.port, params.port)))
+    .get();
   if (byAddressAndPort) {
     if (byAddressAndPort.status === 'BLOCKED') return byAddressAndPort;
     const updated = db
@@ -119,7 +124,7 @@ export async function handleIncomingFriendRequest(
 }
 
 // Accepts a Db or a Drizzle transaction (same interface)
-export async function acceptFriendRequest(db: Db, friendId: string): Promise<Friend> {
+export function acceptFriendRequest(db: Db, friendId: string): Friend {
   const friend = db.select().from(friends).where(eq(friends.id, friendId)).get();
   if (!friend) throw new NotFoundError(`Friend ${friendId} not found`);
   if (friend.status === 'ACCEPTED') return friend;
