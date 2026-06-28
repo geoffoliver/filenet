@@ -148,7 +148,9 @@ export const messages = sqliteTable(
   'Message',
   {
     id: text('id').primaryKey(),
-    conversationId: text('conversationId').notNull(),
+    conversationId: text('conversationId')
+      .notNull()
+      .references(() => conversations.id, { onDelete: 'cascade' }),
     fromNodeId: text('fromNodeId').notNull(),
     body: text('body').notNull(),
     sentAt: integer('sentAt', { mode: 'timestamp_ms' }).notNull(),

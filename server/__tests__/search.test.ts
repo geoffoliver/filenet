@@ -224,6 +224,39 @@ describe('searchFiles — pagination', () => {
   });
 });
 
+describe('searchFiles — LIKE metacharacter escaping', () => {
+  beforeEach(() => {
+    db.delete(sharedFiles).run();
+    db.insert(sharedFiles)
+      .values([
+        makeFile({
+          path: '/files/100%_done.txt',
+          filename: '100%_done.txt',
+          sha256: 'h'.repeat(64),
+        }),
+        makeFile({ path: '/files/other.txt', filename: 'other.txt', sha256: 'i'.repeat(64) }),
+      ])
+      .run();
+  });
+
+  it('treats % in query as a literal character, not a wildcard', async () => {
+    const result = await searchFiles(db, { query: '%' });
+    expect(result.total).toBe(1);
+    expect(result.files[0].filename).toBe('100%_done.txt');
+  });
+
+  it('treats _ in query as a literal character, not a single-char wildcard', async () => {
+    const result = await searchFiles(db, { query: '100%_' });
+    expect(result.total).toBe(1);
+    expect(result.files[0].filename).toBe('100%_done.txt');
+  });
+
+  it('does not match unrelated files when query contains %', async () => {
+    const result = await searchFiles(db, { query: 'xyz%' });
+    expect(result.total).toBe(0);
+  });
+});
+
 describe('searchFiles — stable sort', () => {
   beforeEach(() => {
     db.delete(sharedFiles).run();

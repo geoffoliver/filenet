@@ -1,4 +1,4 @@
-CREATE TABLE `Conversation` (
+CREATE TABLE IF NOT EXISTS `Conversation` (
 	`id` text PRIMARY KEY NOT NULL,
 	`type` text DEFAULT 'DM' NOT NULL,
 	`name` text,
@@ -6,7 +6,7 @@ CREATE TABLE `Conversation` (
 	`updatedAt` integer NOT NULL
 );
 --> statement-breakpoint
-CREATE TABLE `Download` (
+CREATE TABLE IF NOT EXISTS `Download` (
 	`id` text PRIMARY KEY NOT NULL,
 	`sha256` text NOT NULL,
 	`filename` text NOT NULL,
@@ -26,7 +26,7 @@ CREATE TABLE `Download` (
 	`completedAt` integer
 );
 --> statement-breakpoint
-CREATE TABLE `Friend` (
+CREATE TABLE IF NOT EXISTS `Friend` (
 	`id` text PRIMARY KEY NOT NULL,
 	`name` text NOT NULL,
 	`nodeId` text,
@@ -44,9 +44,9 @@ CREATE TABLE `Friend` (
 	`uploadTotalBytes` integer DEFAULT 0 NOT NULL
 );
 --> statement-breakpoint
-CREATE UNIQUE INDEX `Friend_nodeId_unique` ON `Friend` (`nodeId`);--> statement-breakpoint
-CREATE UNIQUE INDEX `Friend_address_port_unique` ON `Friend` (`address`,`port`);--> statement-breakpoint
-CREATE TABLE `Identity` (
+CREATE UNIQUE INDEX IF NOT EXISTS `Friend_nodeId_unique` ON `Friend` (`nodeId`);--> statement-breakpoint
+CREATE UNIQUE INDEX IF NOT EXISTS `Friend_address_port_unique` ON `Friend` (`address`,`port`);--> statement-breakpoint
+CREATE TABLE IF NOT EXISTS `Identity` (
 	`id` text PRIMARY KEY NOT NULL,
 	`nodeId` text NOT NULL,
 	`publicKey` text NOT NULL,
@@ -54,8 +54,8 @@ CREATE TABLE `Identity` (
 	`createdAt` integer NOT NULL
 );
 --> statement-breakpoint
-CREATE UNIQUE INDEX `Identity_nodeId_unique` ON `Identity` (`nodeId`);--> statement-breakpoint
-CREATE TABLE `Message` (
+CREATE UNIQUE INDEX IF NOT EXISTS `Identity_nodeId_unique` ON `Identity` (`nodeId`);--> statement-breakpoint
+CREATE TABLE IF NOT EXISTS `Message` (
 	`id` text PRIMARY KEY NOT NULL,
 	`conversationId` text NOT NULL,
 	`fromNodeId` text NOT NULL,
@@ -63,16 +63,16 @@ CREATE TABLE `Message` (
 	`sentAt` integer NOT NULL
 );
 --> statement-breakpoint
-CREATE INDEX `Message_conversationId_sentAt_idx` ON `Message` (`conversationId`,`sentAt`);--> statement-breakpoint
-CREATE TABLE `PostDownloadScript` (
+CREATE INDEX IF NOT EXISTS `Message_conversationId_sentAt_idx` ON `Message` (`conversationId`,`sentAt`);--> statement-breakpoint
+CREATE TABLE IF NOT EXISTS `PostDownloadScript` (
 	`id` text PRIMARY KEY NOT NULL,
 	`path` text NOT NULL,
 	`order` integer NOT NULL,
 	`createdAt` integer NOT NULL
 );
 --> statement-breakpoint
-CREATE UNIQUE INDEX `PostDownloadScript_path_unique` ON `PostDownloadScript` (`path`);--> statement-breakpoint
-CREATE TABLE `Settings` (
+CREATE UNIQUE INDEX IF NOT EXISTS `PostDownloadScript_path_unique` ON `PostDownloadScript` (`path`);--> statement-breakpoint
+CREATE TABLE IF NOT EXISTS `Settings` (
 	`id` text PRIMARY KEY DEFAULT 'singleton' NOT NULL,
 	`name` text DEFAULT '' NOT NULL,
 	`invitePassword` text,
@@ -84,7 +84,7 @@ CREATE TABLE `Settings` (
 	`listenPort` integer DEFAULT 7734 NOT NULL
 );
 --> statement-breakpoint
-CREATE TABLE `SharedFile` (
+CREATE TABLE IF NOT EXISTS `SharedFile` (
 	`id` text PRIMARY KEY NOT NULL,
 	`path` text NOT NULL,
 	`filename` text NOT NULL,
@@ -98,4 +98,4 @@ CREATE TABLE `SharedFile` (
 	`updatedAt` integer NOT NULL
 );
 --> statement-breakpoint
-CREATE UNIQUE INDEX `SharedFile_path_unique` ON `SharedFile` (`path`);
+CREATE UNIQUE INDEX IF NOT EXISTS `SharedFile_path_unique` ON `SharedFile` (`path`);

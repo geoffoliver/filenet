@@ -1,4 +1,4 @@
-import { SQL, and, asc, count, like, or } from 'drizzle-orm';
+import { SQL, and, asc, count, like, or, sql } from 'drizzle-orm';
 
 import type { Db } from './db';
 import type { SharedFile } from './schema';
@@ -34,9 +34,14 @@ export async function searchFiles(
   const clauses: (SQL | undefined)[] = [];
 
   if (query) {
-    const q = `%${query}%`;
+    const escaped = query.replace(/[%_\\]/g, (c) => `\\${c}`);
+    const q = `%${escaped}%`;
     clauses.push(
-      or(like(sharedFiles.filename, q), like(sharedFiles.path, q), like(sharedFiles.metadata, q)),
+      or(
+        sql`${sharedFiles.filename} LIKE ${q} ESCAPE '\\'`,
+        sql`${sharedFiles.path} LIKE ${q} ESCAPE '\\'`,
+        sql`${sharedFiles.metadata} LIKE ${q} ESCAPE '\\'`,
+      ),
     );
   }
 
