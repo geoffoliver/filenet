@@ -175,13 +175,13 @@ async function downloadChunk(
       recordBytes(dl, data.length);
 
       const lastIdx = dl.totalChunks - 1;
-      const lastChunkActualSize = Number(dl.size) - lastIdx * dl.chunkSize;
+      const lastChunkActualSize = dl.size - BigInt(lastIdx) * BigInt(dl.chunkSize);
       const bytesReceived =
-        dl.completedChunks.size * dl.chunkSize -
-        (dl.completedChunks.has(lastIdx) ? dl.chunkSize - lastChunkActualSize : 0);
+        BigInt(dl.completedChunks.size) * BigInt(dl.chunkSize) -
+        (dl.completedChunks.has(lastIdx) ? BigInt(dl.chunkSize) - lastChunkActualSize : 0n);
       db.update(downloads)
         .set({
-          bytesReceived: BigInt(bytesReceived),
+          bytesReceived,
           completedChunks: JSON.stringify([...dl.completedChunks]),
           updatedAt: new Date(),
         })
