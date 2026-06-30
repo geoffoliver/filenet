@@ -398,7 +398,7 @@ export async function handleInboundFriendRequest(
   }
 
   if (autoAccept) {
-    await acceptFriendRequest(db, friend.id);
+    acceptFriendRequest(db, friend.id);
     const name = settingsRow.name.trim().slice(0, 200) || undefined;
     sendResponse({ type: 'friend-response', accepted: true, name });
   }

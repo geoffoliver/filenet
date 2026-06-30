@@ -146,9 +146,10 @@ export async function removeStaleEntries(
   const exclusionClauses: SQL[] = protectedRoots.flatMap((root) => {
     const normalized = root.endsWith(sep) ? root.slice(0, -1) : root;
     const escaped = normalized.replace(/[%_\\]/g, (c) => `\\${c}`);
+    const escapedSep = sep.replace(/[%_\\]/g, (c) => `\\${c}`);
     return [
       eq(sharedFiles.path, normalized),
-      sql`${sharedFiles.path} LIKE ${escaped + sep + '%'} ESCAPE '\\'`,
+      sql`${sharedFiles.path} LIKE ${escaped + escapedSep + '%'} ESCAPE '\\'`,
     ] as SQL[];
   });
 

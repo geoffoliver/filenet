@@ -318,6 +318,25 @@ describe('removeStaleEntries', () => {
     expect(removed).toBe(0);
     expect(findFile(filePath)).not.toBeNull();
   });
+
+  it('treats % and _ in protected root paths as literal characters, not LIKE wildcards', async () => {
+    // Directory whose name contains LIKE metacharacters
+    const specialDir = join(tmpDir, '100%_music');
+    await mkdir(specialDir);
+    const protectedPath = join(specialDir, 'song.mp3');
+    // A file in a different dir that would accidentally match if % were a wildcard
+    const otherDir = join(tmpDir, '100x_music');
+    await mkdir(otherDir);
+    const otherPath = join(otherDir, 'song.mp3');
+    await writeFile(protectedPath, 'keep');
+    await writeFile(otherPath, 'stale');
+    await indexFile(db, protectedPath, new Date(1000));
+    await indexFile(db, otherPath, new Date(1000));
+    const removed = await removeStaleEntries(db, new Date(), [specialDir]);
+    expect(removed).toBe(1);
+    expect(findFile(protectedPath)).not.toBeNull();
+    expect(findFile(otherPath)).toBeNull();
+  });
 });
 
 describe('scanAndIndex', () => {
