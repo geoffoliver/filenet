@@ -78,7 +78,7 @@ export async function indexFile(
   // Fast path: size + mtime match — just touch lastSeenAt without re-hashing
   const fastHit = db
     .update(sharedFiles)
-    .set({ lastSeenAt })
+    .set({ lastSeenAt, updatedAt: lastSeenAt })
     .where(
       and(
         eq(sharedFiles.path, path),
@@ -86,12 +86,10 @@ export async function indexFile(
         eq(sharedFiles.fileModifiedAt, fileModifiedAt),
       ),
     )
-    .returning({ id: sharedFiles.id })
+    .returning()
     .all();
   if (fastHit.length > 0) {
-    const row = db.select().from(sharedFiles).where(eq(sharedFiles.path, path)).get();
-    if (!row) throw new Error(`indexFile: fast-path update succeeded but row not found: ${path}`);
-    return row;
+    return fastHit[0];
   }
 
   // Full re-index
