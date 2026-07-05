@@ -4,6 +4,8 @@ import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 
+import type { Changes } from 'bun:sqlite';
+
 import { SQL, and, eq, lt, or, sql } from 'drizzle-orm';
 
 import type { Db } from './db';
@@ -156,7 +158,7 @@ export async function removeStaleEntries(
       ? and(lt(sharedFiles.lastSeenAt, scanStart), sql`NOT (${or(...exclusionClauses)})`)
       : lt(sharedFiles.lastSeenAt, scanStart);
 
-  const result = db.delete(sharedFiles).where(where).run() as any;
+  const result = db.delete(sharedFiles).where(where).run() as unknown as Changes;
   return result.changes;
 }
 
