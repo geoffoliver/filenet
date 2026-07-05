@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 
-import type { PrismaClient } from '@prisma/client';
+import type { Db } from './db';
 
 import { type ConnectedPeer, getConnectedPeer, sendToPeer } from './connections';
 import { type FileType, searchFiles } from './search';
@@ -211,7 +211,7 @@ export function handleSearchResult(
 
 export async function handleSearchRequest(
   msg: SearchRequestMessage,
-  prisma: PrismaClient,
+  db: Db,
   identity: Identity,
   fromPeer: ConnectedPeer,
   allPeers: ConnectedPeer[],
@@ -238,7 +238,7 @@ export async function handleSearchRequest(
   }
 
   // Execute local search — skip the count query since the protocol only uses files
-  const { files } = await searchFiles(prisma, {
+  const { files } = await searchFiles(db, {
     query: msg.query,
     type: coerceFileType(msg.fileType),
     limit: 50,

@@ -21,7 +21,6 @@ A self-hosted, peer-to-peer file sharing and chat application. Users maintain a 
 git clone https://github.com/geoffoliver/filenet.git
 cd filenet
 bun install
-bunx prisma db push
 ```
 
 ## Running
@@ -129,11 +128,10 @@ bun run build
 
 ### Database
 
-The app uses Prisma with SQLite. After changing `prisma/schema.prisma`:
+The app uses Drizzle ORM with SQLite. Migrations are applied automatically at startup. To generate a new migration after changing `server/schema.ts`:
 
 ```bash
-bunx prisma db push        # apply to dev DB
-bunx prisma generate       # regenerate client
+bunx drizzle-kit generate
 ```
 
 Test databases are created automatically by the test suite and cleaned up afterwards.

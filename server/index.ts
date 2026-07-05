@@ -5,23 +5,25 @@ import {
   handleMessage,
   handleOpen,
 } from './peer';
+import { applyMigrations, createDb } from './db';
 import { clearActiveUploadSessionsForPeer, dispatchTransferMessage } from './transfer-protocol';
 import { connectToPeer, getConnectedPeer, unregisterPeer } from './connections';
 import { getOrCreateSettings, parseSharedFolders } from './config';
 import { createManagementFetch } from './management';
-import { createPrismaClient } from './db';
 import { getOrCreateIdentity } from './identity';
 import { pauseAllActiveDownloads } from './download-manager';
 import { startPeriodicRescan } from './indexer';
 import { startReconnectLoop } from './reconnect';
 
-const prisma = createPrismaClient();
+const db = createDb();
+applyMigrations(db);
+
 const MGMT_PORT = parseInt(process.env.MGMT_PORT ?? '7735', 10);
 if (isNaN(MGMT_PORT) || MGMT_PORT < 1 || MGMT_PORT > 65535)
   throw new Error(`Invalid MGMT_PORT: "${process.env.MGMT_PORT ?? ''}"`);
 
-const identity = await getOrCreateIdentity(prisma);
-const startupSettings = await getOrCreateSettings(prisma);
+const identity = await getOrCreateIdentity(db);
+const startupSettings = await getOrCreateSettings(db);
 const PORT = parseInt(process.env.P2P_PORT ?? String(startupSettings.listenPort), 10);
 if (isNaN(PORT) || PORT < 1 || PORT > 65535)
   throw new Error(
@@ -40,13 +42,13 @@ console.log(`P2P port:  ${PORT}`);
 console.log(`Mgmt port: ${MGMT_PORT} (localhost only)`);
 
 const stopRescan = startPeriodicRescan(
-  prisma,
+  db,
   async () => {
-    const s = await getOrCreateSettings(prisma);
+    const s = await getOrCreateSettings(db);
     return parseSharedFolders(s.sharedFolders);
   },
   async () => {
-    const s = await getOrCreateSettings(prisma);
+    const s = await getOrCreateSettings(db);
     return s.rescanIntervalMinutes;
   },
 );
@@ -56,32 +58,30 @@ const connectPeerFn = (
   port: number,
   friendRequest?: { name: string; password?: string },
 ) =>
-  connectToPeer(identity, prisma, address, port, PORT, friendRequest, async (nodeId, msg) => {
-    await dispatchSearchMessage(msg, nodeId, prisma, identity);
-    await dispatchTransferMessage(msg, nodeId, prisma);
-    await dispatchVouchMessage(msg, nodeId, prisma);
+  connectToPeer(identity, db, address, port, PORT, friendRequest, async (nodeId, msg) => {
+    await dispatchSearchMessage(msg, nodeId, db, identity);
+    await dispatchTransferMessage(msg, nodeId, db);
+    await dispatchVouchMessage(msg, nodeId, db);
   });
 
-const stopReconnect = startReconnectLoop(prisma, identity, connectPeerFn);
+const stopReconnect = startReconnectLoop(db, identity, connectPeerFn);
 
 const shutdown = () => {
   stopRescan();
   stopReconnect();
-  pauseAllActiveDownloads(prisma)
+  pauseAllActiveDownloads(db)
     .catch(() => {})
     .finally(() => process.exit(0));
 };
 process.on('SIGTERM', shutdown);
 process.on('SIGINT', shutdown);
 
-// Management API — localhost only, no WebSocket upgrade
 Bun.serve({
   port: MGMT_PORT,
   hostname: '127.0.0.1',
-  fetch: createManagementFetch({ identity, prisma, connectPeer: connectPeerFn }),
+  fetch: createManagementFetch({ identity, db, connectPeer: connectPeerFn }),
 });
 
-// P2P server — public, WebSocket + pubkey endpoint only
 Bun.serve<PeerData>({
   port: PORT,
   fetch(req, server) {
@@ -102,7 +102,7 @@ Bun.serve<PeerData>({
       server.upgrade(req, {
         data: {
           identity,
-          prisma,
+          db,
           localPort: PORT,
           state: { phase: 'pending' },
         },

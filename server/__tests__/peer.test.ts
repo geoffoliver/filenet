@@ -1,12 +1,11 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'bun:test';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import crypto from 'node:crypto';
-import { execSync } from 'child_process';
 import { join } from 'node:path';
+import { randomUUID } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { unlinkSync } from 'fs';
 
-import type { PrismaClient } from '@prisma/client';
 import type { ServerWebSocket } from 'bun';
 
 import {
@@ -21,13 +20,14 @@ import {
   initiateNetworkSearch,
   resetInternalMapsForTesting,
 } from '../search-protocol';
+import { type Db, applyMigrations, createDb } from '../db';
 import type { InnerMessage, SearchRequestMessage, SearchResultMessage } from '../types';
 import { type PeerData, dispatchMessage } from '../peer';
-import { createPrismaClient } from '../db';
+import { friends, sharedFiles } from '../schema';
 import { indexFile } from '../indexer';
 
 const TEST_DB_URL = 'file:./data/test-peer.db';
-let prisma: PrismaClient;
+let db: Db;
 let tmpDir: string;
 
 const identity = {
@@ -50,7 +50,7 @@ function makeMockWs(peerNodeId: string): { dispatchWs: ServerWebSocket<PeerData>
   const dispatchWs = {
     data: {
       identity,
-      prisma,
+      db,
       localPort: 7734,
       state: {
         phase: 'authenticated' as const,
@@ -71,25 +71,49 @@ function captureAll(log: { peer: ConnectedPeer; msg: InnerMessage }[]) {
 }
 
 beforeAll(async () => {
-  execSync(`bunx prisma db push --url "${TEST_DB_URL}"`, { stdio: 'pipe' });
-  prisma = createPrismaClient(TEST_DB_URL);
+  db = createDb(TEST_DB_URL);
+  applyMigrations(db);
   tmpDir = await mkdtemp(join(tmpdir(), 'filenet-peer-test-'));
 });
 
 afterAll(async () => {
-  await prisma.$disconnect();
+  db.$client.close();
   await rm(tmpDir, { recursive: true, force: true });
   try {
     unlinkSync('./data/test-peer.db');
   } catch {}
 });
 
-beforeEach(async () => {
-  await prisma.friend.deleteMany();
-  await prisma.sharedFile.deleteMany();
+beforeEach(() => {
+  db.delete(friends).run();
+  db.delete(sharedFiles).run();
   resetInternalMapsForTesting();
   resetVouchesForTesting();
 });
+
+function insertFriend(overrides: {
+  nodeId: string;
+  status: string;
+  address: string;
+  port?: number;
+  name?: string;
+}) {
+  const now = new Date();
+  return db
+    .insert(friends)
+    .values({
+      id: randomUUID(),
+      name: overrides.name ?? 'Peer',
+      address: overrides.address,
+      port: overrides.port ?? 7734,
+      nodeId: overrides.nodeId,
+      status: overrides.status as 'ACCEPTED' | 'INCOMING_PENDING' | 'OUTGOING_PENDING' | 'BLOCKED',
+      addedAt: now,
+      updatedAt: now,
+    })
+    .returning()
+    .get()!;
+}
 
 // ---------------------------------------------------------------------------
 // search-request auth gate
@@ -104,7 +128,7 @@ describe('dispatchMessage — search-request auth gate', () => {
     const dir = join(tmpDir, 'gate-stranger');
     await mkdir(dir, { recursive: true });
     await writeFile(join(dir, 'secret.mp3'), 'data');
-    await indexFile(prisma, join(dir, 'secret.mp3'));
+    await indexFile(db, join(dir, 'secret.mp3'));
 
     const msg: SearchRequestMessage = {
       type: 'search-request',
@@ -123,22 +147,14 @@ describe('dispatchMessage — search-request auth gate', () => {
 
   it('drops search-request from a peer with INCOMING_PENDING status', async () => {
     const nodeId = 'pending-in-' + crypto.randomUUID();
-    await prisma.friend.create({
-      data: {
-        name: 'Pending',
-        address: '127.0.0.1',
-        port: 7734,
-        nodeId,
-        status: 'INCOMING_PENDING',
-      },
-    });
+    insertFriend({ nodeId, status: 'INCOMING_PENDING', address: '127.0.0.1' });
     const { dispatchWs, mockWs } = makeMockWs(nodeId);
     registerPeer(mockWs, Buffer.alloc(32), nodeId, Buffer.alloc(32), '127.0.0.1', 0);
 
     const dir = join(tmpDir, 'gate-incoming');
     await mkdir(dir, { recursive: true });
     await writeFile(join(dir, 'pendingfile.mp3'), 'data');
-    await indexFile(prisma, join(dir, 'pendingfile.mp3'));
+    await indexFile(db, join(dir, 'pendingfile.mp3'));
 
     const msg: SearchRequestMessage = {
       type: 'search-request',
@@ -157,15 +173,7 @@ describe('dispatchMessage — search-request auth gate', () => {
 
   it('drops search-request from a peer with OUTGOING_PENDING status', async () => {
     const nodeId = 'pending-out-' + crypto.randomUUID();
-    await prisma.friend.create({
-      data: {
-        name: 'Pending',
-        address: '127.0.0.1',
-        port: 7734,
-        nodeId,
-        status: 'OUTGOING_PENDING',
-      },
-    });
+    insertFriend({ nodeId, status: 'OUTGOING_PENDING', address: '127.0.0.1' });
     const { dispatchWs, mockWs } = makeMockWs(nodeId);
     registerPeer(mockWs, Buffer.alloc(32), nodeId, Buffer.alloc(32), '127.0.0.1', 0);
 
@@ -186,16 +194,14 @@ describe('dispatchMessage — search-request auth gate', () => {
 
   it('processes search-request from an ACCEPTED friend and sends results', async () => {
     const nodeId = 'accepted-' + crypto.randomUUID();
-    await prisma.friend.create({
-      data: { name: 'Friend', address: '127.0.0.1', port: 7734, nodeId, status: 'ACCEPTED' },
-    });
+    insertFriend({ nodeId, status: 'ACCEPTED', address: '127.0.0.1' });
     const { dispatchWs, mockWs } = makeMockWs(nodeId);
     registerPeer(mockWs, Buffer.alloc(32), nodeId, Buffer.alloc(32), '127.0.0.1', 0);
 
     const dir = join(tmpDir, 'gate-accepted');
     await mkdir(dir, { recursive: true });
     await writeFile(join(dir, 'shared.mp3'), 'data');
-    await indexFile(prisma, join(dir, 'shared.mp3'));
+    await indexFile(db, join(dir, 'shared.mp3'));
 
     const msg: SearchRequestMessage = {
       type: 'search-request',
@@ -220,9 +226,7 @@ describe('dispatchMessage — search-request auth gate', () => {
 describe('dispatchMessage — search-result auth gate', () => {
   it('drops search-result that would inject into a pending search from a non-friend', async () => {
     const intruderNodeId = 'intruder-' + crypto.randomUUID();
-    // no friend record for intruder
 
-    // Start a network search to get a live searchId
     const dummyPeer = {
       peerNodeId: 'dummy',
       peerPublicKey: Buffer.alloc(32),
@@ -270,15 +274,7 @@ describe('dispatchMessage — search-result auth gate', () => {
 
   it('accepts search-result from an ACCEPTED friend', async () => {
     const friendNodeId = 'friend-result-' + crypto.randomUUID();
-    await prisma.friend.create({
-      data: {
-        name: 'Friend',
-        address: '127.0.0.1',
-        port: 7734,
-        nodeId: friendNodeId,
-        status: 'ACCEPTED',
-      },
-    });
+    insertFriend({ nodeId: friendNodeId, status: 'ACCEPTED', address: '127.0.0.1' });
 
     const dummyPeer = {
       peerNodeId: 'dummy2',
@@ -333,15 +329,7 @@ describe('dispatchMessage — search-result auth gate', () => {
 describe('dispatchMessage — viaNodeId attribution', () => {
   it('preserves producer fromNodeId and tags viaNodeId with the authenticated sender', async () => {
     const friendNodeId = 'spoof-friend-' + crypto.randomUUID();
-    await prisma.friend.create({
-      data: {
-        name: 'Friend',
-        address: '127.0.0.1',
-        port: 7734,
-        nodeId: friendNodeId,
-        status: 'ACCEPTED',
-      },
-    });
+    insertFriend({ nodeId: friendNodeId, status: 'ACCEPTED', address: '127.0.0.1' });
 
     const dummyPeer = {
       peerNodeId: 'dummy-spoof',
@@ -366,7 +354,6 @@ describe('dispatchMessage — viaNodeId attribution', () => {
     const { dispatchWs, mockWs } = makeMockWs(friendNodeId);
     registerPeer(mockWs, Buffer.alloc(32), friendNodeId, Buffer.alloc(32), '127.0.0.1', 0);
 
-    // Friend tries to claim the result came from 'impersonated-node', not themselves
     const resultMsg: SearchResultMessage = {
       type: 'search-result',
       searchId,
@@ -388,9 +375,7 @@ describe('dispatchMessage — viaNodeId attribution', () => {
     const results = await searchPromise;
     const found = results.find((r) => r.sha256 === '2'.repeat(64));
     expect(found).toBeDefined();
-    // fromNodeId is preserved so multi-hop results retain correct producer attribution
     expect(found?.nodeId).toBe('impersonated-node');
-    // viaNodeId is the authenticated sender — lets callers verify the relay chain
     expect(found?.viaNodeId).toBe(friendNodeId);
   });
 });
@@ -413,15 +398,7 @@ describe('dispatchMessage — friend-vouch-request', () => {
 
   it('responds vouched=false when accepted friend asks about an unknown candidate', async () => {
     const friendNodeId = 'vouch-friend-' + crypto.randomUUID();
-    await prisma.friend.create({
-      data: {
-        name: 'Friend',
-        address: '127.0.0.1',
-        port: 7734,
-        nodeId: friendNodeId,
-        status: 'ACCEPTED',
-      },
-    });
+    insertFriend({ nodeId: friendNodeId, status: 'ACCEPTED', address: '127.0.0.1' });
     const { dispatchWs, mockWs } = makeMockWs(friendNodeId);
     registerPeer(mockWs, Buffer.alloc(32), friendNodeId, Buffer.alloc(32), '127.0.0.1', 0);
 
@@ -432,8 +409,6 @@ describe('dispatchMessage — friend-vouch-request', () => {
     unregisterPeer(friendNodeId);
 
     expect(mockWs.sends).toHaveLength(1);
-    // The response is an encrypted message — just verify something was sent
-    // (decrypting requires the session key, which is all-zeros here)
     expect(mockWs.sends[0]).toBeDefined();
   });
 
@@ -441,28 +416,11 @@ describe('dispatchMessage — friend-vouch-request', () => {
     const friendNodeId = 'vouch-asker-' + crypto.randomUUID();
     const candidateNodeId = 'vouch-candidate-' + crypto.randomUUID();
 
-    await prisma.friend.create({
-      data: {
-        name: 'Asker',
-        address: '127.0.0.1',
-        port: 7734,
-        nodeId: friendNodeId,
-        status: 'ACCEPTED',
-      },
-    });
-    await prisma.friend.create({
-      data: {
-        name: 'Candidate',
-        address: '10.0.0.1',
-        port: 7734,
-        nodeId: candidateNodeId,
-        status: 'ACCEPTED',
-      },
-    });
+    insertFriend({ nodeId: friendNodeId, status: 'ACCEPTED', address: '127.0.0.1' });
+    insertFriend({ nodeId: candidateNodeId, status: 'ACCEPTED', address: '10.0.0.1' });
 
     const sessionKey = Buffer.alloc(32);
     const { dispatchWs } = makeMockWs(friendNodeId);
-    // Re-create with a tracked session key so we can decrypt the response
     const trackedSends: Buffer[] = [];
     const trackedWs = {
       sends: trackedSends,
@@ -476,7 +434,6 @@ describe('dispatchMessage — friend-vouch-request', () => {
     await dispatchMessage(dispatchWs, { type: 'friend-vouch-request', nodeId: candidateNodeId });
     unregisterPeer(friendNodeId);
 
-    // Verify a response was sent
     expect(trackedSends).toHaveLength(1);
   });
 });
@@ -490,7 +447,6 @@ describe('dispatchMessage — friend-vouch-response', () => {
     const strangerNodeId = 'vouch-resp-stranger-' + crypto.randomUUID();
     const { dispatchWs } = makeMockWs(strangerNodeId);
 
-    // Should not throw and should not resolve any pending vouch
     await dispatchMessage(dispatchWs, {
       type: 'friend-vouch-response',
       nodeId: 'some-candidate',
@@ -500,15 +456,7 @@ describe('dispatchMessage — friend-vouch-response', () => {
 
   it('resolves a pending vouch when accepted friend sends vouched=true', async () => {
     const friendNodeId = 'vouch-resp-friend-' + crypto.randomUUID();
-    await prisma.friend.create({
-      data: {
-        name: 'Friend',
-        address: '127.0.0.1',
-        port: 7734,
-        nodeId: friendNodeId,
-        status: 'ACCEPTED',
-      },
-    });
+    insertFriend({ nodeId: friendNodeId, status: 'ACCEPTED', address: '127.0.0.1' });
     const { dispatchWs, mockWs } = makeMockWs(friendNodeId);
     registerPeer(mockWs, Buffer.alloc(32), friendNodeId, Buffer.alloc(32), '127.0.0.1', 0);
 
@@ -537,25 +485,15 @@ describe('dispatchMessage — friend-vouch-response', () => {
 
   it('does not resolve vouch for an unqueried candidateNodeId', async () => {
     const friendNodeId = 'vouch-resp-unqueried-' + crypto.randomUUID();
-    await prisma.friend.create({
-      data: {
-        name: 'Friend',
-        address: '127.0.0.1',
-        port: 7734,
-        nodeId: friendNodeId,
-        status: 'ACCEPTED',
-      },
-    });
+    insertFriend({ nodeId: friendNodeId, status: 'ACCEPTED', address: '127.0.0.1' });
     const { dispatchWs, mockWs } = makeMockWs(friendNodeId);
     registerPeer(mockWs, Buffer.alloc(32), friendNodeId, Buffer.alloc(32), '127.0.0.1', 0);
 
-    // No pending vouch for this candidate — resolveVouch should be a no-op
     await dispatchMessage(dispatchWs, {
       type: 'friend-vouch-response',
       nodeId: 'no-pending-candidate',
       vouched: true,
     });
-    // No assertion needed — just verify no throw
     unregisterPeer(friendNodeId);
   });
 });

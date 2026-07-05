@@ -1,4 +1,4 @@
-import type { PrismaClient } from '@prisma/client';
+import { and, eq } from 'drizzle-orm';
 import type { ServerWebSocket } from 'bun';
 
 import {
@@ -31,9 +31,11 @@ import {
   generateEphemeralKeypair,
 } from './handshake';
 import { handleSearchRequest, handleSearchResult } from './search-protocol';
+import type { Db } from './db';
 import type { Identity } from './identity';
 import { acceptFriendRequest } from './friends';
 import { dispatchTransferMessage } from './transfer-protocol';
+import { friends } from './schema';
 import { handleChatMessage } from './chat';
 
 type PeerState =
@@ -53,7 +55,7 @@ type PeerState =
 
 export type PeerData = {
   identity: Identity;
-  prisma: PrismaClient;
+  db: Db;
   localPort: number;
   state: PeerState;
 };
@@ -72,12 +74,7 @@ export function handleMessage(
 
   if (wire.type === 'hello') {
     const { ack, ephemeral } = createHelloAck(identity, wire);
-    ws.data.state = {
-      phase: 'ack-sent',
-      hello: wire,
-      ack,
-      ephemeral,
-    };
+    ws.data.state = { phase: 'ack-sent', hello: wire, ack, ephemeral };
     ws.send(encodeMessage(ack));
     return;
   }
@@ -107,7 +104,6 @@ export function handleMessage(
           peerNodeId: state.hello.nodeId,
           peerPublicKey,
         };
-        // Port is unknown for inbound connections until a friend-request arrives.
         registerPeer(ws, sessionKey, state.hello.nodeId, peerPublicKey, ws.remoteAddress, 0);
       } catch {
         ws.close(1008, 'Handshake failed');
@@ -134,6 +130,7 @@ export async function dispatchMessage(
 ): Promise<void> {
   const state = ws.data.state;
   if (state.phase !== 'authenticated') return;
+  const db = ws.data.db;
 
   if (msg.type === 'friend-request') {
     const result = FriendRequestMessageSchema.safeParse(msg);
@@ -145,7 +142,7 @@ export async function dispatchMessage(
     updatePeerPort(state.peerNodeId, validated.port);
     await handleInboundFriendRequest(
       ws.data.identity,
-      ws.data.prisma,
+      db,
       validated,
       {
         nodeId: state.peerNodeId,
@@ -162,85 +159,83 @@ export async function dispatchMessage(
     const result = FriendResponseMessageSchema.safeParse(msg);
     if (!result.success) return;
     const { accepted, name } = result.data;
-    const friend = await ws.data.prisma.friend.findFirst({
-      where: { nodeId: state.peerNodeId },
-    });
+    const friend = db.select().from(friends).where(eq(friends.nodeId, state.peerNodeId)).get();
     if (!friend) return;
 
     if (accepted) {
-      await ws.data.prisma.$transaction(async (tx) => {
-        await acceptFriendRequest(tx, friend.id);
+      db.transaction((tx) => {
+        acceptFriendRequest(tx as unknown as Db, friend.id);
         if (name) {
-          await tx.friend.update({ where: { id: friend.id }, data: { name } });
+          tx.update(friends)
+            .set({ name, updatedAt: new Date() })
+            .where(eq(friends.id, friend.id))
+            .run();
         }
       });
     } else {
-      await ws.data.prisma.friend.delete({ where: { id: friend.id } });
+      db.delete(friends).where(eq(friends.id, friend.id)).run();
       closeAndUnregisterPeer(state.peerNodeId);
     }
     return;
   }
 
   if (msg.type === 'search-request' || msg.type === 'search-result') {
-    await dispatchSearchMessage(msg, state.peerNodeId, ws.data.prisma, ws.data.identity);
+    await dispatchSearchMessage(msg, state.peerNodeId, db, ws.data.identity);
     return;
   }
 
   if (msg.type === 'chunk-request' || msg.type === 'chunk-response' || msg.type === 'chunk-error') {
-    await dispatchTransferMessage(msg, state.peerNodeId, ws.data.prisma);
+    await dispatchTransferMessage(msg, state.peerNodeId, db);
     return;
   }
 
   if (msg.type === 'chat-message') {
     const result = ChatMessageSchema.safeParse(msg);
     if (!result.success) return;
-    const isFriend = await ws.data.prisma.friend.findFirst({
-      where: { nodeId: state.peerNodeId, status: 'ACCEPTED' },
-    });
+    const isFriend = db
+      .select()
+      .from(friends)
+      .where(and(eq(friends.nodeId, state.peerNodeId), eq(friends.status, 'ACCEPTED')))
+      .get();
     if (!isFriend) return;
-    await handleChatMessage(result.data, state.peerNodeId, ws.data.prisma, ws.data.identity.nodeId);
+    await handleChatMessage(result.data, state.peerNodeId, db, ws.data.identity.nodeId);
     return;
   }
 
   if (msg.type === 'friend-vouch-request' || msg.type === 'friend-vouch-response') {
-    await dispatchVouchMessage(msg, state.peerNodeId, ws.data.prisma);
+    await dispatchVouchMessage(msg, state.peerNodeId, db);
     return;
   }
 }
 
-/**
- * Handle search-request and search-result messages for any authenticated connection
- * (both inbound ServerWebSocket and outbound native WebSocket).  Exported so index.ts
- * can wire it up as the onMessage callback for outbound connections.
- */
 export async function dispatchSearchMessage(
   msg: InnerMessage,
   senderNodeId: string,
-  prisma: PrismaClient,
+  db: Db,
   identity: Identity,
 ): Promise<void> {
   if (msg.type === 'search-request') {
     const result = SearchRequestMessageSchema.safeParse(msg);
-    if (!result.success) return; // malformed — drop
-    // Targeted check first so non-friends can't trigger a full-table scan
-    const senderFriend = await prisma.friend.findFirst({
-      where: { nodeId: senderNodeId, status: 'ACCEPTED' },
-    });
-    if (!senderFriend) return; // not an accepted friend — drop
+    if (!result.success) return;
+    const senderFriend = db
+      .select()
+      .from(friends)
+      .where(and(eq(friends.nodeId, senderNodeId), eq(friends.status, 'ACCEPTED')))
+      .get();
+    if (!senderFriend) return;
     const fromPeer = getConnectedPeer(senderNodeId);
     if (!fromPeer) return;
-    // Only resolve accepted peers for forwarding when the request will actually be forwarded.
-    const acceptedPeers = result.data.ttl > 1 ? await getAcceptedConnectedPeers(prisma) : [];
-    await handleSearchRequest(result.data, prisma, identity, fromPeer, acceptedPeers);
+    const acceptedPeers = result.data.ttl > 1 ? await getAcceptedConnectedPeers(db) : [];
+    await handleSearchRequest(result.data, db, identity, fromPeer, acceptedPeers);
   } else if (msg.type === 'search-result') {
     const result = SearchResultMessageSchema.safeParse(msg);
-    if (!result.success) return; // malformed — drop
-    const isFriend = await prisma.friend.findFirst({
-      where: { nodeId: senderNodeId, status: 'ACCEPTED' },
-    });
-    if (!isFriend) return; // not an accepted friend — drop
-    // Tag viaNodeId with the authenticated sender while preserving the original producer's
-    // fromNodeId so multi-hop results retain correct producer attribution.
+    if (!result.success) return;
+    const isFriend = db
+      .select()
+      .from(friends)
+      .where(and(eq(friends.nodeId, senderNodeId), eq(friends.status, 'ACCEPTED')))
+      .get();
+    if (!isFriend) return;
     handleSearchResult({ ...result.data, viaNodeId: senderNodeId });
   }
 }
@@ -251,27 +246,25 @@ export function sendEncrypted(ws: ServerWebSocket<PeerData>, msg: InnerMessage):
   ws.send(encodeMessage(encryptMessage(msg, state.sessionKey)));
 }
 
-/**
- * Handle friend-vouch-request and friend-vouch-response for any authenticated
- * connection (both inbound ServerWebSocket and outbound native WebSocket).
- * Exported so index.ts can wire it into the outbound onMessage callback.
- */
 export async function dispatchVouchMessage(
   msg: InnerMessage,
   senderNodeId: string,
-  prisma: PrismaClient,
+  db: Db,
 ): Promise<void> {
   if (msg.type === 'friend-vouch-request') {
     const result = FriendVouchRequestMessageSchema.safeParse(msg);
     if (!result.success) return;
-    // Only accepted friends may request vouches — limits enumeration attack surface
-    const isFriend = await prisma.friend.findFirst({
-      where: { nodeId: senderNodeId, status: 'ACCEPTED' },
-    });
+    const isFriend = db
+      .select()
+      .from(friends)
+      .where(and(eq(friends.nodeId, senderNodeId), eq(friends.status, 'ACCEPTED')))
+      .get();
     if (!isFriend) return;
-    const isVouched = await prisma.friend.findFirst({
-      where: { nodeId: result.data.nodeId, status: 'ACCEPTED' },
-    });
+    const isVouched = db
+      .select()
+      .from(friends)
+      .where(and(eq(friends.nodeId, result.data.nodeId), eq(friends.status, 'ACCEPTED')))
+      .get();
     const senderPeer = getConnectedPeer(senderNodeId);
     if (!senderPeer) return;
     try {
@@ -281,15 +274,16 @@ export async function dispatchVouchMessage(
         vouched: !!isVouched,
       });
     } catch {
-      // peer disconnected between lookup and send — response is lost, nothing to do
+      // peer disconnected between lookup and send
     }
   } else if (msg.type === 'friend-vouch-response') {
     const result = FriendVouchResponseMessageSchema.safeParse(msg);
     if (!result.success) return;
-    // Only accept vouch responses from accepted friends
-    const isFriend = await prisma.friend.findFirst({
-      where: { nodeId: senderNodeId, status: 'ACCEPTED' },
-    });
+    const isFriend = db
+      .select()
+      .from(friends)
+      .where(and(eq(friends.nodeId, senderNodeId), eq(friends.status, 'ACCEPTED')))
+      .get();
     if (!isFriend) return;
     resolveVouch(senderNodeId, result.data.nodeId, result.data.vouched);
   }

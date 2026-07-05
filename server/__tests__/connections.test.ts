@@ -1,6 +1,7 @@
+import { randomUUID } from 'node:crypto';
+
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'bun:test';
-import type { PrismaClient } from '@prisma/client';
-import { execSync } from 'child_process';
+import { eq } from 'drizzle-orm';
 import { unlinkSync } from 'fs';
 
 import {
@@ -18,41 +19,42 @@ import {
   unregisterPeer,
   updatePeerPort,
 } from '../connections';
+import { type Db, applyMigrations, createDb } from '../db';
 import {
   createHello,
   createHelloAck as createHelloAck_forTest,
   decodeMessage,
   decryptMessage,
   encodeMessage,
-  encryptMessage,
   generateEphemeralKeypair,
   processHelloAck,
 } from '../handshake';
 import { dispatchMessage, handleMessage } from '../peer';
+import { friends, identity as identityTable, settings } from '../schema';
 import { getOrCreateSettings, updateSettings } from '../config';
 import type { InnerMessage } from '../types';
-import { createPrismaClient } from '../db';
+import type { PeerData } from '../peer';
 import { generateIdentity } from '../identity';
 
 const TEST_DB_URL = 'file:./data/test-connections.db';
-let prisma: PrismaClient;
+let db: Db;
 
 beforeAll(() => {
-  execSync(`bunx prisma db push --url "${TEST_DB_URL}"`, { stdio: 'pipe' });
-  prisma = createPrismaClient(TEST_DB_URL);
+  db = createDb(TEST_DB_URL);
+  applyMigrations(db);
 });
 
-afterAll(async () => {
-  await prisma.$disconnect();
+afterAll(() => {
+  db.$client.close();
   try {
     unlinkSync('./data/test-connections.db');
   } catch {}
 });
 
-beforeEach(async () => {
-  await prisma.identity.deleteMany();
-  await prisma.friend.deleteMany();
-  await prisma.settings.deleteMany();
+beforeEach(() => {
+  db.delete(identityTable).run();
+  db.delete(friends).run();
+  db.delete(settings).run();
 });
 
 describe('initiator handshake side (processHelloAck)', () => {
@@ -60,12 +62,8 @@ describe('initiator handshake side (processHelloAck)', () => {
     const initiator = generateIdentity();
     const responder = generateIdentity();
     const initiatorEph = generateEphemeralKeypair();
-
     const hello = createHello(initiator, initiatorEph);
-
-    // Simulate responder generating hello-ack
     const { ack } = createHelloAck_forTest(responder, hello);
-
     const { sessionKey, ready } = processHelloAck(initiator, initiatorEph, hello, ack);
     expect(sessionKey).toBeInstanceOf(Buffer);
     expect(sessionKey.length).toBe(32);
@@ -77,13 +75,9 @@ describe('initiator handshake side (processHelloAck)', () => {
     const initiator = generateIdentity();
     const attacker = generateIdentity();
     const initiatorEph = generateEphemeralKeypair();
-
     const hello = createHello(initiator, initiatorEph);
     const { ack } = createHelloAck_forTest(attacker, hello);
-
-    // Swap in initiator's public key to fake identity (attacker signed with wrong key)
     const tamperedAck = { ...ack, publicKey: initiator.publicKey.toString('base64') };
-
     expect(() => processHelloAck(initiator, initiatorEph, hello, tamperedAck)).toThrow();
   });
 });
@@ -92,33 +86,21 @@ describe('full two-party handshake via handleMessage', () => {
   it('both sides reach authenticated state', async () => {
     const initiator = generateIdentity();
     const responder = generateIdentity();
-
     const initiatorEph = generateEphemeralKeypair();
     const hello = createHello(initiator, initiatorEph);
-
-    // Simulate server receiving hello and responding with hello-ack
     const sentMessages: string[] = [];
     const ws = makeFakeWs(responder, sentMessages);
-
     handleMessage(ws as any, encodeMessage(hello));
     expect(sentMessages.length).toBe(1);
     const ack = decodeMessage(sentMessages[0]);
     expect(ack.type).toBe('hello-ack');
     if (ack.type !== 'hello-ack') throw new Error('unreachable');
-
-    // Initiator processes hello-ack and sends encrypted ready
     const { sessionKey, ready } = processHelloAck(initiator, initiatorEph, hello, ack);
-
-    // Server processes encrypted ready
     const readyWire = { type: 'encrypted' as const, payload: ready.toString('base64') };
     handleMessage(ws as any, encodeMessage(readyWire));
-
-    // Server should now be authenticated
     expect(ws.data.state.phase).toBe('authenticated');
     if (ws.data.state.phase !== 'authenticated') throw new Error('unreachable');
     expect(ws.data.state.peerNodeId).toBe(initiator.nodeId);
-
-    // Session keys should match
     expect(ws.data.state.sessionKey.toString('hex')).toBe(sessionKey.toString('hex'));
   });
 
@@ -126,13 +108,11 @@ describe('full two-party handshake via handleMessage', () => {
     const peer1 = generateIdentity();
     const sessionKey = Buffer.alloc(32, 0xab);
     const fakeWs = { send: (_m: string) => {} } as any;
-
     registerPeer(fakeWs, sessionKey, peer1.nodeId, peer1.publicKey, '10.0.0.2', 7734);
     const found = getConnectedPeer(peer1.nodeId);
     expect(found).toBeDefined();
     expect(found?.peerNodeId).toBe(peer1.nodeId);
     expect(found?.sessionKey.toString('hex')).toBe(sessionKey.toString('hex'));
-
     unregisterPeer(peer1.nodeId);
     expect(getConnectedPeer(peer1.nodeId)).toBeUndefined();
   });
@@ -143,13 +123,10 @@ describe('full two-party handshake via handleMessage', () => {
     const closeCalls: string[] = [];
     const oldWs = { send: (_m: string) => {}, close: () => closeCalls.push('old') } as any;
     const newWs = { send: (_m: string) => {}, close: () => closeCalls.push('new') } as any;
-
     registerPeer(oldWs, sessionKey, peer1.nodeId, peer1.publicKey, '10.0.0.2', 7734);
     registerPeer(newWs, sessionKey, peer1.nodeId, peer1.publicKey, '10.0.0.2', 7734);
-
     expect(closeCalls).toEqual(['old']);
     expect(getConnectedPeer(peer1.nodeId)?.ws).toBe(newWs);
-
     unregisterPeer(peer1.nodeId);
   });
 
@@ -158,10 +135,8 @@ describe('full two-party handshake via handleMessage', () => {
     const sessionKey = Buffer.alloc(32, 0xcd);
     const closed: boolean[] = [];
     const fakeWs = { send: (_m: string) => {}, close: () => closed.push(true) } as any;
-
     registerPeer(fakeWs, sessionKey, peer1.nodeId, peer1.publicKey, '10.0.0.4', 7734);
     closeAndUnregisterPeer(peer1.nodeId);
-
     expect(closed.length).toBe(1);
     expect(getConnectedPeer(peer1.nodeId)).toBeUndefined();
   });
@@ -170,13 +145,10 @@ describe('full two-party handshake via handleMessage', () => {
     const peer1 = generateIdentity();
     const sessionKey = Buffer.alloc(32, 0xcd);
     const fakeWs = { send: (_m: string) => {} } as any;
-
     registerPeer(fakeWs, sessionKey, peer1.nodeId, peer1.publicKey, '10.0.0.3', 0);
     expect(getConnectedPeer(peer1.nodeId)?.port).toBe(0);
-
     updatePeerPort(peer1.nodeId, 7734);
     expect(getConnectedPeer(peer1.nodeId)?.port).toBe(7734);
-
     unregisterPeer(peer1.nodeId);
   });
 });
@@ -192,51 +164,55 @@ describe('handleInboundFriendRequest', () => {
   const msg = { type: 'friend-request' as const, name: 'Alice', port: 7734 };
 
   it('stores INCOMING_PENDING and sends no response when auto-accept is off', async () => {
-    await getOrCreateSettings(prisma);
+    await getOrCreateSettings(db);
     const responses: unknown[] = [];
-    await handleInboundFriendRequest(identity, prisma, msg, peer, (r) => responses.push(r));
+    await handleInboundFriendRequest(identity, db, msg, peer, (r) => responses.push(r));
     expect(responses.length).toBe(0);
-    const friends = await prisma.friend.findMany();
-    expect(friends.length).toBe(1);
-    expect(friends[0].status).toBe('INCOMING_PENDING');
+    const rows = db.select().from(friends).all();
+    expect(rows.length).toBe(1);
+    expect(rows[0].status).toBe('INCOMING_PENDING');
   });
 
   it('accepts and sends friend-response when autoAcceptFromAnyone is on', async () => {
-    await updateSettings(prisma, { autoAcceptFromAnyone: true });
+    await updateSettings(db, { autoAcceptFromAnyone: true });
     const responses: unknown[] = [];
-    await handleInboundFriendRequest(identity, prisma, msg, peer, (r) => responses.push(r));
+    await handleInboundFriendRequest(identity, db, msg, peer, (r) => responses.push(r));
     expect(responses).toHaveLength(1);
     expect((responses[0] as any).type).toBe('friend-response');
     expect((responses[0] as any).accepted).toBe(true);
-    const friends = await prisma.friend.findMany();
-    expect(friends[0].status).toBe('ACCEPTED');
+    const rows = db.select().from(friends).all();
+    expect(rows[0].status).toBe('ACCEPTED');
   });
 
   it('accepts when correct password provided', async () => {
-    await updateSettings(prisma, { invitePassword: 'sesame' });
+    await updateSettings(db, { invitePassword: 'sesame' });
     const msgWithPass = { ...msg, password: 'sesame' };
     const responses: unknown[] = [];
-    await handleInboundFriendRequest(identity, prisma, msgWithPass, peer, (r) => responses.push(r));
+    await handleInboundFriendRequest(identity, db, msgWithPass, peer, (r) => responses.push(r));
     expect((responses[0] as any).accepted).toBe(true);
   });
 
   it('sends no response and does not accept when the matched friend is BLOCKED', async () => {
-    await updateSettings(prisma, { autoAcceptFromAnyone: true });
-    await prisma.friend.create({
-      data: {
+    await updateSettings(db, { autoAcceptFromAnyone: true });
+    const now = new Date();
+    db.insert(friends)
+      .values({
+        id: randomUUID(),
         name: 'Blocked',
         nodeId: peer.nodeId,
         publicKey: peer.publicKey.toString('base64'),
         address: peer.address,
         port: peer.port,
         status: 'BLOCKED',
-      },
-    });
+        addedAt: now,
+        updatedAt: now,
+      })
+      .run();
     const responses: unknown[] = [];
-    await handleInboundFriendRequest(identity, prisma, msg, peer, (r) => responses.push(r));
+    await handleInboundFriendRequest(identity, db, msg, peer, (r) => responses.push(r));
     expect(responses.length).toBe(0);
-    const friends = await prisma.friend.findMany();
-    expect(friends[0].status).toBe('BLOCKED');
+    const rows = db.select().from(friends).all();
+    expect(rows[0].status).toBe('BLOCKED');
   });
 });
 
@@ -252,7 +228,6 @@ describe('notifyFriendAccepted / notifyFriendRejected', () => {
       address: '10.0.0.1',
       port: 7734,
     };
-
     notifyFriendAccepted(fakePeer, 'Bob');
     expect(sent.length).toBe(1);
     const wire = decodeMessage(sent[0]);
@@ -274,7 +249,6 @@ describe('notifyFriendAccepted / notifyFriendRejected', () => {
       address: '10.0.0.1',
       port: 7734,
     };
-
     notifyFriendRejected(fakePeer);
     expect(sent.length).toBe(1);
     const wire = decodeMessage(sent[0]);
@@ -290,22 +264,23 @@ describe('peer.ts dispatchMessage — inbound friend-response', () => {
     const sessionKey = Buffer.alloc(32, 0x50);
     const peerIdentity = generateIdentity();
     const localIdentity = generateIdentity();
-
-    await prisma.friend.create({
-      data: {
+    const now = new Date();
+    db.insert(friends)
+      .values({
+        id: randomUUID(),
         name: 'Old Name',
         nodeId: peerIdentity.nodeId,
         publicKey: peerIdentity.publicKey.toString('base64'),
         address: '10.0.0.20',
         port: 7734,
         status: 'OUTGOING_PENDING',
-      },
-    });
-
-    const ws = makeFakeWsAuthenticated(localIdentity, prisma, sessionKey, peerIdentity.nodeId);
+        addedAt: now,
+        updatedAt: now,
+      })
+      .run();
+    const ws = makeFakeWsAuthenticated(localIdentity, db, sessionKey, peerIdentity.nodeId);
     await dispatchMessage(ws as any, { type: 'friend-response', accepted: true, name: 'New Name' });
-
-    const friend = await prisma.friend.findFirst({ where: { nodeId: peerIdentity.nodeId } });
+    const friend = db.select().from(friends).where(eq(friends.nodeId, peerIdentity.nodeId)).get();
     expect(friend?.status).toBe('ACCEPTED');
     expect(friend?.name).toBe('New Name');
   });
@@ -314,22 +289,23 @@ describe('peer.ts dispatchMessage — inbound friend-response', () => {
     const sessionKey = Buffer.alloc(32, 0x51);
     const peerIdentity = generateIdentity();
     const localIdentity = generateIdentity();
-
-    await prisma.friend.create({
-      data: {
+    const now = new Date();
+    db.insert(friends)
+      .values({
+        id: randomUUID(),
         name: 'Keep Me',
         nodeId: peerIdentity.nodeId,
         publicKey: peerIdentity.publicKey.toString('base64'),
         address: '10.0.0.21',
         port: 7734,
         status: 'OUTGOING_PENDING',
-      },
-    });
-
-    const ws = makeFakeWsAuthenticated(localIdentity, prisma, sessionKey, peerIdentity.nodeId);
+        addedAt: now,
+        updatedAt: now,
+      })
+      .run();
+    const ws = makeFakeWsAuthenticated(localIdentity, db, sessionKey, peerIdentity.nodeId);
     await dispatchMessage(ws as any, { type: 'friend-response', accepted: true });
-
-    const friend = await prisma.friend.findFirst({ where: { nodeId: peerIdentity.nodeId } });
+    const friend = db.select().from(friends).where(eq(friends.nodeId, peerIdentity.nodeId)).get();
     expect(friend?.status).toBe('ACCEPTED');
     expect(friend?.name).toBe('Keep Me');
   });
@@ -338,18 +314,20 @@ describe('peer.ts dispatchMessage — inbound friend-response', () => {
     const sessionKey = Buffer.alloc(32, 0x52);
     const peerIdentity = generateIdentity();
     const localIdentity = generateIdentity();
-
-    await prisma.friend.create({
-      data: {
+    const now = new Date();
+    db.insert(friends)
+      .values({
+        id: randomUUID(),
         name: 'Rejected',
         nodeId: peerIdentity.nodeId,
         publicKey: peerIdentity.publicKey.toString('base64'),
         address: '10.0.0.22',
         port: 7734,
         status: 'OUTGOING_PENDING',
-      },
-    });
-
+        addedAt: now,
+        updatedAt: now,
+      })
+      .run();
     const fakeWs = { send: (_m: string) => {}, close: () => {} } as any;
     registerPeer(
       fakeWs,
@@ -359,12 +337,10 @@ describe('peer.ts dispatchMessage — inbound friend-response', () => {
       '10.0.0.22',
       7734,
     );
-
-    const ws = makeFakeWsAuthenticated(localIdentity, prisma, sessionKey, peerIdentity.nodeId);
+    const ws = makeFakeWsAuthenticated(localIdentity, db, sessionKey, peerIdentity.nodeId);
     await dispatchMessage(ws as any, { type: 'friend-response', accepted: false });
-
-    const friend = await prisma.friend.findFirst({ where: { nodeId: peerIdentity.nodeId } });
-    expect(friend).toBeNull();
+    const friend = db.select().from(friends).where(eq(friends.nodeId, peerIdentity.nodeId)).get();
+    expect(friend).toBeUndefined();
     expect(getConnectedPeer(peerIdentity.nodeId)).toBeUndefined();
   });
 
@@ -372,13 +348,9 @@ describe('peer.ts dispatchMessage — inbound friend-response', () => {
     const sessionKey = Buffer.alloc(32, 0x53);
     const peerIdentity = generateIdentity();
     const localIdentity = generateIdentity();
-
-    const ws = makeFakeWsAuthenticated(localIdentity, prisma, sessionKey, peerIdentity.nodeId);
-    // Should not throw
+    const ws = makeFakeWsAuthenticated(localIdentity, db, sessionKey, peerIdentity.nodeId);
     await dispatchMessage(ws as any, { type: 'friend-response', accepted: true, name: 'Ghost' });
-
-    const friends = await prisma.friend.findMany();
-    expect(friends.length).toBe(0);
+    expect(db.select().from(friends).all().length).toBe(0);
   });
 });
 
@@ -387,40 +359,41 @@ describe('peer.ts handleMessage — onAuthenticated ordering', () => {
     const sessionKey = Buffer.alloc(32, 0x60);
     const peerIdentity = generateIdentity();
     const localIdentity = generateIdentity();
-
-    await prisma.friend.create({
-      data: {
+    const now = new Date();
+    db.insert(friends)
+      .values({
+        id: randomUUID(),
         name: 'Ordering Test',
         nodeId: peerIdentity.nodeId,
         publicKey: peerIdentity.publicKey.toString('base64'),
         address: '10.0.0.30',
         port: 7734,
         status: 'OUTGOING_PENDING',
-      },
-    });
-
-    const ws = makeFakeWsAuthenticated(localIdentity, prisma, sessionKey, peerIdentity.nodeId);
+        addedAt: now,
+        updatedAt: now,
+      })
+      .run();
+    const ws = makeFakeWsAuthenticated(localIdentity, db, sessionKey, peerIdentity.nodeId);
     let dbStatusAtCallback: string | null | undefined;
-
+    const { encryptMessage } = await import('../handshake');
     await new Promise<void>((resolve) => {
       handleMessage(
         ws as any,
         encodeMessage(encryptMessage({ type: 'friend-response', accepted: true }, sessionKey)),
         async () => {
-          const friend = await prisma.friend.findFirst({ where: { nodeId: peerIdentity.nodeId } });
+          const friend = db
+            .select()
+            .from(friends)
+            .where(eq(friends.nodeId, peerIdentity.nodeId))
+            .get();
           dbStatusAtCallback = friend?.status;
           resolve();
         },
       );
     });
-
     expect(dbStatusAtCallback).toBe('ACCEPTED');
   });
 });
-
-// ---------------------------------------------------------------------------
-// queryVouch / resolveVouch
-// ---------------------------------------------------------------------------
 
 describe('queryVouch', () => {
   afterEach(() => {
@@ -428,8 +401,7 @@ describe('queryVouch', () => {
   });
 
   it('returns false immediately when peers list is empty', async () => {
-    const result = await queryVouch('candidate', []);
-    expect(result).toBe(false);
+    expect(await queryVouch('candidate', [])).toBe(false);
   });
 
   it('returns false after timeout when no peer responds', async () => {
@@ -489,7 +461,6 @@ describe('queryVouch', () => {
     await Bun.sleep(10);
     resolveVouch('voucher4a', 'candidate', true);
     expect(await queryPromise).toBe(true);
-    // voucher4b never responds — no hang
   });
 
   it('ignores vouch responses from peers that were not queried', async () => {
@@ -502,19 +473,16 @@ describe('queryVouch', () => {
       2_000,
     );
     await Bun.sleep(10);
-    resolveVouch('stranger-not-queried', 'candidate', true); // should be ignored
-    resolveVouch('voucher5', 'candidate', false); // the real peer responds false
+    resolveVouch('stranger-not-queried', 'candidate', true);
+    resolveVouch('voucher5', 'candidate', false);
     expect(await queryPromise).toBe(false);
   });
 
   it('ignores responses for a candidateNodeId that has no pending vouch', () => {
-    // should not throw
     resolveVouch('some-peer', 'no-pending-candidate', true);
   });
 
   it('ignores a second false response from the same peer (double-response attack)', async () => {
-    // A malicious queried peer could send vouched=false twice to drain remainingPeers
-    // to 0 and force an early false before other honest queried peers respond true.
     const peer1 = makeFakePeer('voucher6a');
     const peer2 = makeFakePeer('voucher6b');
     const sent: { peer: ConnectedPeer; msg: InnerMessage }[] = [];
@@ -526,8 +494,8 @@ describe('queryVouch', () => {
     );
     await Bun.sleep(10);
     resolveVouch('voucher6a', 'candidate', false);
-    resolveVouch('voucher6a', 'candidate', false); // duplicate — must not decrement again
-    resolveVouch('voucher6b', 'candidate', true); // honest peer responds — must still resolve true
+    resolveVouch('voucher6a', 'candidate', false);
+    resolveVouch('voucher6b', 'candidate', true);
     expect(await queryPromise).toBe(true);
   });
 
@@ -549,7 +517,6 @@ describe('queryVouch', () => {
 
   it('returns false immediately when MAX_PENDING_VOUCHES is reached', async () => {
     const { MAX_PENDING_VOUCHES: cap } = await import('../connections');
-    // Fill up to the cap — use a sendFn that does nothing and long timeouts
     for (let i = 0; i < cap; i++) {
       void queryVouch(`flood-candidate-${i}`, [makeFakePeer(`flood-peer-${i}`)], () => {}, 60_000);
     }
@@ -572,7 +539,6 @@ describe('queryVouch', () => {
       (p, m) => sent.push({ peer: p, msg: m }),
       2_000,
     );
-    // Second call for the same candidateNodeId must return false immediately
     const secondResult = await queryVouch(
       'collision-candidate',
       [peer2],
@@ -580,24 +546,22 @@ describe('queryVouch', () => {
       2_000,
     );
     expect(secondResult).toBe(false);
-    // First query is still pending — resolve it to clean up
     resolveVouch('collision-peer-1', 'collision-candidate', false);
     expect(await firstPromise).toBe(false);
-    expect(sent).toHaveLength(1); // only peer1 was queried; peer2 was never asked
+    expect(sent).toHaveLength(1);
   });
 });
 
 describe('handleInboundFriendRequest — friends-of-friends auto-accept', () => {
   const identity = generateIdentity();
 
-  afterEach(async () => {
+  afterEach(() => {
     resetVouchesForTesting();
-    await prisma.friend.deleteMany();
+    db.delete(friends).run();
   });
 
   it('auto-accepts when an accepted connected peer vouches the candidate', async () => {
-    await updateSettings(prisma, { autoAcceptFromFriendsOfFriends: true });
-
+    await updateSettings(db, { autoAcceptFromFriendsOfFriends: true });
     const voucherPeer = makeFakePeer('fof-voucher-1');
     registerPeer(
       voucherPeer.ws,
@@ -607,17 +571,20 @@ describe('handleInboundFriendRequest — friends-of-friends auto-accept', () => 
       '127.0.0.1',
       7734,
     );
-    await prisma.friend.create({
-      data: {
+    const now = new Date();
+    db.insert(friends)
+      .values({
+        id: randomUUID(),
         name: 'Voucher',
         nodeId: 'fof-voucher-1',
         publicKey: 'fakekey',
         address: '127.0.0.1',
         port: 7734,
         status: 'ACCEPTED',
-      },
-    });
-
+        addedAt: now,
+        updatedAt: now,
+      })
+      .run();
     const candidatePeer = {
       nodeId: 'fof-candidate-1',
       publicKey: Buffer.from('fakekey'),
@@ -625,32 +592,27 @@ describe('handleInboundFriendRequest — friends-of-friends auto-accept', () => 
       port: 7734,
     };
     const responses: unknown[] = [];
-
     const requestPromise = handleInboundFriendRequest(
       identity,
-      prisma,
+      db,
       { type: 'friend-request', name: 'Candidate', port: 7734 },
       candidatePeer,
       (r) => responses.push(r),
       2_000,
     );
-
     await Bun.sleep(20);
     resolveVouch('fof-voucher-1', 'fof-candidate-1', true);
     await requestPromise;
-
     expect(responses).toHaveLength(1);
     expect((responses[0] as any).type).toBe('friend-response');
     expect((responses[0] as any).accepted).toBe(true);
-    const friend = await prisma.friend.findFirst({ where: { nodeId: 'fof-candidate-1' } });
+    const friend = db.select().from(friends).where(eq(friends.nodeId, 'fof-candidate-1')).get();
     expect(friend?.status).toBe('ACCEPTED');
-
     unregisterPeer('fof-voucher-1');
   });
 
   it('leaves as INCOMING_PENDING when no peer vouches within timeout', async () => {
-    await updateSettings(prisma, { autoAcceptFromFriendsOfFriends: true });
-
+    await updateSettings(db, { autoAcceptFromFriendsOfFriends: true });
     const voucherPeer = makeFakePeer('fof-voucher-2');
     registerPeer(
       voucherPeer.ws,
@@ -660,17 +622,20 @@ describe('handleInboundFriendRequest — friends-of-friends auto-accept', () => 
       '127.0.0.1',
       7734,
     );
-    await prisma.friend.create({
-      data: {
+    const now = new Date();
+    db.insert(friends)
+      .values({
+        id: randomUUID(),
         name: 'Voucher2',
         nodeId: 'fof-voucher-2',
         publicKey: 'fakekey2',
         address: '127.0.0.1',
         port: 7734,
         status: 'ACCEPTED',
-      },
-    });
-
+        addedAt: now,
+        updatedAt: now,
+      })
+      .run();
     const candidatePeer = {
       nodeId: 'fof-candidate-2',
       publicKey: Buffer.from('fakekey'),
@@ -678,27 +643,22 @@ describe('handleInboundFriendRequest — friends-of-friends auto-accept', () => 
       port: 7734,
     };
     const responses: unknown[] = [];
-
     await handleInboundFriendRequest(
       identity,
-      prisma,
+      db,
       { type: 'friend-request', name: 'Candidate2', port: 7734 },
       candidatePeer,
       (r) => responses.push(r),
-      50, // very short timeout — no vouching occurs
+      50,
     );
-
     expect(responses).toHaveLength(0);
-    const friend = await prisma.friend.findFirst({ where: { nodeId: 'fof-candidate-2' } });
+    const friend = db.select().from(friends).where(eq(friends.nodeId, 'fof-candidate-2')).get();
     expect(friend?.status).toBe('INCOMING_PENDING');
-
     unregisterPeer('fof-voucher-2');
   });
 
   it('leaves as INCOMING_PENDING when no accepted peers are connected', async () => {
-    await updateSettings(prisma, { autoAcceptFromFriendsOfFriends: true });
-    // no peers registered
-
+    await updateSettings(db, { autoAcceptFromFriendsOfFriends: true });
     const candidatePeer = {
       nodeId: 'fof-candidate-3',
       publicKey: Buffer.from('fakekey'),
@@ -706,26 +666,20 @@ describe('handleInboundFriendRequest — friends-of-friends auto-accept', () => 
       port: 7734,
     };
     const responses: unknown[] = [];
-
     await handleInboundFriendRequest(
       identity,
-      prisma,
+      db,
       { type: 'friend-request', name: 'Candidate3', port: 7734 },
       candidatePeer,
       (r) => responses.push(r),
     );
-
     expect(responses).toHaveLength(0);
-    const friend = await prisma.friend.findFirst({ where: { nodeId: 'fof-candidate-3' } });
+    const friend = db.select().from(friends).where(eq(friends.nodeId, 'fof-candidate-3')).get();
     expect(friend?.status).toBe('INCOMING_PENDING');
   });
 
   it('skips vouch query when autoAcceptFromAnyone already triggers auto-accept', async () => {
-    await updateSettings(prisma, {
-      autoAcceptFromAnyone: true,
-      autoAcceptFromFriendsOfFriends: true,
-    });
-    // Register a peer — it should NOT receive a vouch request
+    await updateSettings(db, { autoAcceptFromAnyone: true, autoAcceptFromFriendsOfFriends: true });
     const voucherPeer = makeFakePeer('fof-voucher-4');
     const sent: InnerMessage[] = [];
     const sentWs = {
@@ -742,21 +696,24 @@ describe('handleInboundFriendRequest — friends-of-friends auto-accept', () => 
       '127.0.0.1',
       7734,
     );
-    await prisma.friend.create({
-      data: {
+    const now = new Date();
+    db.insert(friends)
+      .values({
+        id: randomUUID(),
         name: 'Voucher4',
         nodeId: 'fof-voucher-4',
         publicKey: 'fakekey4',
         address: '127.0.0.1',
         port: 7734,
         status: 'ACCEPTED',
-      },
-    });
-
+        addedAt: now,
+        updatedAt: now,
+      })
+      .run();
     const responses: unknown[] = [];
     await handleInboundFriendRequest(
       identity,
-      prisma,
+      db,
       { type: 'friend-request', name: 'Candidate4', port: 7734 },
       {
         nodeId: 'fof-candidate-4',
@@ -766,19 +723,14 @@ describe('handleInboundFriendRequest — friends-of-friends auto-accept', () => 
       },
       (r) => responses.push(r),
     );
-
     expect(responses).toHaveLength(1);
     expect((responses[0] as any).accepted).toBe(true);
-    // No vouch-request should have been sent since autoAcceptFromAnyone triggered first
     expect(sent).toHaveLength(0);
-
     unregisterPeer('fof-voucher-4');
   });
 
   it('excludes the requesting peer itself from vouch candidates', async () => {
-    await updateSettings(prisma, { autoAcceptFromFriendsOfFriends: true });
-
-    // Register the CANDIDATE as a connected peer (edge case: they are also a connected peer)
+    await updateSettings(db, { autoAcceptFromFriendsOfFriends: true });
     const candidateNodeId = 'fof-candidate-5';
     const candidatePeerObj = makeFakePeer(candidateNodeId);
     registerPeer(
@@ -789,23 +741,24 @@ describe('handleInboundFriendRequest — friends-of-friends auto-accept', () => 
       '10.0.0.5',
       7734,
     );
-    // If candidate were in the DB as ACCEPTED (some edge case), we'd still not ask them
-    await prisma.friend.create({
-      data: {
+    const now = new Date();
+    db.insert(friends)
+      .values({
+        id: randomUUID(),
         name: 'Self-Voucher',
         nodeId: candidateNodeId,
         publicKey: 'fakekey5',
         address: '10.0.0.5',
         port: 7734,
         status: 'ACCEPTED',
-      },
-    });
-
+        addedAt: now,
+        updatedAt: now,
+      })
+      .run();
     const responses: unknown[] = [];
-    // With only the candidate as a connected accepted peer, no vouch can happen → INCOMING_PENDING
     await handleInboundFriendRequest(
       identity,
-      prisma,
+      db,
       { type: 'friend-request', name: 'Candidate5', port: 7734 },
       {
         nodeId: candidateNodeId,
@@ -816,16 +769,11 @@ describe('handleInboundFriendRequest — friends-of-friends auto-accept', () => 
       (r) => responses.push(r),
       50,
     );
-
     expect(responses).toHaveLength(0);
     unregisterPeer(candidateNodeId);
-    await prisma.friend.delete({ where: { nodeId: candidateNodeId } });
+    db.delete(friends).where(eq(friends.nodeId, candidateNodeId)).run();
   });
 });
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
 
 function makeFakePeer(nodeId: string): ConnectedPeer {
   return {
@@ -840,10 +788,7 @@ function makeFakePeer(nodeId: string): ConnectedPeer {
 
 function makeFakeWs(identity: ReturnType<typeof generateIdentity>, sent: string[]) {
   return {
-    data: {
-      identity,
-      state: { phase: 'pending' as const },
-    },
+    data: { identity, state: { phase: 'pending' } as PeerData['state'] },
     send(msg: string) {
       sent.push(msg);
     },
@@ -853,14 +798,14 @@ function makeFakeWs(identity: ReturnType<typeof generateIdentity>, sent: string[
 
 function makeFakeWsAuthenticated(
   identity: ReturnType<typeof generateIdentity>,
-  db: PrismaClient,
+  db: Db,
   sessionKey: Buffer,
   peerNodeId: string,
 ) {
   return {
     data: {
       identity,
-      prisma: db,
+      db,
       localPort: 7734,
       state: {
         phase: 'authenticated' as const,
@@ -875,31 +820,22 @@ function makeFakeWsAuthenticated(
   };
 }
 
-// ---------------------------------------------------------------------------
-// connectToPeer — handshake timeout
-// ---------------------------------------------------------------------------
-
 describe('connectToPeer — handshake timeout', () => {
   it('rejects when the peer accepts the socket but never completes the handshake', async () => {
     const identity = generateIdentity();
-    // A server that upgrades the WebSocket but swallows every message — the
-    // hello is never answered, so without a timeout the promise would hang forever.
     const server = Bun.serve({
       port: 0,
       fetch(req, srv) {
         if (srv.upgrade(req)) return undefined;
         return new Response('Not Found', { status: 404 });
       },
-      websocket: {
-        message() {},
-      },
+      websocket: { message() {} },
     });
     try {
       const start = Date.now();
       await expect(
-        connectToPeer(identity, prisma, '127.0.0.1', server.port, 7734, undefined, undefined, 300),
+        connectToPeer(identity, db, '127.0.0.1', server.port!, 7734, undefined, undefined, 300),
       ).rejects.toThrow(/Handshake timeout/);
-      // Sanity: rejected because of the timeout, not some later mechanism
       expect(Date.now() - start).toBeLessThan(2_000);
     } finally {
       server.stop(true);
@@ -909,10 +845,6 @@ describe('connectToPeer — handshake timeout', () => {
   it('never registers the peer when the hello-ack arrives after the timeout', async () => {
     const initiator = generateIdentity();
     const responder = generateIdentity();
-    // A server that answers the hello with a VALID hello-ack — but only after
-    // the client's timeout has already fired. Whether the late ack is stopped
-    // by the socket close or the timedOut guard, the invariant is the same:
-    // a timed-out dial must never produce a registered peer.
     const server = Bun.serve({
       port: 0,
       fetch(req, srv) {
@@ -927,9 +859,7 @@ describe('connectToPeer — handshake timeout', () => {
             setTimeout(() => {
               try {
                 ws.send(encodeMessage(ack));
-              } catch {
-                // socket already closed by the client's timeout — expected
-              }
+              } catch {}
             }, 500);
           }
         },
@@ -937,9 +867,8 @@ describe('connectToPeer — handshake timeout', () => {
     });
     try {
       await expect(
-        connectToPeer(initiator, prisma, '127.0.0.1', server.port, 7734, undefined, undefined, 200),
+        connectToPeer(initiator, db, '127.0.0.1', server.port!, 7734, undefined, undefined, 200),
       ).rejects.toThrow(/Handshake timeout/);
-      // Wait past the delayed ack, then confirm no peer was registered
       await new Promise<void>((r) => setTimeout(r, 500));
       expect(getConnectedPeer(responder.nodeId)).toBeUndefined();
     } finally {
@@ -950,10 +879,6 @@ describe('connectToPeer — handshake timeout', () => {
   it('closes socket and discards subsequent messages when onmessage throws before handshake completes', async () => {
     const initiator = generateIdentity();
     const responder = generateIdentity();
-    // Server sends a garbled frame immediately, then a valid hello-ack 200 ms later.
-    // The bad frame causes JSON.parse to throw inside onmessage's catch block; the
-    // fix must close the socket and set the drop-messages guard so the delayed
-    // hello-ack never registers a peer.
     const server = Bun.serve({
       port: 0,
       fetch(req, srv) {
@@ -964,14 +889,12 @@ describe('connectToPeer — handshake timeout', () => {
         message(ws, raw) {
           const wire = decodeMessage(typeof raw === 'string' ? raw : Buffer.from(raw));
           if (wire.type === 'hello') {
-            ws.send('not-valid-json'); // triggers SyntaxError in client onmessage
+            ws.send('not-valid-json');
             const { ack } = createHelloAck_forTest(responder, wire);
             setTimeout(() => {
               try {
                 ws.send(encodeMessage(ack));
-              } catch {
-                // socket already closed by client — expected
-              }
+              } catch {}
             }, 200);
           }
         },
@@ -980,20 +903,9 @@ describe('connectToPeer — handshake timeout', () => {
     try {
       const start = Date.now();
       await expect(
-        connectToPeer(
-          initiator,
-          prisma,
-          '127.0.0.1',
-          server.port,
-          7734,
-          undefined,
-          undefined,
-          5_000,
-        ),
+        connectToPeer(initiator, db, '127.0.0.1', server.port!, 7734, undefined, undefined, 5_000),
       ).rejects.toThrow();
-      // Rejected by the bad frame, not after the 5 s timeout
       expect(Date.now() - start).toBeLessThan(2_000);
-      // Wait past the delayed hello-ack — no peer must be registered
       await new Promise<void>((r) => setTimeout(r, 300));
       expect(getConnectedPeer(responder.nodeId)).toBeUndefined();
     } finally {
@@ -1003,11 +915,8 @@ describe('connectToPeer — handshake timeout', () => {
 
   it('wraps IPv6 addresses in brackets so the WebSocket URL is valid', async () => {
     const identity = generateIdentity();
-    // A real Bun WebSocket server on the IPv6 loopback interface. Without bracket
-    // wrapping, new WebSocket('ws://::1:<port>') throws a URL syntax error before
-    // any network I/O; with it, the connection proceeds and we get the usual
-    // handshake-timeout rejection instead.
-    let server: ReturnType<typeof Bun.serve>;
+
+    let server: any;
     try {
       server = Bun.serve({
         hostname: '::1',
@@ -1019,12 +928,11 @@ describe('connectToPeer — handshake timeout', () => {
         websocket: { message() {} },
       });
     } catch {
-      // IPv6 loopback not available in this environment — skip
       return;
     }
     try {
       await expect(
-        connectToPeer(identity, prisma, '::1', server.port, 7734, undefined, undefined, 300),
+        connectToPeer(identity, db, '::1', server.port, 7734, undefined, undefined, 300),
       ).rejects.toThrow(/Handshake timeout/);
     } finally {
       server.stop(true);
@@ -1033,7 +941,8 @@ describe('connectToPeer — handshake timeout', () => {
 
   it('does not double-bracket an already-bracketed IPv6 address', async () => {
     const identity = generateIdentity();
-    let server: ReturnType<typeof Bun.serve>;
+
+    let server: any;
     try {
       server = Bun.serve({
         hostname: '::1',
@@ -1045,12 +954,11 @@ describe('connectToPeer — handshake timeout', () => {
         websocket: { message() {} },
       });
     } catch {
-      return; // IPv6 not available
+      return;
     }
     try {
-      // '[::1]' already contains brackets — must not produce 'ws://[[::1]]:port'
       await expect(
-        connectToPeer(identity, prisma, '[::1]', server.port, 7734, undefined, undefined, 300),
+        connectToPeer(identity, db, '[::1]', server.port, 7734, undefined, undefined, 300),
       ).rejects.toThrow(/Handshake timeout/);
     } finally {
       server.stop(true);
@@ -1059,9 +967,6 @@ describe('connectToPeer — handshake timeout', () => {
 
   it('rejects via onerror (not the timeout) when the server refuses the WebSocket upgrade', async () => {
     const identity = generateIdentity();
-    // A server that returns a plain HTTP response — the WebSocket client fires
-    // onerror when it receives a non-101 status, which must clear the handshake
-    // timer and reject the promise without waiting for the full timeout.
     const server = Bun.serve({
       port: 0,
       fetch() {
@@ -1071,18 +976,8 @@ describe('connectToPeer — handshake timeout', () => {
     });
     try {
       const start = Date.now();
-      // Use a 5 s timeout; if the fix is broken the test would hang for 5 s
       await expect(
-        connectToPeer(
-          identity,
-          prisma,
-          '127.0.0.1',
-          server.port,
-          7734,
-          undefined,
-          undefined,
-          5_000,
-        ),
+        connectToPeer(identity, db, '127.0.0.1', server.port!, 7734, undefined, undefined, 5_000),
       ).rejects.toThrow();
       expect(Date.now() - start).toBeLessThan(2_000);
     } finally {

@@ -3,19 +3,29 @@ import { randomUUID } from 'node:crypto';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'bun:test';
 import { homedir, tmpdir } from 'node:os';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
-import type { PrismaClient } from '@prisma/client';
-import { execSync } from 'child_process';
+
 import { join } from 'node:path';
 import { unlinkSync } from 'fs';
 
+import { type Db, applyMigrations, createDb } from '../db';
+import type { DownloadState, FriendStatus } from '../schema';
+import {
+  conversations,
+  downloads,
+  friends,
+  messages,
+  postDownloadScripts,
+  settings,
+  sharedFiles,
+} from '../schema';
 import { registerPeer, unregisterPeer } from '../connections';
 import { createManagementFetch } from '../management';
-import { createPrismaClient } from '../db';
+import { eq } from 'drizzle-orm';
 import { generateIdentity } from '../identity';
 import { resetPendingForTesting } from '../transfer-protocol';
 
 const TEST_DB_URL = 'file:./data/test-management.db';
-let prisma: PrismaClient;
+let db: Db;
 let tmpDir: string;
 
 const identity = generateIdentity();
@@ -24,7 +34,7 @@ const neverConnect = async (): Promise<never> => {
 };
 
 function makeHandler() {
-  return createManagementFetch({ identity, prisma, connectPeer: neverConnect });
+  return createManagementFetch({ identity, db, connectPeer: neverConnect });
 }
 
 function req(path: string, options?: RequestInit) {
@@ -40,13 +50,14 @@ function jsonReq(path: string, method: string, body: unknown) {
 }
 
 beforeAll(async () => {
-  execSync(`bunx prisma db push --url "${TEST_DB_URL}"`, { stdio: 'pipe' });
-  prisma = createPrismaClient(TEST_DB_URL);
+  db = createDb(TEST_DB_URL);
+  applyMigrations(db);
+
   tmpDir = await mkdtemp(join(tmpdir(), 'filenet-mgmt-test-'));
 });
 
 afterAll(async () => {
-  await prisma.$disconnect();
+  db.$client.close();
   await rm(tmpDir, { recursive: true, force: true });
   try {
     unlinkSync('./data/test-management.db');
@@ -54,10 +65,10 @@ afterAll(async () => {
 });
 
 beforeEach(async () => {
-  await prisma.sharedFile.deleteMany();
-  await prisma.friend.deleteMany();
-  await prisma.settings.deleteMany();
-  await prisma.postDownloadScript.deleteMany();
+  db.delete(sharedFiles).run();
+  db.delete(friends).run();
+  db.delete(settings).run();
+  db.delete(postDownloadScripts).run();
   resetPendingForTesting();
 });
 
@@ -88,9 +99,19 @@ describe('GET /api/friends', () => {
   });
 
   it('returns list of friends', async () => {
-    await prisma.friend.create({
-      data: { name: 'Alice', address: '10.0.0.1', port: 7734, status: 'INCOMING_PENDING' },
-    });
+    db
+      .insert(friends)
+      .values({
+        id: randomUUID(),
+        addedAt: new Date(),
+        updatedAt: new Date(),
+        name: 'Alice',
+        address: '10.0.0.1',
+        port: 7734,
+        status: 'INCOMING_PENDING',
+      })
+      .returning()
+      .get()!;
     const res = await makeHandler()(req('/api/friends'));
     expect(res.status).toBe(200);
     const body = await res.json();
@@ -99,9 +120,19 @@ describe('GET /api/friends', () => {
   });
 
   it('includes online boolean on each friend', async () => {
-    await prisma.friend.create({
-      data: { name: 'Bob', address: '10.0.0.2', port: 7734, status: 'ACCEPTED' },
-    });
+    db
+      .insert(friends)
+      .values({
+        id: randomUUID(),
+        addedAt: new Date(),
+        updatedAt: new Date(),
+        name: 'Bob',
+        address: '10.0.0.2',
+        port: 7734,
+        status: 'ACCEPTED',
+      })
+      .returning()
+      .get()!;
     const res = await makeHandler()(req('/api/friends'));
     const body = await res.json();
     expect(typeof body[0].online).toBe('boolean');
@@ -109,15 +140,20 @@ describe('GET /api/friends', () => {
   });
 
   it('does not expose remotePassword in the response', async () => {
-    await prisma.friend.create({
-      data: {
+    db
+      .insert(friends)
+      .values({
+        id: randomUUID(),
+        addedAt: new Date(),
+        updatedAt: new Date(),
         name: 'Zara',
         address: '10.0.0.99',
         port: 7734,
         status: 'OUTGOING_PENDING',
         remotePassword: 'supersecret',
-      },
-    });
+      })
+      .returning()
+      .get()!;
     const res = await makeHandler()(req('/api/friends'));
     const body = await res.json();
     const zara = body.find((f: { name: string }) => f.name === 'Zara');
@@ -126,15 +162,20 @@ describe('GET /api/friends', () => {
   });
 
   it('includes zero download stats for a friend with no downloads', async () => {
-    await prisma.friend.create({
-      data: {
+    db
+      .insert(friends)
+      .values({
+        id: randomUUID(),
+        addedAt: new Date(),
+        updatedAt: new Date(),
         name: 'Carol',
         nodeId: 'node-carol',
         address: '10.0.0.3',
         port: 7734,
         status: 'ACCEPTED',
-      },
-    });
+      })
+      .returning()
+      .get()!;
     const res = await makeHandler()(req('/api/friends'));
     const body = await res.json();
     expect(body[0].downloads.count).toBe(0);
@@ -144,8 +185,12 @@ describe('GET /api/friends', () => {
   });
 
   it('maps downloadCount/uploadCount and byte totals to the response shape', async () => {
-    await prisma.friend.create({
-      data: {
+    db
+      .insert(friends)
+      .values({
+        id: randomUUID(),
+        addedAt: new Date(),
+        updatedAt: new Date(),
         name: 'Dave',
         nodeId: 'node-dave',
         address: '10.0.0.4',
@@ -155,8 +200,9 @@ describe('GET /api/friends', () => {
         downloadTotalBytes: 3000n,
         uploadCount: 5,
         uploadTotalBytes: 8000n,
-      },
-    });
+      })
+      .returning()
+      .get()!;
     const res = await makeHandler()(req('/api/friends'));
     const body = await res.json();
     expect(body[0].downloads.count).toBe(2);
@@ -166,24 +212,26 @@ describe('GET /api/friends', () => {
   });
 
   it('pending and blocked friends always show zero download and upload stats', async () => {
-    await prisma.friend.createMany({
-      data: [
-        {
-          name: 'Incoming Frank',
-          nodeId: 'node-frank',
-          address: '10.0.0.6',
-          port: 7734,
-          status: 'INCOMING_PENDING',
-        },
-        {
-          name: 'Blocked Grace',
-          nodeId: 'node-grace',
-          address: '10.0.0.7',
-          port: 7734,
-          status: 'BLOCKED',
-        },
-      ],
-    });
+    db.insert(friends)
+      .values(
+        [
+          {
+            name: 'Incoming Frank',
+            nodeId: 'node-frank',
+            address: '10.0.0.6',
+            port: 7734,
+            status: 'INCOMING_PENDING' as FriendStatus,
+          },
+          {
+            name: 'Blocked Grace',
+            nodeId: 'node-grace',
+            address: '10.0.0.7',
+            port: 7734,
+            status: 'BLOCKED' as FriendStatus,
+          },
+        ].map((d) => ({ id: randomUUID(), addedAt: new Date(), updatedAt: new Date(), ...d })),
+      )
+      .run();
     const res = await makeHandler()(req('/api/friends'));
     const body = await res.json();
     const frank = body.find((f: { name: string }) => f.name === 'Incoming Frank');
@@ -195,8 +243,12 @@ describe('GET /api/friends', () => {
   });
 
   it('zeroes out download and upload stats when a previously-ACCEPTED friend is later blocked', async () => {
-    const f = await prisma.friend.create({
-      data: {
+    db
+      .insert(friends)
+      .values({
+        id: randomUUID(),
+        addedAt: new Date(),
+        updatedAt: new Date(),
         name: 'Eve',
         nodeId: 'node-eve',
         address: '10.0.0.8',
@@ -206,11 +258,12 @@ describe('GET /api/friends', () => {
         downloadTotalBytes: 9000n,
         uploadCount: 3,
         uploadTotalBytes: 4000n,
-      },
-    });
+      })
+      .returning()
+      .get()!;
     const res = await makeHandler()(req('/api/friends'));
     const body = await res.json();
-    const eve = body.find((fr: { name: string }) => fr.name === f.name);
+    const eve = body.find((fr: { name: string }) => fr.name === 'Eve');
     expect(eve.downloads.count).toBe(0);
     expect(eve.downloads.totalSize).toBe('0');
     expect(eve.uploads.count).toBe(0);
@@ -227,7 +280,7 @@ describe('POST /api/friends', () => {
     const syncThrow = (): Promise<never> => {
       throw new Error('sync throw'); // no Promise returned — throws before returning
     };
-    const handler = createManagementFetch({ identity, prisma, connectPeer: syncThrow });
+    const handler = createManagementFetch({ identity, db, connectPeer: syncThrow });
     const res = await handler(
       jsonReq('/api/friends', 'POST', { name: 'SyncFail', address: '10.0.0.99', port: 7734 }),
     );
@@ -329,9 +382,19 @@ describe('POST /api/friends', () => {
 
 describe('PUT /api/friends/:id — accept', () => {
   it('accepts an INCOMING_PENDING friend and returns 200', async () => {
-    const f = await prisma.friend.create({
-      data: { name: 'Grace', address: '10.0.0.10', port: 7734, status: 'INCOMING_PENDING' },
-    });
+    const f = db
+      .insert(friends)
+      .values({
+        id: randomUUID(),
+        addedAt: new Date(),
+        updatedAt: new Date(),
+        name: 'Grace',
+        address: '10.0.0.10',
+        port: 7734,
+        status: 'INCOMING_PENDING',
+      })
+      .returning()
+      .get()!;
     const res = await makeHandler()(jsonReq(`/api/friends/${f.id}`, 'PUT', { action: 'accept' }));
     expect(res.status).toBe(200);
     const body = await res.json();
@@ -339,15 +402,20 @@ describe('PUT /api/friends/:id — accept', () => {
   });
 
   it('does not expose remotePassword in the accept response', async () => {
-    const f = await prisma.friend.create({
-      data: {
+    const f = db
+      .insert(friends)
+      .values({
+        id: randomUUID(),
+        addedAt: new Date(),
+        updatedAt: new Date(),
         name: 'NoLeak',
         address: '10.0.0.17',
         port: 7734,
         status: 'INCOMING_PENDING',
         remotePassword: 'should-not-appear',
-      },
-    });
+      })
+      .returning()
+      .get()!;
     const res = await makeHandler()(jsonReq(`/api/friends/${f.id}`, 'PUT', { action: 'accept' }));
     expect(res.status).toBe(200);
     const body = await res.json();
@@ -355,9 +423,19 @@ describe('PUT /api/friends/:id — accept', () => {
   });
 
   it('response includes zero download and upload stats for a freshly created friend', async () => {
-    const f = await prisma.friend.create({
-      data: { name: 'Grace2', address: '10.0.0.16', port: 7734, status: 'INCOMING_PENDING' },
-    });
+    const f = db
+      .insert(friends)
+      .values({
+        id: randomUUID(),
+        addedAt: new Date(),
+        updatedAt: new Date(),
+        name: 'Grace2',
+        address: '10.0.0.16',
+        port: 7734,
+        status: 'INCOMING_PENDING',
+      })
+      .returning()
+      .get()!;
     const res = await makeHandler()(jsonReq(`/api/friends/${f.id}`, 'PUT', { action: 'accept' }));
     const body = await res.json();
     expect(body.downloads.count).toBe(0);
@@ -367,8 +445,12 @@ describe('PUT /api/friends/:id — accept', () => {
   });
 
   it('response reflects actual DB download and upload counts from the accepted record', async () => {
-    const f = await prisma.friend.create({
-      data: {
+    const f = db
+      .insert(friends)
+      .values({
+        id: randomUUID(),
+        addedAt: new Date(),
+        updatedAt: new Date(),
         name: 'Stats',
         address: '10.0.0.19',
         port: 7734,
@@ -377,8 +459,9 @@ describe('PUT /api/friends/:id — accept', () => {
         downloadTotalBytes: 5000n,
         uploadCount: 7,
         uploadTotalBytes: 12000n,
-      },
-    });
+      })
+      .returning()
+      .get()!;
     const res = await makeHandler()(jsonReq(`/api/friends/${f.id}`, 'PUT', { action: 'accept' }));
     const body = await res.json();
     expect(body.downloads.count).toBe(3);
@@ -388,9 +471,19 @@ describe('PUT /api/friends/:id — accept', () => {
   });
 
   it('response includes online boolean to match GET /api/friends shape', async () => {
-    const f = await prisma.friend.create({
-      data: { name: 'Grace3', address: '10.0.0.17', port: 7734, status: 'INCOMING_PENDING' },
-    });
+    const f = db
+      .insert(friends)
+      .values({
+        id: randomUUID(),
+        addedAt: new Date(),
+        updatedAt: new Date(),
+        name: 'Grace3',
+        address: '10.0.0.17',
+        port: 7734,
+        status: 'INCOMING_PENDING',
+      })
+      .returning()
+      .get()!;
     const res = await makeHandler()(jsonReq(`/api/friends/${f.id}`, 'PUT', { action: 'accept' }));
     const body = await res.json();
     expect(body.online).toBe(false);
@@ -398,15 +491,20 @@ describe('PUT /api/friends/:id — accept', () => {
 
   it('response reflects actual connection state: online true when peer is connected', async () => {
     const nodeId = 'node-connected-test';
-    const f = await prisma.friend.create({
-      data: {
+    const f = db
+      .insert(friends)
+      .values({
+        id: randomUUID(),
+        addedAt: new Date(),
+        updatedAt: new Date(),
         name: 'Connected',
         nodeId,
         address: '10.0.0.18',
         port: 7734,
         status: 'INCOMING_PENDING',
-      },
-    });
+      })
+      .returning()
+      .get()!;
     const fakePeer = registerPeer(
       { send: () => {}, close: () => {} },
       Buffer.alloc(32),
@@ -426,9 +524,19 @@ describe('PUT /api/friends/:id — accept', () => {
   });
 
   it('returns 409 when accepting a non-INCOMING_PENDING friend', async () => {
-    const f = await prisma.friend.create({
-      data: { name: 'Hank', address: '10.0.0.11', port: 7734, status: 'OUTGOING_PENDING' },
-    });
+    const f = db
+      .insert(friends)
+      .values({
+        id: randomUUID(),
+        addedAt: new Date(),
+        updatedAt: new Date(),
+        name: 'Hank',
+        address: '10.0.0.11',
+        port: 7734,
+        status: 'OUTGOING_PENDING',
+      })
+      .returning()
+      .get()!;
     const res = await makeHandler()(jsonReq(`/api/friends/${f.id}`, 'PUT', { action: 'accept' }));
     expect(res.status).toBe(409);
   });
@@ -443,19 +551,39 @@ describe('PUT /api/friends/:id — accept', () => {
 
 describe('PUT /api/friends/:id — reject', () => {
   it('rejects an INCOMING_PENDING friend and returns 204', async () => {
-    const f = await prisma.friend.create({
-      data: { name: 'Iris', address: '10.0.0.12', port: 7734, status: 'INCOMING_PENDING' },
-    });
+    const f = db
+      .insert(friends)
+      .values({
+        id: randomUUID(),
+        addedAt: new Date(),
+        updatedAt: new Date(),
+        name: 'Iris',
+        address: '10.0.0.12',
+        port: 7734,
+        status: 'INCOMING_PENDING',
+      })
+      .returning()
+      .get()!;
     const res = await makeHandler()(jsonReq(`/api/friends/${f.id}`, 'PUT', { action: 'reject' }));
     expect(res.status).toBe(204);
-    const found = await prisma.friend.findUnique({ where: { id: f.id } });
+    const found = db.select().from(friends).where(eq(friends.id, f.id)).get() ?? null;
     expect(found).toBeNull();
   });
 
   it('returns 409 when rejecting an ACCEPTED friend', async () => {
-    const f = await prisma.friend.create({
-      data: { name: 'Jack', address: '10.0.0.13', port: 7734, status: 'ACCEPTED' },
-    });
+    const f = db
+      .insert(friends)
+      .values({
+        id: randomUUID(),
+        addedAt: new Date(),
+        updatedAt: new Date(),
+        name: 'Jack',
+        address: '10.0.0.13',
+        port: 7734,
+        status: 'ACCEPTED',
+      })
+      .returning()
+      .get()!;
     const res = await makeHandler()(jsonReq(`/api/friends/${f.id}`, 'PUT', { action: 'reject' }));
     expect(res.status).toBe(409);
   });
@@ -470,17 +598,37 @@ describe('PUT /api/friends/:id — reject', () => {
 
 describe('PUT /api/friends/:id — validation', () => {
   it('returns 400 for invalid action', async () => {
-    const f = await prisma.friend.create({
-      data: { name: 'Kim', address: '10.0.0.14', port: 7734, status: 'INCOMING_PENDING' },
-    });
+    const f = db
+      .insert(friends)
+      .values({
+        id: randomUUID(),
+        addedAt: new Date(),
+        updatedAt: new Date(),
+        name: 'Kim',
+        address: '10.0.0.14',
+        port: 7734,
+        status: 'INCOMING_PENDING',
+      })
+      .returning()
+      .get()!;
     const res = await makeHandler()(jsonReq(`/api/friends/${f.id}`, 'PUT', { action: 'delete' }));
     expect(res.status).toBe(400);
   });
 
   it('returns 400 for missing action', async () => {
-    const f = await prisma.friend.create({
-      data: { name: 'Lee', address: '10.0.0.15', port: 7734, status: 'INCOMING_PENDING' },
-    });
+    const f = db
+      .insert(friends)
+      .values({
+        id: randomUUID(),
+        addedAt: new Date(),
+        updatedAt: new Date(),
+        name: 'Lee',
+        address: '10.0.0.15',
+        port: 7734,
+        status: 'INCOMING_PENDING',
+      })
+      .returning()
+      .get()!;
     const res = await makeHandler()(jsonReq(`/api/friends/${f.id}`, 'PUT', {}));
     expect(res.status).toBe(400);
   });
@@ -497,12 +645,22 @@ describe('PUT /api/friends/:id — validation', () => {
 
 describe('DELETE /api/friends/:id', () => {
   it('deletes a friend and returns 204', async () => {
-    const f = await prisma.friend.create({
-      data: { name: 'Mike', address: '10.0.0.20', port: 7734, status: 'ACCEPTED' },
-    });
+    const f = db
+      .insert(friends)
+      .values({
+        id: randomUUID(),
+        addedAt: new Date(),
+        updatedAt: new Date(),
+        name: 'Mike',
+        address: '10.0.0.20',
+        port: 7734,
+        status: 'ACCEPTED',
+      })
+      .returning()
+      .get()!;
     const res = await makeHandler()(req(`/api/friends/${f.id}`, { method: 'DELETE' }));
     expect(res.status).toBe(204);
-    const found = await prisma.friend.findUnique({ where: { id: f.id } });
+    const found = db.select().from(friends).where(eq(friends.id, f.id)).get() ?? null;
     expect(found).toBeNull();
   });
 
@@ -518,9 +676,7 @@ describe('DELETE /api/friends/:id', () => {
 
 describe('GET /api/settings', () => {
   it('returns safe settings without invitePassword', async () => {
-    await prisma.settings.create({
-      data: { id: 'singleton', name: 'MyNode', invitePassword: 'secret' },
-    });
+    db.insert(settings).values({ id: 'singleton', name: 'MyNode', invitePassword: 'secret' }).run();
     const res = await makeHandler()(req('/api/settings'));
     expect(res.status).toBe(200);
     const body = await res.json();
@@ -733,9 +889,9 @@ describe('POST /api/rescan', () => {
 
 describe('GET /api/stats', () => {
   beforeEach(async () => {
-    await prisma.download.deleteMany();
-    await prisma.sharedFile.deleteMany();
-    await prisma.friend.deleteMany();
+    db.delete(downloads).run();
+    db.delete(sharedFiles).run();
+    db.delete(friends).run();
   });
 
   it('returns zero counts when nothing is indexed', async () => {
@@ -751,12 +907,20 @@ describe('GET /api/stats', () => {
   });
 
   it('counts indexed files and sums their sizes', async () => {
-    await prisma.sharedFile.createMany({
-      data: [
-        { path: '/a.mp3', filename: 'a.mp3', size: 1000n, sha256: 'aa'.repeat(32) },
-        { path: '/b.mp3', filename: 'b.mp3', size: 2500n, sha256: 'bb'.repeat(32) },
-      ],
-    });
+    db.insert(sharedFiles)
+      .values(
+        [
+          { path: '/a.mp3', filename: 'a.mp3', size: 1000n, sha256: 'aa'.repeat(32) },
+          { path: '/b.mp3', filename: 'b.mp3', size: 2500n, sha256: 'bb'.repeat(32) },
+        ].map((d) => ({
+          id: randomUUID(),
+          lastSeenAt: new Date(),
+          indexedAt: new Date(),
+          updatedAt: new Date(),
+          ...d,
+        })),
+      )
+      .run();
     const res = await makeHandler()(req('/api/stats'));
     expect(res.status).toBe(200);
     const body = await res.json();
@@ -765,14 +929,26 @@ describe('GET /api/stats', () => {
   });
 
   it('counts only ACCEPTED friends', async () => {
-    await prisma.friend.createMany({
-      data: [
-        { name: 'Alice', address: '1.1.1.1', port: 7734, status: 'ACCEPTED' },
-        { name: 'Bob', address: '2.2.2.2', port: 7734, status: 'ACCEPTED' },
-        { name: 'Carol', address: '3.3.3.3', port: 7734, status: 'OUTGOING_PENDING' },
-        { name: 'Dave', address: '4.4.4.4', port: 7734, status: 'INCOMING_PENDING' },
-      ],
-    });
+    db.insert(friends)
+      .values(
+        [
+          { name: 'Alice', address: '1.1.1.1', port: 7734, status: 'ACCEPTED' as FriendStatus },
+          { name: 'Bob', address: '2.2.2.2', port: 7734, status: 'ACCEPTED' as FriendStatus },
+          {
+            name: 'Carol',
+            address: '3.3.3.3',
+            port: 7734,
+            status: 'OUTGOING_PENDING' as FriendStatus,
+          },
+          {
+            name: 'Dave',
+            address: '4.4.4.4',
+            port: 7734,
+            status: 'INCOMING_PENDING' as FriendStatus,
+          },
+        ].map((d) => ({ id: randomUUID(), addedAt: new Date(), updatedAt: new Date(), ...d })),
+      )
+      .run();
     const res = await makeHandler()(req('/api/stats'));
     expect(res.status).toBe(200);
     const body = await res.json();
@@ -781,31 +957,33 @@ describe('GET /api/stats', () => {
   });
 
   it('counts only COMPLETED downloads', async () => {
-    await prisma.download.createMany({
-      data: [
-        {
-          sha256: 'a'.repeat(64),
-          filename: 'done.mp3',
-          size: 1000n,
-          state: 'COMPLETED',
-          sources: '[]',
-        },
-        {
-          sha256: 'b'.repeat(64),
-          filename: 'fail.mp3',
-          size: 2000n,
-          state: 'FAILED',
-          sources: '[]',
-        },
-        {
-          sha256: 'c'.repeat(64),
-          filename: 'dl.mp3',
-          size: 3000n,
-          state: 'DOWNLOADING',
-          sources: '[]',
-        },
-      ],
-    });
+    db.insert(downloads)
+      .values(
+        [
+          {
+            sha256: 'a'.repeat(64),
+            filename: 'done.mp3',
+            size: 1000n,
+            state: 'COMPLETED' as DownloadState,
+            sources: '[]',
+          },
+          {
+            sha256: 'b'.repeat(64),
+            filename: 'fail.mp3',
+            size: 2000n,
+            state: 'FAILED' as DownloadState,
+            sources: '[]',
+          },
+          {
+            sha256: 'c'.repeat(64),
+            filename: 'dl.mp3',
+            size: 3000n,
+            state: 'DOWNLOADING' as DownloadState,
+            sources: '[]',
+          },
+        ].map((d) => ({ id: randomUUID(), createdAt: new Date(), updatedAt: new Date(), ...d })),
+      )
+      .run();
     const res = await makeHandler()(req('/api/stats'));
     const body = await res.json();
     expect(body.downloads.count).toBe(1);
@@ -813,24 +991,26 @@ describe('GET /api/stats', () => {
   });
 
   it('sums sizes across multiple completed downloads', async () => {
-    await prisma.download.createMany({
-      data: [
-        {
-          sha256: 'a'.repeat(64),
-          filename: 'a.mp3',
-          size: 500n,
-          state: 'COMPLETED',
-          sources: '[]',
-        },
-        {
-          sha256: 'b'.repeat(64),
-          filename: 'b.mp3',
-          size: 1500n,
-          state: 'COMPLETED',
-          sources: '[]',
-        },
-      ],
-    });
+    db.insert(downloads)
+      .values(
+        [
+          {
+            sha256: 'a'.repeat(64),
+            filename: 'a.mp3',
+            size: 500n,
+            state: 'COMPLETED' as DownloadState,
+            sources: '[]',
+          },
+          {
+            sha256: 'b'.repeat(64),
+            filename: 'b.mp3',
+            size: 1500n,
+            state: 'COMPLETED' as DownloadState,
+            sources: '[]',
+          },
+        ].map((d) => ({ id: randomUUID(), createdAt: new Date(), updatedAt: new Date(), ...d })),
+      )
+      .run();
     const res = await makeHandler()(req('/api/stats'));
     const body = await res.json();
     expect(body.downloads.count).toBe(2);
@@ -844,26 +1024,34 @@ describe('GET /api/stats', () => {
 
 describe('GET /api/search', () => {
   beforeEach(async () => {
-    await prisma.sharedFile.createMany({
-      data: [
-        {
-          path: '/music/song.mp3',
-          filename: 'song.mp3',
-          size: 1000n,
-          sha256: 'a'.repeat(64),
-          mimeType: 'audio/mpeg',
-          metadata: null,
-        },
-        {
-          path: '/docs/readme.txt',
-          filename: 'readme.txt',
-          size: 500n,
-          sha256: 'b'.repeat(64),
-          mimeType: 'text/plain',
-          metadata: null,
-        },
-      ],
-    });
+    db.insert(sharedFiles)
+      .values(
+        [
+          {
+            path: '/music/song.mp3',
+            filename: 'song.mp3',
+            size: 1000n,
+            sha256: 'a'.repeat(64),
+            mimeType: 'audio/mpeg',
+            metadata: null,
+          },
+          {
+            path: '/docs/readme.txt',
+            filename: 'readme.txt',
+            size: 500n,
+            sha256: 'b'.repeat(64),
+            mimeType: 'text/plain',
+            metadata: null,
+          },
+        ].map((d) => ({
+          id: randomUUID(),
+          lastSeenAt: new Date(),
+          indexedAt: new Date(),
+          updatedAt: new Date(),
+          ...d,
+        })),
+      )
+      .run();
   });
 
   it('returns all files with empty query', async () => {
@@ -929,15 +1117,20 @@ describe('GET /api/search', () => {
   });
 
   it('network=true returns empty network array when accepted friends are not connected', async () => {
-    await prisma.friend.create({
-      data: {
+    db
+      .insert(friends)
+      .values({
+        id: randomUUID(),
+        addedAt: new Date(),
+        updatedAt: new Date(),
         name: 'Bob',
         address: '127.0.0.1',
         port: 7734,
         nodeId: 'bob-node',
         status: 'ACCEPTED',
-      },
-    });
+      })
+      .returning()
+      .get()!;
     const res = await makeHandler()(req('/api/search?network=true'));
     expect(res.status).toBe(200);
     const body = await res.json();
@@ -946,15 +1139,20 @@ describe('GET /api/search', () => {
   });
 
   it('network=true does not fan out to pending friends', async () => {
-    await prisma.friend.create({
-      data: {
+    db
+      .insert(friends)
+      .values({
+        id: randomUUID(),
+        addedAt: new Date(),
+        updatedAt: new Date(),
         name: 'Pending',
         address: '127.0.0.1',
         port: 7734,
         nodeId: 'pending-node',
         status: 'INCOMING_PENDING',
-      },
-    });
+      })
+      .returning()
+      .get()!;
     const res = await makeHandler()(req('/api/search?network=true'));
     expect(res.status).toBe(200);
     const body = await res.json();
@@ -962,15 +1160,20 @@ describe('GET /api/search', () => {
   });
 
   it('network=true includes results from connected peers alongside local results', async () => {
-    await prisma.friend.create({
-      data: {
+    db
+      .insert(friends)
+      .values({
+        id: randomUUID(),
+        addedAt: new Date(),
+        updatedAt: new Date(),
         name: 'Alice',
         address: '10.0.0.99',
         port: 7734,
         nodeId: 'alice-node',
         status: 'ACCEPTED',
-      },
-    });
+      })
+      .returning()
+      .get()!;
     const fakeNetworkResult = {
       filename: 'remote.mp3',
       size: '9999',
@@ -981,7 +1184,7 @@ describe('GET /api/search', () => {
     };
     const handler = createManagementFetch({
       identity,
-      prisma,
+      db,
       connectPeer: neverConnect,
       networkSearch: async () => [fakeNetworkResult],
     });
@@ -1005,7 +1208,7 @@ describe('GET /api/search', () => {
 
 describe('GET /api/transfers', () => {
   beforeEach(async () => {
-    await prisma.download.deleteMany();
+    db.delete(downloads).run();
   });
 
   it('returns an empty array when no transfers exist', async () => {
@@ -1015,9 +1218,19 @@ describe('GET /api/transfers', () => {
   });
 
   it('returns existing download records', async () => {
-    await prisma.download.create({
-      data: { sha256: 'a'.repeat(64), filename: 'test.mp3', size: 1000n, sources: '["node1"]' },
-    });
+    db
+      .insert(downloads)
+      .values({
+        id: randomUUID(),
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        sha256: 'a'.repeat(64),
+        filename: 'test.mp3',
+        size: 1000n,
+        sources: '["node1"]',
+      })
+      .returning()
+      .get()!;
     const res = await makeHandler()(req('/api/transfers'));
     const body = await res.json();
     expect(body).toHaveLength(1);
@@ -1028,7 +1241,7 @@ describe('GET /api/transfers', () => {
 
 describe('POST /api/transfers', () => {
   beforeEach(async () => {
-    await prisma.download.deleteMany();
+    db.delete(downloads).run();
     await makeHandler()(jsonReq('/api/settings', 'PATCH', { downloadFolder: tmpDir }));
   });
 
@@ -1108,7 +1321,7 @@ describe('POST /api/transfers', () => {
     );
     expect(res.status).toBe(201);
     const { id } = await res.json();
-    const dl = await prisma.download.findUniqueOrThrow({ where: { id } });
+    const dl = db.select().from(downloads).where(eq(downloads.id, id)).get()!;
     expect(dl.filename.length).toBeLessThanOrEqual(200);
   });
 
@@ -1125,7 +1338,7 @@ describe('POST /api/transfers', () => {
     );
     expect(res.status).toBe(201);
     const { id } = await res.json();
-    const dl = await prisma.download.findUniqueOrThrow({ where: { id } });
+    const dl = db.select().from(downloads).where(eq(downloads.id, id)).get()!;
     expect(JSON.parse(dl.sources)).toEqual([nodeA, nodeB]);
   });
 
@@ -1147,19 +1360,24 @@ describe('POST /api/transfers', () => {
 
 describe('PATCH /api/transfers/:id', () => {
   beforeEach(async () => {
-    await prisma.download.deleteMany();
+    db.delete(downloads).run();
   });
 
   it('returns 400 for an unknown action', async () => {
-    const dl = await prisma.download.create({
-      data: {
+    const dl = db
+      .insert(downloads)
+      .values({
+        id: randomUUID(),
+        createdAt: new Date(),
+        updatedAt: new Date(),
         sha256: 'd'.repeat(64),
         filename: 'a.txt',
         size: 100n,
         state: 'DOWNLOADING',
         sources: '[]',
-      },
-    });
+      })
+      .returning()
+      .get()!;
     const res = await makeHandler()(jsonReq(`/api/transfers/${dl.id}`, 'PATCH', { action: 'fly' }));
     expect(res.status).toBe(400);
   });
@@ -1167,34 +1385,44 @@ describe('PATCH /api/transfers/:id', () => {
 
 describe('DELETE /api/transfers/:id', () => {
   beforeEach(async () => {
-    await prisma.download.deleteMany();
+    db.delete(downloads).run();
   });
 
   it('deletes a completed download', async () => {
-    const dl = await prisma.download.create({
-      data: {
+    const dl = db
+      .insert(downloads)
+      .values({
+        id: randomUUID(),
+        createdAt: new Date(),
+        updatedAt: new Date(),
         sha256: 'e'.repeat(64),
         filename: 'done.txt',
         size: 100n,
         state: 'COMPLETED',
         sources: '[]',
-      },
-    });
+      })
+      .returning()
+      .get()!;
     const res = await makeHandler()(req(`/api/transfers/${dl.id}`, { method: 'DELETE' }));
     expect(res.status).toBe(204);
-    expect(await prisma.download.findUnique({ where: { id: dl.id } })).toBeNull();
+    expect(db.select().from(downloads).where(eq(downloads.id, dl.id)).get() ?? null).toBeNull();
   });
 
   it('refuses to delete an active download', async () => {
-    const dl = await prisma.download.create({
-      data: {
+    const dl = db
+      .insert(downloads)
+      .values({
+        id: randomUUID(),
+        createdAt: new Date(),
+        updatedAt: new Date(),
         sha256: 'f'.repeat(64),
         filename: 'active.txt',
         size: 100n,
         state: 'DOWNLOADING',
         sources: '[]',
-      },
-    });
+      })
+      .returning()
+      .get()!;
     const res = await makeHandler()(req(`/api/transfers/${dl.id}`, { method: 'DELETE' }));
     expect(res.status).toBe(409);
   });
@@ -1230,8 +1458,8 @@ describe('GET /api/uploads', () => {
 
 describe('GET /api/conversations', () => {
   beforeEach(async () => {
-    await prisma.message.deleteMany();
-    await prisma.conversation.deleteMany();
+    db.delete(messages).run();
+    db.delete(conversations).run();
   });
 
   it('returns empty array when no conversations', async () => {
@@ -1241,18 +1469,26 @@ describe('GET /api/conversations', () => {
   });
 
   it('returns conversations with latest message included', async () => {
-    const conv = await prisma.conversation.create({
-      data: { id: 'group:abc', type: 'GROUP', name: 'Test' },
-    });
-    await prisma.message.create({
-      data: {
+    db.insert(conversations)
+      .values({
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        id: 'group:abc',
+        type: 'GROUP',
+        name: 'Test',
+      })
+      .run();
+    db
+      .insert(messages)
+      .values({
         id: randomUUID(),
-        conversationId: conv.id,
+        conversationId: 'group:abc',
         fromNodeId: 'node-a',
         body: 'Hello',
         sentAt: new Date(),
-      },
-    });
+      })
+      .returning()
+      .get()!;
     const res = await makeHandler()(req('/api/conversations'));
     expect(res.status).toBe(200);
     const body = await res.json();
@@ -1263,17 +1499,28 @@ describe('GET /api/conversations', () => {
   });
 
   it('orders conversations by updatedAt desc', async () => {
-    await prisma.conversation.create({
-      data: { id: 'group:first', type: 'GROUP', name: 'First', updatedAt: new Date('2025-01-01') },
-    });
-    await prisma.conversation.create({
-      data: {
+    db
+      .insert(conversations)
+      .values({
+        createdAt: new Date(),
+        id: 'group:first',
+        type: 'GROUP',
+        name: 'First',
+        updatedAt: new Date('2025-01-01'),
+      })
+      .returning()
+      .get()!;
+    db
+      .insert(conversations)
+      .values({
+        createdAt: new Date(),
         id: 'group:second',
         type: 'GROUP',
         name: 'Second',
         updatedAt: new Date('2025-06-01'),
-      },
-    });
+      })
+      .returning()
+      .get()!;
     const res = await makeHandler()(req('/api/conversations'));
     const body = await res.json();
     expect(body[0].id).toBe('group:second');
@@ -1287,21 +1534,26 @@ describe('GET /api/conversations', () => {
 
 describe('POST /api/conversations — DM', () => {
   beforeEach(async () => {
-    await prisma.message.deleteMany();
-    await prisma.conversation.deleteMany();
-    await prisma.friend.deleteMany();
+    db.delete(messages).run();
+    db.delete(conversations).run();
+    db.delete(friends).run();
   });
 
   it('creates a DM conversation and returns 200', async () => {
-    await prisma.friend.create({
-      data: {
+    db
+      .insert(friends)
+      .values({
+        id: randomUUID(),
+        addedAt: new Date(),
+        updatedAt: new Date(),
         name: 'Peer',
         address: '10.0.0.1',
         port: 7734,
         nodeId: 'peer-node-1',
         status: 'ACCEPTED',
-      },
-    });
+      })
+      .returning()
+      .get()!;
     const res = await makeHandler()(
       jsonReq('/api/conversations', 'POST', { peerNodeId: 'peer-node-1' }),
     );
@@ -1312,15 +1564,20 @@ describe('POST /api/conversations — DM', () => {
   });
 
   it('response includes messages array', async () => {
-    await prisma.friend.create({
-      data: {
+    db
+      .insert(friends)
+      .values({
+        id: randomUUID(),
+        addedAt: new Date(),
+        updatedAt: new Date(),
         name: 'Peer4',
         address: '10.0.0.4',
         port: 7734,
         nodeId: 'peer-node-4',
         status: 'ACCEPTED',
-      },
-    });
+      })
+      .returning()
+      .get()!;
     const res = await makeHandler()(
       jsonReq('/api/conversations', 'POST', { peerNodeId: 'peer-node-4' }),
     );
@@ -1336,15 +1593,20 @@ describe('POST /api/conversations — DM', () => {
   });
 
   it('is idempotent — opening the same DM twice returns same id', async () => {
-    await prisma.friend.create({
-      data: {
+    db
+      .insert(friends)
+      .values({
+        id: randomUUID(),
+        addedAt: new Date(),
+        updatedAt: new Date(),
         name: 'Peer2',
         address: '10.0.0.2',
         port: 7734,
         nodeId: 'peer-node-2',
         status: 'ACCEPTED',
-      },
-    });
+      })
+      .returning()
+      .get()!;
     const res1 = await makeHandler()(
       jsonReq('/api/conversations', 'POST', { peerNodeId: 'peer-node-2' }),
     );
@@ -1357,15 +1619,20 @@ describe('POST /api/conversations — DM', () => {
   });
 
   it('trims peerNodeId whitespace', async () => {
-    await prisma.friend.create({
-      data: {
+    db
+      .insert(friends)
+      .values({
+        id: randomUUID(),
+        addedAt: new Date(),
+        updatedAt: new Date(),
         name: 'Peer3',
         address: '10.0.0.3',
         port: 7734,
         nodeId: 'peer-node-3',
         status: 'ACCEPTED',
-      },
-    });
+      })
+      .returning()
+      .get()!;
     const res = await makeHandler()(
       jsonReq('/api/conversations', 'POST', { peerNodeId: '  peer-node-3  ' }),
     );
@@ -1377,8 +1644,8 @@ describe('POST /api/conversations — DM', () => {
 
 describe('POST /api/conversations — group', () => {
   beforeEach(async () => {
-    await prisma.message.deleteMany();
-    await prisma.conversation.deleteMany();
+    db.delete(messages).run();
+    db.delete(conversations).run();
   });
 
   it('creates a group conversation and returns 201', async () => {
@@ -1432,39 +1699,61 @@ describe('POST /api/conversations — group', () => {
 
 describe('GET /api/conversations/:id/messages', () => {
   beforeEach(async () => {
-    await prisma.message.deleteMany();
-    await prisma.conversation.deleteMany();
+    db.delete(messages).run();
+    db.delete(conversations).run();
   });
 
   it('returns empty array when conversation has no messages', async () => {
-    await prisma.conversation.create({ data: { id: 'group:empty', type: 'GROUP', name: 'Empty' } });
+    db
+      .insert(conversations)
+      .values({
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        id: 'group:empty',
+        type: 'GROUP',
+        name: 'Empty',
+      })
+      .returning()
+      .get()!;
     const res = await makeHandler()(req('/api/conversations/group:empty/messages'));
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual([]);
   });
 
   it('returns messages ordered by sentAt asc', async () => {
-    await prisma.conversation.create({
-      data: { id: 'group:ordered', type: 'GROUP', name: 'Ordered' },
-    });
-    await prisma.message.create({
-      data: {
+    db
+      .insert(conversations)
+      .values({
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        id: 'group:ordered',
+        type: 'GROUP',
+        name: 'Ordered',
+      })
+      .returning()
+      .get()!;
+    db
+      .insert(messages)
+      .values({
         id: randomUUID(),
         conversationId: 'group:ordered',
         fromNodeId: 'n',
         body: 'First',
         sentAt: new Date('2025-01-01'),
-      },
-    });
-    await prisma.message.create({
-      data: {
+      })
+      .returning()
+      .get()!;
+    db
+      .insert(messages)
+      .values({
         id: randomUUID(),
         conversationId: 'group:ordered',
         fromNodeId: 'n',
         body: 'Second',
         sentAt: new Date('2025-06-01'),
-      },
-    });
+      })
+      .returning()
+      .get()!;
     const res = await makeHandler()(req('/api/conversations/group:ordered/messages'));
     const body = await res.json();
     expect(body[0].body).toBe('First');
@@ -1472,19 +1761,29 @@ describe('GET /api/conversations/:id/messages', () => {
   });
 
   it('respects the limit query param', async () => {
-    await prisma.conversation.create({
-      data: { id: 'group:limited', type: 'GROUP', name: 'Limited' },
-    });
+    db
+      .insert(conversations)
+      .values({
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        id: 'group:limited',
+        type: 'GROUP',
+        name: 'Limited',
+      })
+      .returning()
+      .get()!;
     for (let i = 0; i < 5; i++) {
-      await prisma.message.create({
-        data: {
+      db
+        .insert(messages)
+        .values({
           id: randomUUID(),
           conversationId: 'group:limited',
           fromNodeId: 'n',
           body: `msg${i}`,
           sentAt: new Date(2025, 0, i + 1),
-        },
-      });
+        })
+        .returning()
+        .get()!;
     }
     const res = await makeHandler()(req('/api/conversations/group:limited/messages?limit=3'));
     const body = await res.json();
@@ -1492,18 +1791,26 @@ describe('GET /api/conversations/:id/messages', () => {
   });
 
   it('returns the newest messages when count exceeds limit', async () => {
-    await prisma.conversation.create({
-      data: { id: 'group:newest', type: 'GROUP', name: 'Newest' },
-    });
-    await prisma.message.createMany({
-      data: Array.from({ length: 10 }, (_, i) => ({
-        id: randomUUID(),
-        conversationId: 'group:newest',
-        fromNodeId: 'n',
-        body: `msg${i}`,
-        sentAt: new Date(2025, 0, i + 1),
-      })),
-    });
+    db.insert(conversations)
+      .values({
+        id: 'group:newest',
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        type: 'GROUP',
+        name: 'Newest',
+      })
+      .run();
+    db.insert(messages)
+      .values(
+        Array.from({ length: 10 }, (_, i) => ({
+          id: randomUUID(),
+          conversationId: 'group:newest',
+          fromNodeId: 'n',
+          body: `msg${i}`,
+          sentAt: new Date(2025, 0, i + 1),
+        })),
+      )
+      .run();
     const res = await makeHandler()(req('/api/conversations/group:newest/messages?limit=3'));
     const body = await res.json();
     // Should return the 3 newest in chronological order: msg7, msg8, msg9
@@ -1513,16 +1820,26 @@ describe('GET /api/conversations/:id/messages', () => {
   });
 
   it('caps limit at 200 — returns exactly 200 messages even when more exist', async () => {
-    await prisma.conversation.create({ data: { id: 'group:cap', type: 'GROUP', name: 'Cap' } });
-    await prisma.message.createMany({
-      data: Array.from({ length: 201 }, (_, i) => ({
-        id: randomUUID(),
-        conversationId: 'group:cap',
-        fromNodeId: 'n',
-        body: `msg${i}`,
-        sentAt: new Date(2025, 0, i + 1),
-      })),
-    });
+    db.insert(conversations)
+      .values({
+        id: 'group:cap',
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        type: 'GROUP',
+        name: 'Cap',
+      })
+      .run();
+    db.insert(messages)
+      .values(
+        Array.from({ length: 201 }, (_, i) => ({
+          id: randomUUID(),
+          conversationId: 'group:cap',
+          fromNodeId: 'n',
+          body: `msg${i}`,
+          sentAt: new Date(2025, 0, i + 1),
+        })),
+      )
+      .run();
     const res = await makeHandler()(req('/api/conversations/group:cap/messages?limit=9999'));
     expect(res.status).toBe(200);
     const body = await res.json();
@@ -1530,26 +1847,46 @@ describe('GET /api/conversations/:id/messages', () => {
   });
 
   it('returns 400 for an invalid before date', async () => {
-    await prisma.conversation.create({
-      data: { id: 'group:before-bad', type: 'GROUP', name: 'B' },
-    });
+    db
+      .insert(conversations)
+      .values({
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        id: 'group:before-bad',
+        type: 'GROUP',
+        name: 'B',
+      })
+      .returning()
+      .get()!;
     const res = await makeHandler()(
       req('/api/conversations/group:before-bad/messages?before=not-a-date'),
     );
     expect(res.status).toBe(400);
   });
 
-  it('clamps negative limit to 1 — does not pass a negative take to Prisma', async () => {
-    await prisma.conversation.create({ data: { id: 'group:neg', type: 'GROUP', name: 'Neg' } });
-    await prisma.message.create({
-      data: {
+  it('clamps negative limit to 1', async () => {
+    db
+      .insert(conversations)
+      .values({
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        id: 'group:neg',
+        type: 'GROUP',
+        name: 'Neg',
+      })
+      .returning()
+      .get()!;
+    db
+      .insert(messages)
+      .values({
         id: randomUUID(),
         conversationId: 'group:neg',
         fromNodeId: 'n',
         body: 'hi',
         sentAt: new Date(),
-      },
-    });
+      })
+      .returning()
+      .get()!;
     const res = await makeHandler()(req('/api/conversations/group:neg/messages?limit=-5'));
     expect(res.status).toBe(200);
     // With a clamped limit of 1 we still get a valid (non-reversed) response
@@ -1574,12 +1911,22 @@ describe('GET /api/conversations/:id/messages', () => {
 
 describe('POST /api/conversations/:id/messages', () => {
   beforeEach(async () => {
-    await prisma.message.deleteMany();
-    await prisma.conversation.deleteMany();
+    db.delete(messages).run();
+    db.delete(conversations).run();
   });
 
   it('creates a message and returns 201', async () => {
-    await prisma.conversation.create({ data: { id: 'group:send', type: 'GROUP', name: 'Send' } });
+    db
+      .insert(conversations)
+      .values({
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        id: 'group:send',
+        type: 'GROUP',
+        name: 'Send',
+      })
+      .returning()
+      .get()!;
     const res = await makeHandler()(
       jsonReq('/api/conversations/group:send/messages', 'POST', { body: 'Hello world' }),
     );
@@ -1590,7 +1937,17 @@ describe('POST /api/conversations/:id/messages', () => {
   });
 
   it('trims message body', async () => {
-    await prisma.conversation.create({ data: { id: 'group:trim', type: 'GROUP', name: 'Trim' } });
+    db
+      .insert(conversations)
+      .values({
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        id: 'group:trim',
+        type: 'GROUP',
+        name: 'Trim',
+      })
+      .returning()
+      .get()!;
     const res = await makeHandler()(
       jsonReq('/api/conversations/group:trim/messages', 'POST', { body: '  trimmed  ' }),
     );
@@ -1607,9 +1964,17 @@ describe('POST /api/conversations/:id/messages', () => {
   });
 
   it('returns 400 for empty body', async () => {
-    await prisma.conversation.create({
-      data: { id: 'group:empty-body', type: 'GROUP', name: 'E' },
-    });
+    db
+      .insert(conversations)
+      .values({
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        id: 'group:empty-body',
+        type: 'GROUP',
+        name: 'E',
+      })
+      .returning()
+      .get()!;
     const res = await makeHandler()(
       jsonReq('/api/conversations/group:empty-body/messages', 'POST', { body: '   ' }),
     );
@@ -1617,7 +1982,17 @@ describe('POST /api/conversations/:id/messages', () => {
   });
 
   it('returns 400 for missing body field', async () => {
-    await prisma.conversation.create({ data: { id: 'group:no-body', type: 'GROUP', name: 'N' } });
+    db
+      .insert(conversations)
+      .values({
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        id: 'group:no-body',
+        type: 'GROUP',
+        name: 'N',
+      })
+      .returning()
+      .get()!;
     const res = await makeHandler()(
       jsonReq('/api/conversations/group:no-body/messages', 'POST', {}),
     );
@@ -1625,7 +2000,17 @@ describe('POST /api/conversations/:id/messages', () => {
   });
 
   it('returns 400 for body exceeding 10000 chars', async () => {
-    await prisma.conversation.create({ data: { id: 'group:long-body', type: 'GROUP', name: 'L' } });
+    db
+      .insert(conversations)
+      .values({
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        id: 'group:long-body',
+        type: 'GROUP',
+        name: 'L',
+      })
+      .returning()
+      .get()!;
     const res = await makeHandler()(
       jsonReq('/api/conversations/group:long-body/messages', 'POST', { body: 'a'.repeat(10_001) }),
     );
@@ -1633,7 +2018,17 @@ describe('POST /api/conversations/:id/messages', () => {
   });
 
   it('always sets fromNodeId to identity.nodeId', async () => {
-    await prisma.conversation.create({ data: { id: 'group:identity', type: 'GROUP', name: 'I' } });
+    db
+      .insert(conversations)
+      .values({
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        id: 'group:identity',
+        type: 'GROUP',
+        name: 'I',
+      })
+      .returning()
+      .get()!;
     const res = await makeHandler()(
       jsonReq('/api/conversations/group:identity/messages', 'POST', {
         body: 'Test',
@@ -1646,7 +2041,11 @@ describe('POST /api/conversations/:id/messages', () => {
 
   it('returns 403 when sending to a DM whose partner is no longer an accepted friend', async () => {
     const convId = `dm:${[identity.nodeId, 'ex-friend-node'].sort().join(':')}`;
-    await prisma.conversation.create({ data: { id: convId, type: 'DM' } });
+    db
+      .insert(conversations)
+      .values({ createdAt: new Date(), updatedAt: new Date(), id: convId, type: 'DM' })
+      .returning()
+      .get()!;
     // no friend row seeded — partner is not accepted
     const res = await makeHandler()(
       jsonReq(`/api/conversations/${convId}/messages`, 'POST', { body: 'Hello' }),
@@ -1657,7 +2056,11 @@ describe('POST /api/conversations/:id/messages', () => {
   it('returns 400 for a DM conversation whose id does not include the local node', async () => {
     // A DM between two other nodes — local node is not a participant
     const convId = `dm:${['other-node-a', 'other-node-b'].sort().join(':')}`;
-    await prisma.conversation.create({ data: { id: convId, type: 'DM' } });
+    db
+      .insert(conversations)
+      .values({ createdAt: new Date(), updatedAt: new Date(), id: convId, type: 'DM' })
+      .returning()
+      .get()!;
     const res = await makeHandler()(
       jsonReq(`/api/conversations/${convId}/messages`, 'POST', { body: 'Sneaky' }),
     );
@@ -1666,7 +2069,16 @@ describe('POST /api/conversations/:id/messages', () => {
 
   it('returns 400 for a DM conversation with a malformed id (wrong prefix)', async () => {
     // type=DM but id doesn't start with dm: — malformed data
-    await prisma.conversation.create({ data: { id: 'group:malformed-as-dm', type: 'DM' } });
+    db
+      .insert(conversations)
+      .values({
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        id: 'group:malformed-as-dm',
+        type: 'DM',
+      })
+      .returning()
+      .get()!;
     const res = await makeHandler()(
       jsonReq(`/api/conversations/group:malformed-as-dm/messages`, 'POST', { body: 'Bad' }),
     );
@@ -1680,33 +2092,55 @@ describe('POST /api/conversations/:id/messages', () => {
 
 describe('DELETE /api/conversations/:id', () => {
   beforeEach(async () => {
-    await prisma.message.deleteMany();
-    await prisma.conversation.deleteMany();
+    db.delete(messages).run();
+    db.delete(conversations).run();
   });
 
   it('deletes the conversation and returns 204', async () => {
-    await prisma.conversation.create({ data: { id: 'group:del', type: 'GROUP', name: 'Del' } });
+    db
+      .insert(conversations)
+      .values({
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        id: 'group:del',
+        type: 'GROUP',
+        name: 'Del',
+      })
+      .returning()
+      .get()!;
     const res = await makeHandler()(req('/api/conversations/group:del', { method: 'DELETE' }));
     expect(res.status).toBe(204);
-    expect(await prisma.conversation.findUnique({ where: { id: 'group:del' } })).toBeNull();
+    expect(
+      db.select().from(conversations).where(eq(conversations.id, 'group:del')).get() ?? null,
+    ).toBeNull();
   });
 
   it('cascades delete to messages', async () => {
-    await prisma.conversation.create({
-      data: { id: 'group:cascade', type: 'GROUP', name: 'Cascade' },
-    });
+    db
+      .insert(conversations)
+      .values({
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        id: 'group:cascade',
+        type: 'GROUP',
+        name: 'Cascade',
+      })
+      .returning()
+      .get()!;
     const msgId = randomUUID();
-    await prisma.message.create({
-      data: {
+    db
+      .insert(messages)
+      .values({
         id: msgId,
         conversationId: 'group:cascade',
         fromNodeId: 'n',
         body: 'Bye',
         sentAt: new Date(),
-      },
-    });
+      })
+      .returning()
+      .get()!;
     await makeHandler()(req('/api/conversations/group:cascade', { method: 'DELETE' }));
-    expect(await prisma.message.findUnique({ where: { id: msgId } })).toBeNull();
+    expect(db.select().from(messages).where(eq(messages.id, msgId)).get() ?? null).toBeNull();
   });
 
   it('returns 404 for unknown conversation', async () => {
@@ -1726,7 +2160,7 @@ describe('DELETE /api/conversations/:id', () => {
 
 describe('scripts API', () => {
   beforeEach(async () => {
-    await prisma.postDownloadScript.deleteMany();
+    db.delete(postDownloadScripts).run();
   });
 
   describe('GET /api/scripts', () => {
@@ -1737,12 +2171,14 @@ describe('scripts API', () => {
     });
 
     it('returns scripts ordered by order field', async () => {
-      await prisma.postDownloadScript.createMany({
-        data: [
-          { path: '/b.ts', order: 1 },
-          { path: '/a.ts', order: 0 },
-        ],
-      });
+      db.insert(postDownloadScripts)
+        .values(
+          [
+            { path: '/b.ts', order: 1 },
+            { path: '/a.ts', order: 0 },
+          ].map((d) => ({ id: randomUUID(), createdAt: new Date(), ...d })),
+        )
+        .run();
       const res = await makeHandler()(req('/api/scripts'));
       const body = await res.json();
       expect(body[0].path).toBe('/a.ts');
@@ -1764,12 +2200,21 @@ describe('scripts API', () => {
       await makeHandler()(jsonReq('/api/scripts', 'POST', { path: '/first.ts' }));
       const res = await makeHandler()(jsonReq('/api/scripts', 'POST', { path: '/second.ts' }));
       const body = await res.json();
-      const first = await prisma.postDownloadScript.findUnique({ where: { path: '/first.ts' } });
+      const first =
+        db
+          .select()
+          .from(postDownloadScripts)
+          .where(eq(postDownloadScripts.path, '/first.ts'))
+          .get() ?? null;
       expect(body.order).toBe((first?.order ?? -1) + 1);
     });
 
     it('returns 409 when path already exists', async () => {
-      await prisma.postDownloadScript.create({ data: { path: '/dup.ts', order: 0 } });
+      db
+        .insert(postDownloadScripts)
+        .values({ id: randomUUID(), createdAt: new Date(), path: '/dup.ts', order: 0 })
+        .returning()
+        .get()!;
       const res = await makeHandler()(jsonReq('/api/scripts', 'POST', { path: '/dup.ts' }));
       expect(res.status).toBe(409);
     });
@@ -1794,10 +2239,18 @@ describe('scripts API', () => {
 
   describe('PATCH /api/scripts/:id (reorder)', () => {
     it('swaps orders when moving down', async () => {
-      const [a, _b] = await Promise.all([
-        prisma.postDownloadScript.create({ data: { path: '/a.ts', order: 0 } }),
-        prisma.postDownloadScript.create({ data: { path: '/b.ts', order: 1 } }),
-      ]);
+      const [a, _b] = [
+        db
+          .insert(postDownloadScripts)
+          .values({ id: randomUUID(), path: '/a.ts', order: 0, createdAt: new Date() })
+          .returning()
+          .get()!,
+        db
+          .insert(postDownloadScripts)
+          .values({ id: randomUUID(), path: '/b.ts', order: 1, createdAt: new Date() })
+          .returning()
+          .get()!,
+      ];
       const res = await makeHandler()(
         jsonReq(`/api/scripts/${a.id}`, 'PATCH', { direction: 'down' }),
       );
@@ -1808,10 +2261,18 @@ describe('scripts API', () => {
     });
 
     it('swaps orders when moving up', async () => {
-      const [_a, b] = await Promise.all([
-        prisma.postDownloadScript.create({ data: { path: '/a.ts', order: 0 } }),
-        prisma.postDownloadScript.create({ data: { path: '/b.ts', order: 1 } }),
-      ]);
+      const [_a, b] = [
+        db
+          .insert(postDownloadScripts)
+          .values({ id: randomUUID(), path: '/a.ts', order: 0, createdAt: new Date() })
+          .returning()
+          .get()!,
+        db
+          .insert(postDownloadScripts)
+          .values({ id: randomUUID(), path: '/b.ts', order: 1, createdAt: new Date() })
+          .returning()
+          .get()!,
+      ];
       const res = await makeHandler()(
         jsonReq(`/api/scripts/${b.id}`, 'PATCH', { direction: 'up' }),
       );
@@ -1822,7 +2283,11 @@ describe('scripts API', () => {
     });
 
     it('returns 204 when already at the boundary', async () => {
-      const s = await prisma.postDownloadScript.create({ data: { path: '/only.ts', order: 0 } });
+      const s = db
+        .insert(postDownloadScripts)
+        .values({ id: randomUUID(), createdAt: new Date(), path: '/only.ts', order: 0 })
+        .returning()
+        .get()!;
       const res = await makeHandler()(
         jsonReq(`/api/scripts/${s.id}`, 'PATCH', { direction: 'up' }),
       );
@@ -1835,7 +2300,11 @@ describe('scripts API', () => {
     });
 
     it('returns 400 for invalid direction', async () => {
-      const s = await prisma.postDownloadScript.create({ data: { path: '/x.ts', order: 0 } });
+      const s = db
+        .insert(postDownloadScripts)
+        .values({ id: randomUUID(), createdAt: new Date(), path: '/x.ts', order: 0 })
+        .returning()
+        .get()!;
       const res = await makeHandler()(
         jsonReq(`/api/scripts/${s.id}`, 'PATCH', { direction: 'sideways' }),
       );
@@ -1845,10 +2314,16 @@ describe('scripts API', () => {
 
   describe('DELETE /api/scripts/:id', () => {
     it('deletes the script and returns 204', async () => {
-      const s = await prisma.postDownloadScript.create({ data: { path: '/del.ts', order: 0 } });
+      const s = db
+        .insert(postDownloadScripts)
+        .values({ id: randomUUID(), createdAt: new Date(), path: '/del.ts', order: 0 })
+        .returning()
+        .get()!;
       const res = await makeHandler()(req(`/api/scripts/${s.id}`, { method: 'DELETE' }));
       expect(res.status).toBe(204);
-      expect(await prisma.postDownloadScript.findUnique({ where: { id: s.id } })).toBeNull();
+      expect(
+        db.select().from(postDownloadScripts).where(eq(postDownloadScripts.id, s.id)).get() ?? null,
+      ).toBeNull();
     });
 
     it('returns 404 for unknown script id', async () => {

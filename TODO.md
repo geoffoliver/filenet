@@ -4,7 +4,7 @@
 
 ### Identity & Crypto
 
-- [x] Ed25519 keypair generation and persistence (Prisma/SQLite)
+- [x] Ed25519 keypair generation and persistence (Drizzle/SQLite)
 - [x] Node ID derivation (SHA-256 of public key)
 - [x] Public key HTTP endpoint (`GET /pubkey`) — unauthenticated
 - [x] Sign / verify (Ed25519)
@@ -16,8 +16,8 @@
 
 ### Friends
 
-- [x] Prisma schema: `Friend` model with `OUTGOING_PENDING` / `INCOMING_PENDING` / `ACCEPTED` / `BLOCKED` statuses
-- [x] Prisma schema: `Settings` model (name, invitePassword, autoAcceptFromAnyone, autoAcceptFromFriendsOfFriends)
+- [x] Drizzle schema: `Friend` model with `OUTGOING_PENDING` / `INCOMING_PENDING` / `ACCEPTED` / `BLOCKED` statuses
+- [x] Drizzle schema: `Settings` model (name, invitePassword, autoAcceptFromAnyone, autoAcceptFromFriendsOfFriends)
 - [x] Outbound connection: connect to a peer by address + port, complete handshake as initiator
 - [x] Send `friend-request` message over encrypted connection
 - [x] Receive and store incoming friend requests (pending state)
@@ -32,7 +32,7 @@
 
 ### File Indexing
 
-- [x] Prisma schema: `SharedFile` model (filename, path, size, SHA-256, mime type, metadata JSON, indexed at)
+- [x] Drizzle schema: `SharedFile` model (filename, path, size, SHA-256, mime type, metadata JSON, indexed at)
 - [x] Configurable shared folder(s) stored in DB / config
 - [x] Directory scanner: walk folders, hash files, upsert index
 - [x] Metadata extraction — audio/video (artist, album, track, duration, bitrate, dimensions, container, codec) via music-metadata
@@ -52,7 +52,7 @@
 
 ### File Transfers
 
-- [x] Prisma schema: `Download` model (file hash, chunks, sources, state, progress)
+- [x] Drizzle schema: `Download` model (file hash, chunks, sources, state, progress)
 - [x] Chunk-based download protocol (request/serve specific byte ranges; 1 MB chunks, 4 concurrent, 30s timeout)
 - [x] Multi-source downloading (same file from multiple peers simultaneously)
 - [x] SHA-256 verification of completed chunks and whole file
@@ -64,7 +64,7 @@
 
 ### Chat
 
-- [x] Prisma schema: `Conversation` (DM / GROUP) and `Message` models
+- [x] Drizzle schema: `Conversation` (DM / GROUP) and `Message` models
 - [x] One-on-one encrypted messaging over authenticated connection; canonical `dm:{nodeA}:{nodeB}` IDs prevent split-history
 - [x] Persist message history indefinitely (delete on user request via `DELETE /api/conversations/:id`)
 - [x] Group chat: conversation creation, name propagated to all peers via wire message
@@ -175,4 +175,4 @@
 - [x] README: installation, configuration, running, scripting API docs
 - [x] Create necessary files to spin the app up in a Docker container (full `next start`, not a static export or anything dumb)
 - [ ] Database migrations
-- [ ] Single-binary distribution (à la Sonarr/Radarr) — requires two changes: (1) migrate from Prisma to `bun:sqlite` (Prisma's native query-engine binary makes self-contained packaging impossible); (2) switch Next.js to `output: 'export'` so the frontend becomes static files the Bun server can serve directly. Once both are done, `bun build --compile` produces a single platform executable with no external dependencies. Cross-compile targets: `bun-linux-x64`, `bun-linux-arm64`, `bun-darwin-x64`, `bun-darwin-arm64`, `bun-windows-x64`.
+- [ ] Single-binary distribution (à la Sonarr/Radarr) — now that Prisma is gone, only one blocker remains: switch Next.js to `output: 'export'` so the frontend becomes static files the Bun server can serve directly. Once done, `bun build --compile` produces a single platform executable with no external dependencies. Cross-compile targets: `bun-linux-x64`, `bun-linux-arm64`, `bun-darwin-x64`, `bun-darwin-arm64`, `bun-windows-x64`.

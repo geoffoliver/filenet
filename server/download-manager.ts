@@ -4,9 +4,11 @@ import type { FileHandle } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { tmpdir } from 'node:os';
 
-import type { PrismaClient } from '@prisma/client';
+import { and, desc, eq, inArray, notInArray, sql } from 'drizzle-orm';
 
 import { CHUNK_SIZE, requestChunk } from './transfer-protocol';
+import { downloads, friends } from './schema';
+import type { Db } from './db';
 import { getConnectedPeer } from './connections';
 import { hashFile } from './indexer';
 import { runPostDownloadScripts } from './scripts';
@@ -104,14 +106,12 @@ function calcSpeed(dl: ActiveDownload): number {
 // ---------------------------------------------------------------------------
 
 async function uniqueFilePath(folder: string, filename: string): Promise<string> {
-  let safe = basename(filename); // strip directory components to prevent path traversal
-  // basename returns '.' or '..' for those inputs and '' for an empty/root path —
-  // all resolve outside the download folder via join(), so fall back to a safe name.
+  let safe = basename(filename);
   if (safe === '' || safe === '.' || safe === '..') safe = 'download';
 
   const tryReserve = async (p: string): Promise<boolean> => {
     try {
-      const fh = await open(p, 'wx'); // exclusive create — fails with EEXIST if taken
+      const fh = await open(p, 'wx');
       await fh.close();
       return true;
     } catch (err) {
@@ -140,7 +140,7 @@ async function uniqueFilePath(folder: string, filename: string): Promise<string>
 // ---------------------------------------------------------------------------
 
 async function downloadChunk(
-  prisma: PrismaClient,
+  db: Db,
   dl: ActiveDownload,
   chunkIndex: number,
   requestChunkFn: RequestChunkFn,
@@ -148,7 +148,6 @@ async function downloadChunk(
   const offset = chunkIndex * dl.chunkSize;
   const length = Math.min(dl.chunkSize, Number(dl.size) - offset);
 
-  // Try each source in order until one succeeds
   for (const nodeId of dl.sources) {
     if (dl.stopped || dl.paused) {
       dl.inFlight.delete(chunkIndex);
@@ -167,7 +166,6 @@ async function downloadChunk(
         return;
       }
 
-      // Write chunk at the correct offset
       if (dl.fileHandle) {
         await dl.fileHandle.write(data, 0, data.length, offset);
       }
@@ -177,43 +175,37 @@ async function downloadChunk(
       recordBytes(dl, data.length);
 
       const lastIdx = dl.totalChunks - 1;
-      const lastChunkActualSize = Number(dl.size) - lastIdx * dl.chunkSize;
+      const lastChunkActualSize = dl.size - BigInt(lastIdx) * BigInt(dl.chunkSize);
       const bytesReceived =
-        dl.completedChunks.size * dl.chunkSize -
-        (dl.completedChunks.has(lastIdx) ? dl.chunkSize - lastChunkActualSize : 0);
-      await prisma.download.update({
-        where: { id: dl.id },
-        data: {
-          bytesReceived: BigInt(bytesReceived),
+        BigInt(dl.completedChunks.size) * BigInt(dl.chunkSize) -
+        (dl.completedChunks.has(lastIdx) ? BigInt(dl.chunkSize) - lastChunkActualSize : 0n);
+      db.update(downloads)
+        .set({
+          bytesReceived,
           completedChunks: JSON.stringify([...dl.completedChunks]),
-        },
-      });
+          updatedAt: new Date(),
+        })
+        .where(eq(downloads.id, dl.id))
+        .run();
       return;
     } catch {
       if (dl.stopped || dl.paused) {
         dl.inFlight.delete(chunkIndex);
         return;
       }
-      // Try next source
       continue;
     }
   }
 
-  // All sources failed for this chunk
   dl.inFlight.delete(chunkIndex);
   if (!dl.stopped && !dl.paused) {
-    await failDownload(prisma, dl, 'All sources failed to serve chunk');
+    await failDownload(db, dl, 'All sources failed to serve chunk');
   }
 }
 
-async function pump(
-  prisma: PrismaClient,
-  dl: ActiveDownload,
-  requestChunkFn: RequestChunkFn,
-): Promise<void> {
+async function pump(db: Db, dl: ActiveDownload, requestChunkFn: RequestChunkFn): Promise<void> {
   if (dl.paused || dl.stopped) return;
 
-  // Collect chunks still needed
   const pending: number[] = [];
   for (let i = 0; i < dl.totalChunks; i++) {
     if (!dl.completedChunks.has(i) && !dl.inFlight.has(i)) {
@@ -222,7 +214,7 @@ async function pump(
   }
 
   if (pending.length === 0 && dl.inFlight.size === 0) {
-    await finalizeDownload(prisma, dl);
+    await finalizeDownload(db, dl);
     return;
   }
 
@@ -231,8 +223,8 @@ async function pump(
 
   for (const chunkIndex of toStart) {
     dl.inFlight.add(chunkIndex);
-    downloadChunk(prisma, dl, chunkIndex, requestChunkFn)
-      .then(() => pump(prisma, dl, requestChunkFn))
+    downloadChunk(db, dl, chunkIndex, requestChunkFn)
+      .then(() => pump(db, dl, requestChunkFn))
       .catch((err: unknown) => console.error('Chunk error:', err));
   }
 }
@@ -241,7 +233,7 @@ async function pump(
 // Finalize / fail
 // ---------------------------------------------------------------------------
 
-async function finalizeDownload(prisma: PrismaClient, dl: ActiveDownload): Promise<void> {
+async function finalizeDownload(db: Db, dl: ActiveDownload): Promise<void> {
   dl.stopped = true;
 
   if (dl.fileHandle) {
@@ -251,12 +243,11 @@ async function finalizeDownload(prisma: PrismaClient, dl: ActiveDownload): Promi
     dl.fileHandle = null;
   }
 
-  // SHA-256 verify
   let actualHash: string;
   try {
     actualHash = await hashFile(dl.tmpPath);
   } catch {
-    await failDownload(prisma, dl, 'Could not read temp file for verification');
+    await failDownload(db, dl, 'Could not read temp file for verification');
     return;
   }
 
@@ -264,22 +255,22 @@ async function finalizeDownload(prisma: PrismaClient, dl: ActiveDownload): Promi
     try {
       await rm(dl.tmpPath, { force: true });
     } catch {}
-    await prisma.download.update({
-      where: { id: dl.id },
-      data: { state: 'FAILED', error: 'SHA-256 verification failed' },
-    });
+    db.update(downloads)
+      .set({ state: 'FAILED', error: 'SHA-256 verification failed', updatedAt: new Date() })
+      .where(eq(downloads.id, dl.id))
+      .run();
     activeDownloads.delete(dl.id);
     return;
   }
 
-  // Find a non-colliding final path
-  const record = await prisma.download.findUniqueOrThrow({ where: { id: dl.id } });
+  const record = db.select().from(downloads).where(eq(downloads.id, dl.id)).get();
+  if (!record) throw new Error(`Download ${dl.id} not found`);
   const downloadFolder = activeDownloadFolders.get(dl.id) ?? record.downloadFolder ?? tmpdir();
   let finalPath: string;
   try {
     finalPath = await uniqueFilePath(downloadFolder, record.filename);
   } catch {
-    await failDownload(prisma, dl, 'Could not create file in download folder');
+    await failDownload(db, dl, 'Could not create file in download folder');
     return;
   }
 
@@ -287,7 +278,6 @@ async function finalizeDownload(prisma: PrismaClient, dl: ActiveDownload): Promi
     await rename(dl.tmpPath, finalPath);
   } catch (err: unknown) {
     if ((err as NodeJS.ErrnoException).code === 'EXDEV') {
-      // Cross-device move: copy over the reserved placeholder, then remove the temp file.
       try {
         await copyFile(dl.tmpPath, finalPath);
         await rm(dl.tmpPath, { force: true });
@@ -295,46 +285,51 @@ async function finalizeDownload(prisma: PrismaClient, dl: ActiveDownload): Promi
         try {
           await rm(finalPath, { force: true });
         } catch {}
-        await failDownload(prisma, dl, 'Could not move file to download folder');
+        await failDownload(db, dl, 'Could not move file to download folder');
         return;
       }
     } else {
-      // rename failed for another reason — remove the placeholder we reserved.
       try {
         await rm(finalPath, { force: true });
       } catch {}
-      await failDownload(prisma, dl, 'Could not move file to download folder');
+      await failDownload(db, dl, 'Could not move file to download folder');
       return;
     }
   }
 
   const completedAt = new Date();
-  await prisma.download.update({
-    where: { id: dl.id },
-    data: {
+  db.update(downloads)
+    .set({
       state: 'COMPLETED',
       finalPath,
       completedAt,
       bytesReceived: dl.size,
       tmpPath: null,
-    },
-  });
+      updatedAt: completedAt,
+    })
+    .where(eq(downloads.id, dl.id))
+    .run();
   activeDownloads.delete(dl.id);
   activeDownloadFolders.delete(dl.id);
 
-  // Increment per-friend download counters. Failures here are non-fatal —
-  // a transient DB error must not prevent post-download scripts from running.
+  // Increment per-friend download counters (non-fatal).
   const uniqueSources = [...new Set(dl.sources)];
   if (uniqueSources.length > 0) {
-    await prisma.friend
-      .updateMany({
-        where: { nodeId: { in: uniqueSources }, status: 'ACCEPTED' },
-        data: { downloadCount: { increment: 1 }, downloadTotalBytes: { increment: dl.size } },
-      })
-      .catch((err: unknown) => console.error('Failed to update friend download counters:', err));
+    try {
+      db.update(friends)
+        .set({
+          downloadCount: sql`${friends.downloadCount} + 1`,
+          downloadTotalBytes: sql`${friends.downloadTotalBytes} + ${dl.size}`,
+          updatedAt: new Date(),
+        })
+        .where(and(inArray(friends.nodeId, uniqueSources), eq(friends.status, 'ACCEPTED')))
+        .run();
+    } catch (err: unknown) {
+      console.error('Failed to update friend download counters:', err);
+    }
   }
 
-  runPostDownloadScripts(prisma, finalPath, {
+  runPostDownloadScripts(db, finalPath, {
     downloadId: dl.id,
     filename: record.filename,
     sha256: dl.sha256,
@@ -348,11 +343,7 @@ async function finalizeDownload(prisma: PrismaClient, dl: ActiveDownload): Promi
   }).catch((err: unknown) => console.error('Post-download scripts error:', err));
 }
 
-async function failDownload(
-  prisma: PrismaClient,
-  dl: ActiveDownload,
-  error: string,
-): Promise<void> {
+async function failDownload(db: Db, dl: ActiveDownload, error: string): Promise<void> {
   dl.stopped = true;
   if (dl.fileHandle) {
     try {
@@ -363,15 +354,14 @@ async function failDownload(
   try {
     await rm(dl.tmpPath, { force: true });
   } catch {}
-  await prisma.download.update({
-    where: { id: dl.id },
-    data: { state: 'FAILED', error },
-  });
+  db.update(downloads)
+    .set({ state: 'FAILED', error, updatedAt: new Date() })
+    .where(eq(downloads.id, dl.id))
+    .run();
   activeDownloads.delete(dl.id);
   activeDownloadFolders.delete(dl.id);
 }
 
-// Separate map to avoid storing downloadFolder inside the struct redundantly
 const activeDownloadFolders = new Map<string, string>();
 
 // ---------------------------------------------------------------------------
@@ -379,33 +369,31 @@ const activeDownloadFolders = new Map<string, string>();
 // ---------------------------------------------------------------------------
 
 export async function startDownload(
-  prisma: PrismaClient,
+  db: Db,
   opts: StartDownloadOpts,
   requestChunkFn: RequestChunkFn = defaultRequestChunk,
 ): Promise<string> {
   const { sha256, filename, size, mimeType, sources, downloadFolder } = opts;
   const chunkSize = CHUNK_SIZE;
   const totalChunks = Math.ceil(Number(size) / chunkSize);
-
   const tmpPath = join(tmpdir(), `.filenet-dl-${randomUUID()}.tmp`);
 
   let fileHandle: FileHandle | null = null;
-  let record: Awaited<ReturnType<typeof prisma.download.create>>;
+  let record: typeof downloads.$inferSelect;
   try {
-    // Pre-allocate temp file before creating the DB record so a disk/permission
-    // error here never leaves a stranded DOWNLOADING row.
     const fh = await open(tmpPath, 'w');
     try {
-      if (Number(size) > 0) {
-        await truncate(tmpPath, Number(size));
-      }
+      if (Number(size) > 0) await truncate(tmpPath, Number(size));
     } finally {
       await fh.close();
     }
     fileHandle = await open(tmpPath, 'r+');
 
-    record = await prisma.download.create({
-      data: {
+    const now = new Date();
+    const inserted = db
+      .insert(downloads)
+      .values({
+        id: randomUUID(),
         sha256,
         filename,
         size,
@@ -415,8 +403,12 @@ export async function startDownload(
         sources: JSON.stringify(sources),
         tmpPath,
         downloadFolder,
-      },
-    });
+        createdAt: now,
+        updatedAt: now,
+      })
+      .returning()
+      .get();
+    record = inserted!;
   } catch (err) {
     if (fileHandle) {
       try {
@@ -443,40 +435,39 @@ export async function startDownload(
     paused: false,
     stopped: false,
     speedSamples: [],
-    startedAt: record.createdAt,
+    startedAt: record.createdAt!,
   };
 
   activeDownloads.set(record.id, dl);
   activeDownloadFolders.set(record.id, downloadFolder);
 
-  // Start pumping asynchronously
-  pump(prisma, dl, requestChunkFn).catch((err: unknown) =>
-    console.error('Download pump error:', err),
-  );
+  pump(db, dl, requestChunkFn).catch((err: unknown) => console.error('Download pump error:', err));
 
   return record.id;
 }
 
-export async function pauseDownload(prisma: PrismaClient, id: string): Promise<boolean> {
+export async function pauseDownload(db: Db, id: string): Promise<boolean> {
   const dl = activeDownloads.get(id);
   if (!dl || dl.stopped) return false;
-  await prisma.download.update({ where: { id }, data: { state: 'PAUSED' } });
+  db.update(downloads)
+    .set({ state: 'PAUSED', updatedAt: new Date() })
+    .where(eq(downloads.id, id))
+    .run();
   dl.paused = true;
   return true;
 }
 
 export async function resumeDownload(
-  prisma: PrismaClient,
+  db: Db,
   id: string,
   requestChunkFn: RequestChunkFn = defaultRequestChunk,
 ): Promise<boolean> {
-  const record = await prisma.download.findUnique({ where: { id } });
+  const record = db.select().from(downloads).where(eq(downloads.id, id)).get();
   if (!record || record.state !== 'PAUSED') return false;
 
   let dl = activeDownloads.get(id);
 
   if (!dl) {
-    // Rebuild in-memory state from DB record (e.g. after restart)
     const completedChunks: number[] = JSON.parse(record.completedChunks);
     const sources: string[] = JSON.parse(record.sources);
     const chunkSize = record.chunkSize;
@@ -487,12 +478,11 @@ export async function resumeDownload(
     try {
       fileHandle = await open(tmpPath, 'r+');
     } catch {
-      // Temp file gone — recreate it and restart all chunks to avoid zero-fill corruption
       completedChunks.splice(0);
-      await prisma.download.update({
-        where: { id },
-        data: { completedChunks: '[]', bytesReceived: 0n },
-      });
+      db.update(downloads)
+        .set({ completedChunks: '[]', bytesReceived: 0n, updatedAt: new Date() })
+        .where(eq(downloads.id, id))
+        .run();
       const fh2 = await open(tmpPath, 'w');
       try {
         await truncate(tmpPath, Number(record.size));
@@ -506,12 +496,8 @@ export async function resumeDownload(
       activeDownloadFolders.set(id, record.downloadFolder);
     }
 
-    // A concurrent resumeDownload call may have rebuilt and set the entry while
-    // we were awaiting I/O above. JS is single-threaded so this check-then-set
-    // is atomic — no await between here and activeDownloads.set below.
     const concurrent = activeDownloads.get(id);
     if (concurrent) {
-      // Discard our duplicate; close the file handle we just opened.
       try {
         await fileHandle.close();
       } catch {}
@@ -531,36 +517,31 @@ export async function resumeDownload(
         paused: false,
         stopped: false,
         speedSamples: [],
-        startedAt: record.createdAt,
+        startedAt: record.createdAt!,
       };
       activeDownloads.set(id, dl);
     }
   }
 
-  // Conditional update: only flip to DOWNLOADING if the record is still PAUSED.
-  // This guards against two races:
-  //   1. A concurrent cancel changed state to CANCELLED — temp file may be gone.
-  //   2. A concurrent resumeDownload already flipped state to DOWNLOADING — the
-  //      pump is already running and we must not tear it down.
-  const updated = await prisma.download.updateMany({
-    where: { id, state: 'PAUSED' },
-    data: { state: 'DOWNLOADING', tmpPath: dl.tmpPath },
-  });
-  if (updated.count === 0) {
-    // Only clean up the in-memory state we just rebuilt when the record is
-    // truly gone or in a terminal state (CANCELLED/FAILED). If another resume
-    // already started the pump (state=DOWNLOADING), leave that pump running.
-    const current = await prisma.download.findUnique({ where: { id } });
+  const activeDl = dl!;
+  const matched = db
+    .update(downloads)
+    .set({ state: 'DOWNLOADING', tmpPath: activeDl.tmpPath, updatedAt: new Date() })
+    .where(and(eq(downloads.id, id), eq(downloads.state, 'PAUSED')))
+    .returning({ id: downloads.id })
+    .all();
+  if (matched.length === 0) {
+    const current = db.select().from(downloads).where(eq(downloads.id, id)).get();
     if (
       !current ||
       current.state === 'CANCELLED' ||
       current.state === 'FAILED' ||
       current.state === 'COMPLETED'
     ) {
-      dl.stopped = true;
-      if (dl.fileHandle) {
+      activeDl.stopped = true;
+      if (activeDl.fileHandle) {
         try {
-          await dl.fileHandle.close();
+          await activeDl.fileHandle.close();
         } catch {}
       }
       activeDownloads.delete(id);
@@ -568,17 +549,17 @@ export async function resumeDownload(
     }
     return false;
   }
-  dl.paused = false;
+  activeDl.paused = false;
 
-  pump(prisma, dl, requestChunkFn).catch((err: unknown) =>
+  pump(db, activeDl, requestChunkFn).catch((err: unknown) =>
     console.error('Resume pump error:', err),
   );
   return true;
 }
 
-export async function cancelDownload(prisma: PrismaClient, id: string): Promise<boolean> {
+export async function cancelDownload(db: Db, id: string): Promise<boolean> {
   const dl = activeDownloads.get(id);
-  const record = await prisma.download.findUnique({ where: { id } });
+  const record = db.select().from(downloads).where(eq(downloads.id, id)).get();
   if (!record || record.state === 'COMPLETED') return false;
 
   if (dl) {
@@ -600,17 +581,15 @@ export async function cancelDownload(prisma: PrismaClient, id: string): Promise<
     } catch {}
   }
 
-  // Conditional update: do not overwrite a COMPLETED or already-CANCELLED record that
-  // raced us to the finish line between our initial DB read and now.
-  await prisma.download.updateMany({
-    where: { id, state: { notIn: ['COMPLETED', 'CANCELLED'] } },
-    data: { state: 'CANCELLED', tmpPath: null },
-  });
+  db.update(downloads)
+    .set({ state: 'CANCELLED', tmpPath: null, updatedAt: new Date() })
+    .where(and(eq(downloads.id, id), notInArray(downloads.state, ['COMPLETED', 'CANCELLED'])))
+    .run();
   return true;
 }
 
-export async function getTransfers(prisma: PrismaClient): Promise<TransferDto[]> {
-  const records = await prisma.download.findMany({ orderBy: { createdAt: 'desc' } });
+export async function getTransfers(db: Db): Promise<TransferDto[]> {
+  const records = db.select().from(downloads).orderBy(desc(downloads.createdAt)).all();
   return records.map((r) => {
     const dl = activeDownloads.get(r.id);
     const speedBps = dl ? calcSpeed(dl) : 0;
@@ -640,13 +619,13 @@ export async function getTransfers(prisma: PrismaClient): Promise<TransferDto[]>
             }
           })(),
       error: r.error,
-      createdAt: r.createdAt.toISOString(),
+      createdAt: r.createdAt!.toISOString(),
       completedAt: r.completedAt ? r.completedAt.toISOString() : null,
     };
   });
 }
 
-export async function pauseAllActiveDownloads(prisma: PrismaClient): Promise<void> {
+export async function pauseAllActiveDownloads(db: Db): Promise<void> {
   const ids = [...activeDownloads.keys()];
   await Promise.all(
     ids.map(async (id) => {
@@ -661,7 +640,12 @@ export async function pauseAllActiveDownloads(prisma: PrismaClient): Promise<voi
       }
       activeDownloads.delete(id);
       activeDownloadFolders.delete(id);
-      await prisma.download.update({ where: { id }, data: { state: 'PAUSED' } }).catch(() => {});
+      try {
+        db.update(downloads)
+          .set({ state: 'PAUSED', updatedAt: new Date() })
+          .where(eq(downloads.id, id))
+          .run();
+      } catch {}
     }),
   );
 }

@@ -1,40 +1,36 @@
 import { randomUUID } from 'node:crypto';
 
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from 'bun:test';
-import { execSync } from 'child_process';
+import { eq } from 'drizzle-orm';
 import { unlinkSync } from 'fs';
 
+import { type Db, applyMigrations, createDb } from '../db';
+import { conversations, messages } from '../schema';
 import { dmConversationId, handleChatMessage } from '../chat';
-import type { PrismaClient } from '@prisma/client';
-import { createPrismaClient } from '../db';
 
 const TEST_DB_URL = 'file:./data/test-chat.db';
-let prisma: PrismaClient;
+let db: Db;
 
 beforeAll(() => {
-  execSync(`bunx prisma db push --url "${TEST_DB_URL}"`, { stdio: 'pipe' });
-  prisma = createPrismaClient(TEST_DB_URL);
+  db = createDb(TEST_DB_URL);
+  applyMigrations(db);
 });
 
-afterAll(async () => {
-  await prisma.$disconnect();
+afterAll(() => {
+  db.$client.close();
   try {
     unlinkSync('./data/test-chat.db');
   } catch {}
 });
 
-beforeEach(async () => {
-  await prisma.message.deleteMany();
-  await prisma.conversation.deleteMany();
+beforeEach(() => {
+  db.delete(messages).run();
+  db.delete(conversations).run();
 });
 
 const NODE_A = 'aaaa1111';
 const NODE_B = 'bbbb2222';
 const NODE_C = 'cccc3333';
-
-// ---------------------------------------------------------------------------
-// dmConversationId helper
-// ---------------------------------------------------------------------------
 
 describe('dmConversationId', () => {
   test('sorts nodeIds deterministically', () => {
@@ -45,10 +41,6 @@ describe('dmConversationId', () => {
     expect(dmConversationId(NODE_A, NODE_B)).toMatch(/^dm:/);
   });
 });
-
-// ---------------------------------------------------------------------------
-// handleChatMessage — DM
-// ---------------------------------------------------------------------------
 
 describe('handleChatMessage — DM', () => {
   test('stores a valid DM message and creates the conversation', async () => {
@@ -64,17 +56,17 @@ describe('handleChatMessage — DM', () => {
         body: 'Hello!',
         sentAt: Date.now(),
       },
-      NODE_A, // authenticated sender
-      prisma,
-      NODE_B, // local node
+      NODE_A,
+      db,
+      NODE_B,
     );
 
-    const conv = await prisma.conversation.findUnique({ where: { id: convId } });
-    expect(conv).not.toBeNull();
+    const conv = db.select().from(conversations).where(eq(conversations.id, convId)).get();
+    expect(conv).not.toBeUndefined();
     expect(conv!.type).toBe('DM');
 
-    const msg = await prisma.message.findUnique({ where: { id: msgId } });
-    expect(msg).not.toBeNull();
+    const msg = db.select().from(messages).where(eq(messages.id, msgId)).get();
+    expect(msg).not.toBeUndefined();
     expect(msg!.body).toBe('Hello!');
     expect(msg!.fromNodeId).toBe(NODE_A);
   });
@@ -92,10 +84,10 @@ describe('handleChatMessage — DM', () => {
         sentAt: Date.now(),
       },
       NODE_A,
-      prisma,
+      db,
       NODE_B,
     );
-    const msg = await prisma.message.findUnique({ where: { id: msgId } });
+    const msg = db.select().from(messages).where(eq(messages.id, msgId)).get();
     expect(msg!.body).toBe('hello');
   });
 
@@ -111,38 +103,34 @@ describe('handleChatMessage — DM', () => {
         sentAt: Date.now(),
       },
       NODE_A,
-      prisma,
+      db,
       NODE_B,
     );
-
-    const msg = await prisma.message.findUnique({ where: { id: msgId } });
+    const msg = db.select().from(messages).where(eq(messages.id, msgId)).get();
     expect(msg!.fromNodeId).toBe(NODE_A);
   });
 
   test('drops DM with non-canonical (unsorted) conversationId', async () => {
     const msgId = randomUUID();
-    // Canonical for NODE_A→NODE_B is dm:aaaa1111:bbbb2222; flip the order to make it non-canonical.
-    const nonCanonical = `dm:${NODE_B}:${NODE_A}`;
     await handleChatMessage(
       {
         type: 'chat-message',
         messageId: msgId,
-        conversationId: nonCanonical,
+        conversationId: `dm:${NODE_B}:${NODE_A}`,
         fromNodeId: NODE_A,
         body: 'Split history attack',
         sentAt: Date.now(),
       },
       NODE_A,
-      prisma,
+      db,
       NODE_B,
     );
-    const msg = await prisma.message.findUnique({ where: { id: msgId } });
-    expect(msg).toBeNull();
+    const msg = db.select().from(messages).where(eq(messages.id, msgId)).get();
+    expect(msg).toBeUndefined();
   });
 
   test('drops DM whose conversationId does not contain the authenticated sender', async () => {
     const msgId = randomUUID();
-    // Conversation is between NODE_A and NODE_C, but sender is NODE_B — invalid
     await handleChatMessage(
       {
         type: 'chat-message',
@@ -152,18 +140,16 @@ describe('handleChatMessage — DM', () => {
         body: 'Sneaky',
         sentAt: Date.now(),
       },
-      NODE_B, // authenticated as NODE_B
-      prisma,
-      NODE_A, // local is NODE_A — not in this conversation either
+      NODE_B,
+      db,
+      NODE_A,
     );
-
-    const msg = await prisma.message.findUnique({ where: { id: msgId } });
-    expect(msg).toBeNull();
+    const msg = db.select().from(messages).where(eq(messages.id, msgId)).get();
+    expect(msg).toBeUndefined();
   });
 
   test('drops DM whose conversationId does not contain the local node', async () => {
     const msgId = randomUUID();
-    // Conversation is between NODE_A and NODE_C; local node is NODE_B — invalid
     await handleChatMessage(
       {
         type: 'chat-message',
@@ -174,18 +160,20 @@ describe('handleChatMessage — DM', () => {
         sentAt: Date.now(),
       },
       NODE_A,
-      prisma,
-      NODE_B, // local is NODE_B, not NODE_C
+      db,
+      NODE_B,
     );
-
-    const msg = await prisma.message.findUnique({ where: { id: msgId } });
-    expect(msg).toBeNull();
+    const msg = db.select().from(messages).where(eq(messages.id, msgId)).get();
+    expect(msg).toBeUndefined();
   });
 
   test('bumps conversation updatedAt when a new message arrives', async () => {
     const convId = dmConversationId(NODE_A, NODE_B);
-    await prisma.conversation.create({ data: { id: convId, type: 'DM' } });
-    const before = await prisma.conversation.findUnique({ where: { id: convId } });
+    const now = new Date();
+    db.insert(conversations)
+      .values({ id: convId, type: 'DM', createdAt: now, updatedAt: now })
+      .run();
+    const before = db.select().from(conversations).where(eq(conversations.id, convId)).get()!;
 
     await new Promise((r) => setTimeout(r, 20));
 
@@ -199,17 +187,16 @@ describe('handleChatMessage — DM', () => {
         sentAt: Date.now(),
       },
       NODE_A,
-      prisma,
+      db,
       NODE_B,
     );
 
-    const after = await prisma.conversation.findUnique({ where: { id: convId } });
-    expect(after!.updatedAt.getTime()).toBeGreaterThan(before!.updatedAt.getTime());
+    const after = db.select().from(conversations).where(eq(conversations.id, convId)).get()!;
+    expect(after.updatedAt!.getTime()).toBeGreaterThan(before.updatedAt!.getTime());
   });
 
   test('ignores conversationName on DM conversations', async () => {
     const convId = dmConversationId(NODE_A, NODE_B);
-
     await handleChatMessage(
       {
         type: 'chat-message',
@@ -221,18 +208,16 @@ describe('handleChatMessage — DM', () => {
         conversationName: 'Should Be Ignored',
       },
       NODE_A,
-      prisma,
+      db,
       NODE_B,
     );
-
-    const conv = await prisma.conversation.findUnique({ where: { id: convId } });
-    expect(conv!.name).toBeNull();
+    const conv = db.select().from(conversations).where(eq(conversations.id, convId)).get()!;
+    expect(conv.name).toBeNull();
   });
 
   test('drops message with out-of-range sentAt (invalid Date)', async () => {
     const msgId = randomUUID();
     const convId = dmConversationId(NODE_A, NODE_B);
-    // 8_640_000_000_000_001 exceeds the max valid JS Date timestamp — new Date() would be Invalid
     await handleChatMessage(
       {
         type: 'chat-message',
@@ -243,13 +228,13 @@ describe('handleChatMessage — DM', () => {
         sentAt: 8_640_000_000_000_001,
       },
       NODE_A,
-      prisma,
+      db,
       NODE_B,
     );
-    const msg = await prisma.message.findUnique({ where: { id: msgId } });
-    expect(msg).toBeNull();
-    const conv = await prisma.conversation.findUnique({ where: { id: convId } });
-    expect(conv).toBeNull();
+    expect(db.select().from(messages).where(eq(messages.id, msgId)).get()).toBeUndefined();
+    expect(
+      db.select().from(conversations).where(eq(conversations.id, convId)).get(),
+    ).toBeUndefined();
   });
 
   test('deduplicates — replayed messageId is a complete no-op (no conversation bump)', async () => {
@@ -264,24 +249,27 @@ describe('handleChatMessage — DM', () => {
       sentAt: Date.now(),
     };
 
-    await handleChatMessage(base, NODE_A, prisma, NODE_B);
-    const convAfterFirst = await prisma.conversation.findUnique({ where: { id: convId } });
+    await handleChatMessage(base, NODE_A, db, NODE_B);
+    const convAfterFirst = db
+      .select()
+      .from(conversations)
+      .where(eq(conversations.id, convId))
+      .get()!;
 
     await new Promise((r) => setTimeout(r, 20));
-    await handleChatMessage({ ...base, body: 'Second' }, NODE_A, prisma, NODE_B);
+    await handleChatMessage({ ...base, body: 'Second' }, NODE_A, db, NODE_B);
 
-    const msg = await prisma.message.findUnique({ where: { id: msgId } });
-    expect(msg!.body).toBe('First'); // first write wins
+    const msg = db.select().from(messages).where(eq(messages.id, msgId)).get()!;
+    expect(msg.body).toBe('First');
 
-    // The conversation must not have been touched by the replay
-    const convAfterReplay = await prisma.conversation.findUnique({ where: { id: convId } });
-    expect(convAfterReplay!.updatedAt.getTime()).toBe(convAfterFirst!.updatedAt.getTime());
+    const convAfterReplay = db
+      .select()
+      .from(conversations)
+      .where(eq(conversations.id, convId))
+      .get()!;
+    expect(convAfterReplay.updatedAt!.getTime()).toBe(convAfterFirst.updatedAt!.getTime());
   });
 });
-
-// ---------------------------------------------------------------------------
-// handleChatMessage — group
-// ---------------------------------------------------------------------------
 
 describe('handleChatMessage — group', () => {
   test('stores a group message and creates the conversation', async () => {
@@ -299,16 +287,16 @@ describe('handleChatMessage — group', () => {
         conversationName: 'Dev Chat',
       },
       NODE_A,
-      prisma,
+      db,
       NODE_B,
     );
 
-    const conv = await prisma.conversation.findUnique({ where: { id: convId } });
-    expect(conv!.type).toBe('GROUP');
-    expect(conv!.name).toBe('Dev Chat');
+    const conv = db.select().from(conversations).where(eq(conversations.id, convId)).get()!;
+    expect(conv.type).toBe('GROUP');
+    expect(conv.name).toBe('Dev Chat');
 
-    const msg = await prisma.message.findUnique({ where: { id: msgId } });
-    expect(msg!.body).toBe('Hey group');
+    const msg = db.select().from(messages).where(eq(messages.id, msgId)).get()!;
+    expect(msg.body).toBe('Hey group');
   });
 
   test('updates group name when conversationName changes', async () => {
@@ -325,10 +313,9 @@ describe('handleChatMessage — group', () => {
         conversationName: 'Old Name',
       },
       NODE_A,
-      prisma,
+      db,
       NODE_B,
     );
-
     await handleChatMessage(
       {
         type: 'chat-message',
@@ -340,17 +327,16 @@ describe('handleChatMessage — group', () => {
         conversationName: 'New Name',
       },
       NODE_A,
-      prisma,
+      db,
       NODE_B,
     );
 
-    const conv = await prisma.conversation.findUnique({ where: { id: convId } });
-    expect(conv!.name).toBe('New Name');
+    const conv = db.select().from(conversations).where(eq(conversations.id, convId)).get()!;
+    expect(conv.name).toBe('New Name');
   });
 
   test('drops group message whose conversationId has invalid prefix', async () => {
     const msgId = randomUUID();
-
     await handleChatMessage(
       {
         type: 'chat-message',
@@ -361,18 +347,15 @@ describe('handleChatMessage — group', () => {
         sentAt: Date.now(),
       },
       NODE_A,
-      prisma,
+      db,
       NODE_B,
     );
-
-    const msg = await prisma.message.findUnique({ where: { id: msgId } });
-    expect(msg).toBeNull();
+    expect(db.select().from(messages).where(eq(messages.id, msgId)).get()).toBeUndefined();
   });
 
   test('accepts group message for any authenticated sender', async () => {
     const msgId = randomUUID();
     const convId = `group:${randomUUID()}`;
-
     await handleChatMessage(
       {
         type: 'chat-message',
@@ -383,11 +366,9 @@ describe('handleChatMessage — group', () => {
         sentAt: Date.now(),
       },
       NODE_C,
-      prisma,
+      db,
       NODE_A,
     );
-
-    const msg = await prisma.message.findUnique({ where: { id: msgId } });
-    expect(msg).not.toBeNull();
+    expect(db.select().from(messages).where(eq(messages.id, msgId)).get()).not.toBeUndefined();
   });
 });

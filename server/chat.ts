@@ -1,6 +1,8 @@
-import type { PrismaClient } from '@prisma/client';
+import { eq } from 'drizzle-orm';
 
+import { conversations, messages } from './schema';
 import type { ChatMessage } from './types';
+import type { Db } from './db';
 
 export function dmConversationId(nodeA: string, nodeB: string): string {
   return `dm:${[nodeA, nodeB].sort().join(':')}`;
@@ -9,18 +11,15 @@ export function dmConversationId(nodeA: string, nodeB: string): string {
 export async function handleChatMessage(
   msg: ChatMessage,
   senderNodeId: string,
-  prisma: PrismaClient,
+  db: Db,
   localNodeId: string,
 ): Promise<void> {
   const { conversationId } = msg;
 
   if (conversationId.startsWith('dm:')) {
-    // Enforce the canonical sorted form — prevents duplicate threads from non-sorted IDs.
-    if (conversationId !== dmConversationId(senderNodeId, localNodeId)) {
-      return;
-    }
+    if (conversationId !== dmConversationId(senderNodeId, localNodeId)) return;
   } else if (!conversationId.startsWith('group:')) {
-    return; // unknown prefix — drop
+    return;
   }
 
   const isGroup = conversationId.startsWith('group:');
@@ -28,35 +27,37 @@ export async function handleChatMessage(
   const sentAt = new Date(msg.sentAt);
   if (isNaN(sentAt.getTime())) return;
 
-  // Wrap the dedup check and both writes in a transaction so no concurrent delivery can
-  // slip between the findUnique and the message write and incorrectly bump the conversation.
-  await prisma.$transaction(async (tx) => {
-    const existing = await tx.message.findUnique({ where: { id: msg.messageId } });
+  const now = new Date();
+
+  db.transaction((tx) => {
+    const existing = tx.select().from(messages).where(eq(messages.id, msg.messageId)).get();
     if (existing) return;
 
-    await tx.conversation.upsert({
-      where: { id: conversationId },
-      create: {
+    tx.insert(conversations)
+      .values({
         id: conversationId,
         type: isGroup ? 'GROUP' : 'DM',
         name: isGroup ? (msg.conversationName ?? null) : null,
-      },
-      update: {
-        updatedAt: new Date(),
-        ...(isGroup && msg.conversationName ? { name: msg.conversationName } : {}),
-      },
-    });
+        createdAt: now,
+        updatedAt: now,
+      })
+      .onConflictDoUpdate({
+        target: conversations.id,
+        set: {
+          updatedAt: now,
+          ...(isGroup && msg.conversationName ? { name: msg.conversationName } : {}),
+        },
+      })
+      .run();
 
-    // Always use the authenticated senderNodeId — never trust the self-reported fromNodeId.
-    // Trim body to match the REST API send path — peers could send leading/trailing whitespace.
-    await tx.message.create({
-      data: {
+    tx.insert(messages)
+      .values({
         id: msg.messageId,
         conversationId,
         fromNodeId: senderNodeId,
         body: msg.body.trim(),
         sentAt,
-      },
-    });
+      })
+      .run();
   });
 }

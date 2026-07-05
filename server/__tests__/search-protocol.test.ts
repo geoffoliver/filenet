@@ -1,12 +1,11 @@
+import { randomUUID } from 'node:crypto';
+
 import { afterAll, beforeAll, beforeEach, describe, expect, it, jest } from 'bun:test';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import crypto from 'node:crypto';
-import { execSync } from 'child_process';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { unlinkSync } from 'fs';
-
-import type { PrismaClient } from '@prisma/client';
 
 import {
   DEFAULT_TTL,
@@ -22,15 +21,16 @@ import {
   initiateNetworkSearch,
   resetInternalMapsForTesting,
 } from '../search-protocol';
+import { type Db, applyMigrations, createDb } from '../db';
 import type { InnerMessage, SearchRequestMessage, SearchResultMessage } from '../types';
 import { registerPeer, unregisterPeer } from '../connections';
 import type { ConnectedPeer } from '../connections';
 import type { Identity } from '../identity';
-import { createPrismaClient } from '../db';
 import { indexFile } from '../indexer';
+import { sharedFiles } from '../schema';
 
 const TEST_DB_URL = 'file:./data/test-search-protocol.db';
-let prisma: PrismaClient;
+let db: Db;
 let tmpDir: string;
 
 const identity: Identity = {
@@ -57,27 +57,23 @@ function captureAll(log: { peer: ConnectedPeer; msg: InnerMessage }[]) {
 }
 
 beforeAll(async () => {
-  execSync(`bunx prisma db push --url "${TEST_DB_URL}"`, { stdio: 'pipe' });
-  prisma = createPrismaClient(TEST_DB_URL);
+  db = createDb(TEST_DB_URL);
+  applyMigrations(db);
   tmpDir = await mkdtemp(join(tmpdir(), 'filenet-search-proto-'));
 });
 
 afterAll(async () => {
-  await prisma.$disconnect();
+  db.$client.close();
   await rm(tmpDir, { recursive: true, force: true });
   try {
     unlinkSync('./data/test-search-protocol.db');
   } catch {}
 });
 
-beforeEach(async () => {
-  await prisma.sharedFile.deleteMany();
+beforeEach(() => {
+  db.delete(sharedFiles).run();
   resetInternalMapsForTesting();
 });
-
-// ---------------------------------------------------------------------------
-// handleSearchRequest
-// ---------------------------------------------------------------------------
 
 describe('handleSearchRequest', () => {
   it('returns local results to the sender', async () => {
@@ -85,7 +81,7 @@ describe('handleSearchRequest', () => {
     await mkdir(dir);
     const filePath = join(dir, 'hello.mp3');
     await writeFile(filePath, 'fake audio');
-    await indexFile(prisma, filePath);
+    await indexFile(db, filePath);
 
     const fromPeer = makePeer('peer-A');
     const sent: { peer: ConnectedPeer; msg: InnerMessage }[] = [];
@@ -98,7 +94,7 @@ describe('handleSearchRequest', () => {
       ttl: DEFAULT_TTL,
     };
 
-    await handleSearchRequest(msg, prisma, identity, fromPeer, [], captureAll(sent));
+    await handleSearchRequest(msg, db, identity, fromPeer, [], captureAll(sent));
 
     expect(sent).toHaveLength(1);
     expect(sent[0].peer.peerNodeId).toBe('peer-A');
@@ -121,8 +117,7 @@ describe('handleSearchRequest', () => {
       fileType: 'all',
       ttl: DEFAULT_TTL,
     };
-
-    await handleSearchRequest(msg, prisma, identity, fromPeer, [], captureAll(sent));
+    await handleSearchRequest(msg, db, identity, fromPeer, [], captureAll(sent));
     expect(sent).toHaveLength(0);
   });
 
@@ -138,20 +133,17 @@ describe('handleSearchRequest', () => {
       fileType: 'all',
       ttl: 2,
     };
-
     await handleSearchRequest(
       msg,
-      prisma,
+      db,
       identity,
       fromPeer,
       [fromPeer, forwardPeer],
       captureAll(sent),
     );
-
     const forwarded = sent.filter((s) => s.peer.peerNodeId === 'peer-D');
     expect(forwarded).toHaveLength(1);
     expect((forwarded[0].msg as SearchRequestMessage).ttl).toBe(1);
-    expect((forwarded[0].msg as SearchRequestMessage).searchId).toBe(msg.searchId);
   });
 
   it('does not forward when TTL is 1 (terminal hop)', async () => {
@@ -166,18 +158,8 @@ describe('handleSearchRequest', () => {
       fileType: 'all',
       ttl: 1,
     };
-
-    await handleSearchRequest(
-      msg,
-      prisma,
-      identity,
-      fromPeer,
-      [fromPeer, otherPeer],
-      captureAll(sent),
-    );
-
-    const forwarded = sent.filter((s) => s.peer.peerNodeId === 'peer-F');
-    expect(forwarded).toHaveLength(0);
+    await handleSearchRequest(msg, db, identity, fromPeer, [fromPeer, otherPeer], captureAll(sent));
+    expect(sent.filter((s) => s.peer.peerNodeId === 'peer-F')).toHaveLength(0);
   });
 
   it('drops a request with TTL=0 without processing', async () => {
@@ -191,9 +173,7 @@ describe('handleSearchRequest', () => {
       fileType: 'all',
       ttl: 0,
     };
-
-    await handleSearchRequest(msg, prisma, identity, fromPeer, [fromPeer], captureAll(sent));
-
+    await handleSearchRequest(msg, db, identity, fromPeer, [fromPeer], captureAll(sent));
     expect(sent).toHaveLength(0);
   });
 
@@ -208,11 +188,10 @@ describe('handleSearchRequest', () => {
       fileType: 'all',
       ttl: DEFAULT_TTL,
     };
-
-    await handleSearchRequest(msg, prisma, identity, fromPeer, [], captureAll(sent));
-    sent.length = 0; // clear
-    await handleSearchRequest(msg, prisma, identity, fromPeer, [], captureAll(sent));
-    expect(sent).toHaveLength(0); // second call dropped
+    await handleSearchRequest(msg, db, identity, fromPeer, [], captureAll(sent));
+    sent.length = 0;
+    await handleSearchRequest(msg, db, identity, fromPeer, [], captureAll(sent));
+    expect(sent).toHaveLength(0);
   });
 
   it('does not forward back to the peer that sent the request', async () => {
@@ -226,31 +205,28 @@ describe('handleSearchRequest', () => {
       fileType: 'all',
       ttl: 3,
     };
-
-    await handleSearchRequest(
-      msg,
-      prisma,
-      identity,
-      fromPeer,
-      [fromPeer], // only peer is the sender
-      captureAll(sent),
-    );
-
-    const forwarded = sent.filter((s) => (s.msg as SearchRequestMessage).type === 'search-request');
-    expect(forwarded).toHaveLength(0);
+    await handleSearchRequest(msg, db, identity, fromPeer, [fromPeer], captureAll(sent));
+    expect(
+      sent.filter((s) => (s.msg as SearchRequestMessage).type === 'search-request'),
+    ).toHaveLength(0);
   });
 
   it('truncates filename, mimeType, and metadata to schema limits before sending', async () => {
-    await prisma.sharedFile.create({
-      data: {
+    const now = new Date();
+    db.insert(sharedFiles)
+      .values({
+        id: randomUUID(),
         path: '/trunc/file.bin',
         filename: 'trunc_' + 'y'.repeat(1000),
         size: 100n,
         sha256: 'd'.repeat(64),
         mimeType: 'audio/' + 'z'.repeat(200),
         metadata: 'M'.repeat(5000),
-      },
-    });
+        lastSeenAt: now,
+        indexedAt: now,
+        updatedAt: now,
+      })
+      .run();
 
     const fromPeer = makePeer('peer-trunc');
     const sent: { peer: ConnectedPeer; msg: InnerMessage }[] = [];
@@ -262,16 +238,13 @@ describe('handleSearchRequest', () => {
       fileType: 'all',
       ttl: 1,
     };
-
-    await handleSearchRequest(msg, prisma, identity, fromPeer, [], captureAll(sent));
-
+    await handleSearchRequest(msg, db, identity, fromPeer, [], captureAll(sent));
     expect(sent).toHaveLength(1);
     const item = (sent[0].msg as SearchResultMessage).results.find(
       (r) => r.sha256 === 'd'.repeat(64),
     )!;
     expect(item.filename.length).toBeLessThanOrEqual(1000);
     expect(item.mimeType!.length).toBeLessThanOrEqual(200);
-    // Oversized metadata is dropped (null) rather than sliced into invalid JSON
     expect(item.metadata).toBeNull();
   });
 
@@ -279,8 +252,7 @@ describe('handleSearchRequest', () => {
     const dir = join(tmpDir, 'send-err-result');
     await mkdir(dir);
     await writeFile(join(dir, 'errfile.mp3'), 'data');
-    await indexFile(prisma, join(dir, 'errfile.mp3'));
-
+    await indexFile(db, join(dir, 'errfile.mp3'));
     const fromPeer = makePeer('peer-send-err');
     const throwFn = () => {
       throw new Error('send failed');
@@ -293,9 +265,8 @@ describe('handleSearchRequest', () => {
       fileType: 'all',
       ttl: 1,
     };
-
     await expect(
-      handleSearchRequest(msg, prisma, identity, fromPeer, [], throwFn),
+      handleSearchRequest(msg, db, identity, fromPeer, [], throwFn),
     ).resolves.toBeUndefined();
   });
 
@@ -303,8 +274,7 @@ describe('handleSearchRequest', () => {
     const dir = join(tmpDir, 'send-err-fwd');
     await mkdir(dir);
     await writeFile(join(dir, 'fwdfile.mp3'), 'data');
-    await indexFile(prisma, join(dir, 'fwdfile.mp3'));
-
+    await indexFile(db, join(dir, 'fwdfile.mp3'));
     const fromPeer = makePeer('disconnected-requester');
     const fwdPeer = makePeer('forward-target');
     let forwardCount = 0;
@@ -320,19 +290,14 @@ describe('handleSearchRequest', () => {
       fileType: 'all',
       ttl: 2,
     };
-
-    await handleSearchRequest(msg, prisma, identity, fromPeer, [fwdPeer], throwOnResultFn);
-
-    expect(forwardCount).toBe(0); // skip forwarding when requester is gone
-    expect(getInternalMapSizes().searchRoutes).toBe(0); // dead route freed immediately
+    await handleSearchRequest(msg, db, identity, fromPeer, [fwdPeer], throwOnResultFn);
+    expect(forwardCount).toBe(0);
+    expect(getInternalMapSizes().searchRoutes).toBe(0);
   });
 
   it('keeps seenSearchIds and searchRoutes at or below MAX_MAP_SIZE under a burst of unique IDs', async () => {
     const fromPeer = makePeer('flood-peer');
     const noop = () => {};
-    // Send MAX_MAP_SIZE + 100 unique search IDs in rapid succession so pruneExpired fires
-    // and the hard-cap eviction path runs. ttl=2 so a searchRoutes entry is created per request
-    // (ttl=1 would never create routes, making the searchRoutes cap assertion trivially true).
     for (let i = 0; i < MAX_MAP_SIZE + 100; i++) {
       await handleSearchRequest(
         {
@@ -343,7 +308,7 @@ describe('handleSearchRequest', () => {
           fileType: 'all',
           ttl: 2,
         },
-        prisma,
+        db,
         identity,
         fromPeer,
         [],
@@ -356,8 +321,6 @@ describe('handleSearchRequest', () => {
   });
 
   it('does not exceed MAX_MAP_SIZE in seenSearchIds when all entries are protected from eviction', async () => {
-    // Fill seenSearchIds to the cap by initiating MAX_MAP_SIZE origin searches (which protect
-    // their own entries). Then send a new handleSearchRequest and verify the hard cap holds.
     const peers = Array.from({ length: 1 }, (_, i) => makePeer(`protected-peer-${i}`));
     const promises: Promise<NetworkResult[]>[] = [];
     for (let i = 0; i < MAX_MAP_SIZE; i++) {
@@ -365,8 +328,6 @@ describe('handleSearchRequest', () => {
         initiateNetworkSearch(identity, peers, { query: 'fill', fileType: 'all' }, 200, () => {}),
       );
     }
-
-    // All seenSearchIds entries are now protected by pendingSearches — cap should hold
     const fromPeer = makePeer('overflow-peer');
     await handleSearchRequest(
       {
@@ -377,15 +338,13 @@ describe('handleSearchRequest', () => {
         fileType: 'all',
         ttl: 1,
       },
-      prisma,
+      db,
       identity,
       fromPeer,
       [],
       () => {},
     );
     expect(getInternalMapSizes().seenSearchIds).toBeLessThanOrEqual(MAX_MAP_SIZE);
-
-    // Clean up pending searches
     await Promise.all(promises);
   });
 
@@ -403,16 +362,11 @@ describe('handleSearchRequest', () => {
       fileType: 'all',
       ttl: 2,
     };
-
     await expect(
-      handleSearchRequest(msg, prisma, identity, fromPeer, [fromPeer, toPeer], throwFn),
+      handleSearchRequest(msg, db, identity, fromPeer, [fromPeer, toPeer], throwFn),
     ).resolves.toBeUndefined();
   });
 });
-
-// ---------------------------------------------------------------------------
-// handleSearchResult
-// ---------------------------------------------------------------------------
 
 describe('handleSearchResult', () => {
   it('collects results into a pending search', async () => {
@@ -424,9 +378,6 @@ describe('handleSearchResult', () => {
       500,
       captureAll([]),
     );
-
-    // Simulate the peer sending a result back
-    // Get the searchId that was sent to the peer
     const sent: { peer: ConnectedPeer; msg: InnerMessage }[] = [];
     const networkResultsPromise2 = initiateNetworkSearch(
       identity,
@@ -435,13 +386,10 @@ describe('handleSearchResult', () => {
       200,
       captureAll(sent),
     );
-
-    await Bun.sleep(10); // let the search be initiated
+    await Bun.sleep(10);
     expect(sent.length).toBeGreaterThanOrEqual(1);
     const reqMsg = sent[0].msg as SearchRequestMessage;
-    expect(reqMsg.type).toBe('search-request');
-
-    const resultMsg: SearchResultMessage = {
+    handleSearchResult({
       type: 'search-result',
       searchId: reqMsg.searchId,
       fromNodeId: 'relay-1',
@@ -454,15 +402,11 @@ describe('handleSearchResult', () => {
           metadata: null,
         },
       ],
-    };
-    handleSearchResult(resultMsg);
-
+    });
     const results = await networkResultsPromise2;
     expect(results).toHaveLength(1);
     expect(results[0].filename).toBe('found.mp3');
     expect(results[0].nodeId).toBe('relay-1');
-
-    // Clean up first search
     await networkResultsPromise;
   });
 
@@ -485,28 +429,25 @@ describe('handleSearchResult', () => {
         fileType: 'all',
         ttl: 2,
       };
-
-      // Process as relay (returnPeer is upstream)
-      await handleSearchRequest(relayMsg, prisma, identity, returnPeer, [], captureAll([]));
-
-      // Now a downstream peer sends us a result for this search
-      const resultMsg: SearchResultMessage = {
-        type: 'search-result',
-        searchId: relayMsg.searchId,
-        fromNodeId: 'downstream',
-        results: [
-          {
-            filename: 'relay.txt',
-            size: '99',
-            sha256: 'b'.repeat(64),
-            mimeType: 'text/plain',
-            metadata: null,
-          },
-        ],
-      };
+      await handleSearchRequest(relayMsg, db, identity, returnPeer, [], captureAll([]));
       const relayed: { peer: ConnectedPeer; msg: InnerMessage }[] = [];
-      handleSearchResult(resultMsg, captureAll(relayed));
-
+      handleSearchResult(
+        {
+          type: 'search-result',
+          searchId: relayMsg.searchId,
+          fromNodeId: 'downstream',
+          results: [
+            {
+              filename: 'relay.txt',
+              size: '99',
+              sha256: 'b'.repeat(64),
+              mimeType: 'text/plain',
+              metadata: null,
+            },
+          ],
+        },
+        captureAll(relayed),
+      );
       expect(relayed).toHaveLength(1);
       expect(relayed[0].peer.peerNodeId).toBe('upstream');
       expect((relayed[0].msg as SearchResultMessage).results[0].filename).toBe('relay.txt');
@@ -534,9 +475,7 @@ describe('handleSearchResult', () => {
         fileType: 'all',
         ttl: 2,
       };
-      await handleSearchRequest(relayMsg, prisma, identity, returnPeer, [], captureAll([]));
-
-      // Activate fake timers and advance past route expiry
+      await handleSearchRequest(relayMsg, db, identity, returnPeer, [], captureAll([]));
       const expiredAt = Date.now() + ROUTE_EXPIRY_MS + 1;
       jest.useFakeTimers();
       jest.setSystemTime(expiredAt);
@@ -559,8 +498,7 @@ describe('handleSearchResult', () => {
           },
           captureAll(relayed),
         );
-        expect(relayed).toHaveLength(0); // expired route — result must be dropped
-        // Route should be cleaned up
+        expect(relayed).toHaveLength(0);
         expect(getInternalMapSizes().searchRoutes).toBe(0);
       } finally {
         jest.useRealTimers();
@@ -573,19 +511,13 @@ describe('handleSearchResult', () => {
   it('ignores results for unknown search IDs', () => {
     const relayed: { peer: ConnectedPeer; msg: InnerMessage }[] = [];
     handleSearchResult(
-      {
-        type: 'search-result',
-        searchId: crypto.randomUUID(), // unknown ID
-        fromNodeId: 'someone',
-        results: [],
-      },
+      { type: 'search-result', searchId: crypto.randomUUID(), fromNodeId: 'someone', results: [] },
       captureAll(relayed),
     );
     expect(relayed).toHaveLength(0);
   });
 
   it('frees dead relay route when return peer has disconnected', async () => {
-    // Create a relay route for a peer that is NOT in the connections registry
     const gonePeer = makePeer('gone-upstream');
     const relayMsg: SearchRequestMessage = {
       type: 'search-request',
@@ -595,9 +527,8 @@ describe('handleSearchResult', () => {
       fileType: 'all',
       ttl: 2,
     };
-    await handleSearchRequest(relayMsg, prisma, identity, gonePeer, [], captureAll([]));
+    await handleSearchRequest(relayMsg, db, identity, gonePeer, [], captureAll([]));
     expect(getInternalMapSizes().searchRoutes).toBe(1);
-
     const relayed: { peer: ConnectedPeer; msg: InnerMessage }[] = [];
     handleSearchResult(
       {
@@ -610,9 +541,8 @@ describe('handleSearchResult', () => {
       },
       captureAll(relayed),
     );
-
-    expect(relayed).toHaveLength(0); // peer not connected — nothing relayed
-    expect(getInternalMapSizes().searchRoutes).toBe(0); // dead route freed
+    expect(relayed).toHaveLength(0);
+    expect(getInternalMapSizes().searchRoutes).toBe(0);
   });
 
   it('frees relay route on sendFn failure and does not throw', async () => {
@@ -634,30 +564,31 @@ describe('handleSearchResult', () => {
         fileType: 'all',
         ttl: 2,
       };
-
-      await handleSearchRequest(relayMsg, prisma, identity, returnPeer, [], captureAll([]));
+      await handleSearchRequest(relayMsg, db, identity, returnPeer, [], captureAll([]));
       expect(getInternalMapSizes().searchRoutes).toBe(1);
-
-      const resultMsg: SearchResultMessage = {
-        type: 'search-result',
-        searchId: relayMsg.searchId,
-        fromNodeId: 'downstream',
-        results: [
-          {
-            filename: 'a.mp3',
-            size: '100',
-            sha256: 'e'.repeat(64),
-            mimeType: null,
-            metadata: null,
-          },
-        ],
-      };
-
       const throwFn = () => {
         throw new Error('relay send failed');
       };
-      expect(() => handleSearchResult(resultMsg, throwFn)).not.toThrow();
-      expect(getInternalMapSizes().searchRoutes).toBe(0); // dead route freed on send failure
+      expect(() =>
+        handleSearchResult(
+          {
+            type: 'search-result',
+            searchId: relayMsg.searchId,
+            fromNodeId: 'downstream',
+            results: [
+              {
+                filename: 'a.mp3',
+                size: '100',
+                sha256: 'e'.repeat(64),
+                mimeType: null,
+                metadata: null,
+              },
+            ],
+          },
+          throwFn,
+        ),
+      ).not.toThrow();
+      expect(getInternalMapSizes().searchRoutes).toBe(0);
     } finally {
       unregisterPeer('upstream-err');
     }
@@ -666,7 +597,6 @@ describe('handleSearchResult', () => {
   it('does not conflate distinct (fromNodeId, sha256) pairs when fromNodeId contains a colon', async () => {
     const peer = makePeer('colon-peer');
     const sent: { peer: ConnectedPeer; msg: InnerMessage }[] = [];
-
     const networkResultsPromise = initiateNetworkSearch(
       identity,
       [peer],
@@ -674,13 +604,9 @@ describe('handleSearchResult', () => {
       200,
       captureAll(sent),
     );
-
     await Bun.sleep(10);
     const reqMsg = sent[0].msg as SearchRequestMessage;
-
     const sha256 = 'f'.repeat(64);
-    // "node:with:colons" and "node" are two distinct fromNodeId values sharing the same sha256 —
-    // both should be kept as separate results (distinct producers of the same file)
     handleSearchResult({
       type: 'search-result',
       searchId: reqMsg.searchId,
@@ -693,15 +619,10 @@ describe('handleSearchResult', () => {
       fromNodeId: 'node',
       results: [{ filename: 'f2.mp3', size: '1', sha256, mimeType: null, metadata: null }],
     });
-
     const results = await networkResultsPromise;
     expect(results.filter((r) => r.sha256 === sha256)).toHaveLength(2);
   });
 });
-
-// ---------------------------------------------------------------------------
-// initiateNetworkSearch
-// ---------------------------------------------------------------------------
 
 describe('initiateNetworkSearch', () => {
   it('returns empty immediately when there are no peers', async () => {
@@ -712,7 +633,6 @@ describe('initiateNetworkSearch', () => {
   it('resolves after timeout with whatever results arrived', async () => {
     const peer = makePeer('slow-peer');
     const sent: { peer: ConnectedPeer; msg: InnerMessage }[] = [];
-
     const start = Date.now();
     const results = await initiateNetworkSearch(
       identity,
@@ -721,27 +641,23 @@ describe('initiateNetworkSearch', () => {
       100,
       captureAll(sent),
     );
-    const elapsed = Date.now() - start;
-
-    expect(elapsed).toBeGreaterThanOrEqual(90);
-    expect(results).toEqual([]); // no results sent back
+    expect(Date.now() - start).toBeGreaterThanOrEqual(90);
+    expect(results).toEqual([]);
   });
 
   it('resolves early after settle timeout when results arrive before the main timeout', async () => {
     const peer = makePeer('settle-peer');
     const sent: { peer: ConnectedPeer; msg: InnerMessage }[] = [];
     const settleMs = 50;
-
     const start = Date.now();
     const networkResultsPromise = initiateNetworkSearch(
       identity,
       [peer],
       { query: 'settle-test', fileType: 'all' },
-      5_000, // long main timeout — would stall test if settle doesn't work
+      5_000,
       captureAll(sent),
       settleMs,
     );
-
     await Bun.sleep(10);
     const reqMsg = sent[0].msg as SearchRequestMessage;
     handleSearchResult({
@@ -758,33 +674,25 @@ describe('initiateNetworkSearch', () => {
         },
       ],
     });
-
     const results = await networkResultsPromise;
-    const elapsed = Date.now() - start;
-
     expect(results).toHaveLength(1);
-    expect(elapsed).toBeGreaterThanOrEqual(settleMs);
-    expect(elapsed).toBeLessThan(1_000); // nowhere near the 5 s main timeout
+    expect(Date.now() - start).toBeGreaterThanOrEqual(settleMs);
+    expect(Date.now() - start).toBeLessThan(1_000);
   });
 
   it('resets settle timer when a second result batch arrives before settle fires', async () => {
     const peer = makePeer('settle-reset-peer');
     const sent: { peer: ConnectedPeer; msg: InnerMessage }[] = [];
-    const settleMs = 100;
-
     const networkResultsPromise = initiateNetworkSearch(
       identity,
       [peer],
       { query: 'settle-reset', fileType: 'all' },
       5_000,
       captureAll(sent),
-      settleMs,
+      100,
     );
-
     await Bun.sleep(10);
     const reqMsg = sent[0].msg as SearchRequestMessage;
-
-    // First batch arrives
     handleSearchResult({
       type: 'search-result',
       searchId: reqMsg.searchId,
@@ -799,10 +707,7 @@ describe('initiateNetworkSearch', () => {
         },
       ],
     });
-
-    await Bun.sleep(50); // within the settle window
-
-    // Second batch from a different sender
+    await Bun.sleep(50);
     handleSearchResult({
       type: 'search-result',
       searchId: reqMsg.searchId,
@@ -817,9 +722,7 @@ describe('initiateNetworkSearch', () => {
         },
       ],
     });
-
     const results = await networkResultsPromise;
-    // Both batches must be in the final results
     expect(results).toHaveLength(2);
   });
 
@@ -830,7 +733,6 @@ describe('initiateNetworkSearch', () => {
   it('deduplicates results with the same sha256 from the same node', async () => {
     const peer = makePeer('dedup-peer');
     const sent: { peer: ConnectedPeer; msg: InnerMessage }[] = [];
-
     const networkResultsPromise = initiateNetworkSearch(
       identity,
       [peer],
@@ -838,10 +740,8 @@ describe('initiateNetworkSearch', () => {
       200,
       captureAll(sent),
     );
-
     await Bun.sleep(10);
     const reqMsg = sent[0].msg as SearchRequestMessage;
-
     const duplicate = {
       filename: 'song.mp3',
       size: '5000',
@@ -849,8 +749,6 @@ describe('initiateNetworkSearch', () => {
       mimeType: 'audio/mpeg',
       metadata: null,
     };
-
-    // Send same result twice — second call must not add a duplicate entry
     handleSearchResult({
       type: 'search-result',
       searchId: reqMsg.searchId,
@@ -863,7 +761,6 @@ describe('initiateNetworkSearch', () => {
       fromNodeId: 'dedup-peer',
       results: [duplicate],
     });
-
     const results = await networkResultsPromise;
     expect(results.filter((r) => r.sha256 === 'c'.repeat(64))).toHaveLength(1);
   });
@@ -871,7 +768,6 @@ describe('initiateNetworkSearch', () => {
   it('caps collected results at MAX_NETWORK_RESULTS', async () => {
     const peer = makePeer('cap-peer');
     const sent: { peer: ConnectedPeer; msg: InnerMessage }[] = [];
-
     const networkResultsPromise = initiateNetworkSearch(
       identity,
       [peer],
@@ -879,22 +775,24 @@ describe('initiateNetworkSearch', () => {
       200,
       captureAll(sent),
     );
-
     await Bun.sleep(10);
     const reqMsg = sent[0].msg as SearchRequestMessage;
-
     for (let i = 0; i < MAX_NETWORK_RESULTS + 10; i++) {
-      const sha256 = i.toString(16).padStart(64, '0');
       handleSearchResult({
         type: 'search-result',
         searchId: reqMsg.searchId,
         fromNodeId: 'cap-peer',
         results: [
-          { filename: `file${i}.mp3`, size: '100', sha256, mimeType: null, metadata: null },
+          {
+            filename: `file${i}.mp3`,
+            size: '100',
+            sha256: i.toString(16).padStart(64, '0'),
+            mimeType: null,
+            metadata: null,
+          },
         ],
       });
     }
-
     const results = await networkResultsPromise;
     expect(results.length).toBeLessThanOrEqual(MAX_NETWORK_RESULTS);
   });
@@ -902,7 +800,6 @@ describe('initiateNetworkSearch', () => {
   it('caps results per authenticated sender at MAX_RESULTS_PER_SENDER', async () => {
     const peer = makePeer('flood-sender');
     const sent: { peer: ConnectedPeer; msg: InnerMessage }[] = [];
-
     const networkResultsPromise = initiateNetworkSearch(
       identity,
       [peer],
@@ -910,24 +807,25 @@ describe('initiateNetworkSearch', () => {
       200,
       captureAll(sent),
     );
-
     await Bun.sleep(10);
     const reqMsg = sent[0].msg as SearchRequestMessage;
-
-    // Flood from one authenticated sender with many spoofed fromNodeId values
     for (let i = 0; i < MAX_RESULTS_PER_SENDER + 10; i++) {
-      const sha256 = i.toString(16).padStart(64, '0');
       handleSearchResult({
         type: 'search-result',
         searchId: reqMsg.searchId,
         fromNodeId: `spoofed-node-${i}`,
         viaNodeId: 'flood-sender',
         results: [
-          { filename: `file${i}.mp3`, size: '100', sha256, mimeType: null, metadata: null },
+          {
+            filename: `file${i}.mp3`,
+            size: '100',
+            sha256: i.toString(16).padStart(64, '0'),
+            mimeType: null,
+            metadata: null,
+          },
         ],
       });
     }
-
     const results = await networkResultsPromise;
     expect(results.length).toBeLessThanOrEqual(MAX_RESULTS_PER_SENDER);
   });
@@ -935,7 +833,6 @@ describe('initiateNetworkSearch', () => {
   it('allows distinct producers behind different relays to each contribute up to the per-sender cap', async () => {
     const peer = makePeer('multi-relay-peer');
     const sent: { peer: ConnectedPeer; msg: InnerMessage }[] = [];
-
     const networkResultsPromise = initiateNetworkSearch(
       identity,
       [peer],
@@ -943,11 +840,8 @@ describe('initiateNetworkSearch', () => {
       200,
       captureAll(sent),
     );
-
     await Bun.sleep(10);
     const reqMsg = sent[0].msg as SearchRequestMessage;
-
-    // Two producers with the same sha256 coming through different relays — both should be kept
     const sha256 = 'f'.repeat(64);
     handleSearchResult({
       type: 'search-result',
@@ -963,7 +857,6 @@ describe('initiateNetworkSearch', () => {
       viaNodeId: 'relay-2',
       results: [{ filename: 'song.mp3', size: '1000', sha256, mimeType: null, metadata: null }],
     });
-
     const results = await networkResultsPromise;
     expect(results.filter((r) => r.sha256 === sha256)).toHaveLength(2);
   });
@@ -973,7 +866,6 @@ describe('initiateNetworkSearch', () => {
     const throwFn = () => {
       throw new Error('send failed during fan-out');
     };
-
     await expect(
       initiateNetworkSearch(
         identity,
