@@ -156,7 +156,8 @@ export async function removeStaleEntries(
       ? and(lt(sharedFiles.lastSeenAt, scanStart), sql`NOT (${or(...exclusionClauses)})`)
       : lt(sharedFiles.lastSeenAt, scanStart);
 
-  return db.delete(sharedFiles).where(where).run().changes;
+  const result = db.delete(sharedFiles).where(where).run() as any;
+  return result.changes;
 }
 
 // 35791 * 60_000 ms = 2_147_460_000 ms, just under setTimeout's 32-bit signed limit
