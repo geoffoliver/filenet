@@ -9,37 +9,41 @@ import { applyMigrations, createDb } from './db';
 import { clearActiveUploadSessionsForPeer, dispatchTransferMessage } from './transfer-protocol';
 import { connectToPeer, getConnectedPeer, unregisterPeer } from './connections';
 import { getOrCreateSettings, parseSharedFolders } from './config';
-import { createManagementFetch } from './management';
+import { createUiServer } from './ui-server';
 import { getOrCreateIdentity } from './identity';
 import { pauseAllActiveDownloads } from './download-manager';
+import { resolveAssetPath } from './runtime-paths';
 import { startPeriodicRescan } from './indexer';
 import { startReconnectLoop } from './reconnect';
 
 const db = createDb();
 applyMigrations(db);
 
-const MGMT_PORT = parseInt(process.env.MGMT_PORT ?? '7735', 10);
-if (isNaN(MGMT_PORT) || MGMT_PORT < 1 || MGMT_PORT > 65535)
-  throw new Error(`Invalid MGMT_PORT: "${process.env.MGMT_PORT ?? ''}"`);
-
 const identity = await getOrCreateIdentity(db);
 const startupSettings = await getOrCreateSettings(db);
-const PORT = parseInt(process.env.P2P_PORT ?? String(startupSettings.listenPort), 10);
-if (isNaN(PORT) || PORT < 1 || PORT > 65535)
+
+const P2P_PORT = parseInt(process.env.P2P_PORT ?? String(startupSettings.listenPort), 10);
+if (isNaN(P2P_PORT) || P2P_PORT < 1 || P2P_PORT > 65535)
   throw new Error(
     process.env.P2P_PORT !== undefined
       ? `Invalid P2P_PORT env var: "${process.env.P2P_PORT}"`
       : `Invalid listenPort in settings: ${startupSettings.listenPort}`,
   );
-if (PORT === MGMT_PORT)
+
+const UI_PORT = parseInt(process.env.PORT ?? '3000', 10);
+if (isNaN(UI_PORT) || UI_PORT < 1 || UI_PORT > 65535)
+  throw new Error(`Invalid PORT env var: "${process.env.PORT ?? ''}"`);
+
+if (P2P_PORT === UI_PORT)
   throw new Error(
-    `P2P port and management port must be different — both resolved to ${PORT}` +
+    `P2P port and UI port must be different — both resolved to ${P2P_PORT}` +
       ` (P2P from ${process.env.P2P_PORT !== undefined ? 'P2P_PORT env var' : 'listenPort in settings'},` +
-      ` management from ${process.env.MGMT_PORT !== undefined ? 'MGMT_PORT env var' : 'default 7735'})`,
+      ` UI from ${process.env.PORT !== undefined ? 'PORT env var' : 'default 3000'})`,
   );
-console.log(`Node ID:   ${identity.nodeId}`);
-console.log(`P2P port:  ${PORT}`);
-console.log(`Mgmt port: ${MGMT_PORT} (localhost only)`);
+
+console.log(`Node ID:  ${identity.nodeId}`);
+console.log(`P2P port: ${P2P_PORT}`);
+console.log(`UI port:  ${UI_PORT}`);
 
 const stopRescan = startPeriodicRescan(
   db,
@@ -58,7 +62,7 @@ const connectPeerFn = (
   port: number,
   friendRequest?: { name: string; password?: string },
 ) =>
-  connectToPeer(identity, db, address, port, PORT, friendRequest, async (nodeId, msg) => {
+  connectToPeer(identity, db, address, port, P2P_PORT, friendRequest, async (nodeId, msg) => {
     await dispatchSearchMessage(msg, nodeId, db, identity);
     await dispatchTransferMessage(msg, nodeId, db);
     await dispatchVouchMessage(msg, nodeId, db);
@@ -77,13 +81,17 @@ process.on('SIGTERM', shutdown);
 process.on('SIGINT', shutdown);
 
 Bun.serve({
-  port: MGMT_PORT,
-  hostname: '127.0.0.1',
-  fetch: createManagementFetch({ identity, db, connectPeer: connectPeerFn }),
+  port: UI_PORT,
+  fetch: createUiServer({
+    identity,
+    db,
+    connectPeer: connectPeerFn,
+    outDir: resolveAssetPath('out', import.meta.dir),
+  }),
 });
 
 Bun.serve<PeerData>({
-  port: PORT,
+  port: P2P_PORT,
   fetch(req, server) {
     const url = new URL(req.url);
 
@@ -103,7 +111,7 @@ Bun.serve<PeerData>({
         data: {
           identity,
           db,
-          localPort: PORT,
+          localPort: P2P_PORT,
           state: { phase: 'pending' },
         },
       })
