@@ -40,3 +40,6 @@ bun-error.log*
 .pnp.*
 .yarn/
 .vercel
+
+# subagent-driven-development scratch state
+.superpowers/
