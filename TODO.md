@@ -174,5 +174,5 @@
 - [x] CHANGELOG (start and maintain)
 - [x] README: installation, configuration, running, scripting API docs
 - [x] Create necessary files to spin the app up in a Docker container (full `next start`, not a static export or anything dumb)
-- [ ] Database migrations
+- [x] Database migrations — Drizzle migrations (`drizzle/migrations/*.sql`) applied automatically at server startup via `applyMigrations()`
 - [ ] Single-binary distribution (à la Sonarr/Radarr) — now that Prisma is gone, only one blocker remains: switch Next.js to `output: 'export'` so the frontend becomes static files the Bun server can serve directly. Once done, `bun build --compile` produces a single platform executable with no external dependencies. Cross-compile targets: `bun-linux-x64`, `bun-linux-arm64`, `bun-darwin-x64`, `bun-darwin-arm64`, `bun-windows-x64`.
