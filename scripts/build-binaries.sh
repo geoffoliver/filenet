@@ -16,7 +16,13 @@ for target in "${TARGETS[@]}"; do
   fi
 
   echo "Compiling ${target}..."
-  bun build --compile --target="$target" --outfile "${outdir}/${binary_name}" server/index.ts
+  # --define bakes NODE_ENV=production into the compiled binary at build
+  # time (bun build --compile does not set it at runtime on its own), so
+  # dev-only behavior (e.g. permissive CORS in server/ui-server.ts) can
+  # never be active in a shipped executable regardless of the environment
+  # it runs in.
+  bun build --compile --target="$target" --define "process.env.NODE_ENV=\"production\"" \
+    --outfile "${outdir}/${binary_name}" server/index.ts
 
   cp -r out "${outdir}/out"
   mkdir -p "${outdir}/drizzle"

@@ -30,5 +30,6 @@ EXPOSE 7734
 
 ENV PORT=3000
 ENV DATABASE_URL=file:./data/filenet.db
+ENV NODE_ENV=production
 
 ENTRYPOINT ["docker-entrypoint.sh"]

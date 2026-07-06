@@ -37,10 +37,22 @@ Open [http://localhost:3000](http://localhost:3000). The database is persisted i
 ### Manual
 
 ```bash
-bun run dev
+bun run build
+bun run server
 ```
 
 Open [http://localhost:3000](http://localhost:3000). On first launch the setup wizard walks you through the initial configuration.
+
+For local development with hot reload, run the backend and the Next.js dev
+server side by side instead:
+
+```bash
+bun run server   # UI + management API (:3000) + P2P (:7734)
+bun run dev      # Next.js dev server with HMR (:3001)
+```
+
+Open [http://localhost:3001](http://localhost:3001) — `.env.development`
+points the dev server's API calls at the backend on `:3000`.
 
 The application runs two listeners in a single process:
 

@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { basename, join } from 'node:path';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 
 import { type Db, applyMigrations, createDb } from '../db';
@@ -107,6 +107,19 @@ describe('createUiServer', () => {
 
     expect(resolveStaticFile(outDir, traversal)).toBeNull();
 
+    await rm(secretDir, { recursive: true, force: true });
+  });
+
+  it('rejects a symlink inside outDir that points outside it', async () => {
+    const secretDir = await mkdtemp(join(tmpdir(), 'filenet-secret-'));
+    const secretFile = join(secretDir, 'secret.txt');
+    await writeFile(secretFile, 'top secret');
+    const linkPath = join(outDir, 'escape-link.html');
+    await symlink(secretFile, linkPath);
+
+    expect(resolveStaticFile(outDir, '/escape-link')).toBeNull();
+
+    await rm(linkPath, { force: true });
     await rm(secretDir, { recursive: true, force: true });
   });
 });
