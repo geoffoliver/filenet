@@ -173,6 +173,6 @@
 - [ ] Improve backend test coverage as features are added
 - [x] CHANGELOG (start and maintain)
 - [x] README: installation, configuration, running, scripting API docs
-- [x] Create necessary files to spin the app up in a Docker container (full `next start`, not a static export or anything dumb)
+- [x] Create necessary files to spin the app up in a Docker container — now serves the static export (`out/`) via the unified Bun server, not `next start`
 - [x] Database migrations — Drizzle migrations (`drizzle/migrations/*.sql`) applied automatically at server startup via `applyMigrations()`
 - [x] Single-binary distribution (à la Sonarr/Radarr) — Next.js builds via `output: 'export'`; `bun build --compile` packages the app + `out/` + `drizzle/migrations/` for all 5 targets via `bun run build:binaries`
