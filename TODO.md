@@ -72,9 +72,9 @@
 - [x] `ChatMessageSchema` (Zod) validates inbound peer messages; deduplication + atomic transaction
 - [x] Online presence: track which friends are currently connected
 
-### API (Next.js → P2P server bridge)
+### API (management + P2P bridge)
 
-- [x] Management REST API on `127.0.0.1:7735` (localhost-only, no CORS)
+- [x] Management REST API — originally its own process on `127.0.0.1:7735` (localhost-only, no CORS), superseded below
 - [x] Management API served in-process by the unified UI server (`server/ui-server.ts`) — replaced the earlier Next.js catch-all proxy now that the UI is a static export
 - [x] Settings endpoints: `GET/PATCH /api/settings`
 - [x] Search endpoint: `GET /api/search` (local + network)
