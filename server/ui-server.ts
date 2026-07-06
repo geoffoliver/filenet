@@ -1,5 +1,5 @@
 import { existsSync, statSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, resolve, sep } from 'node:path';
 
 import { type ManagementDeps, createManagementFetch } from './management';
 
@@ -48,14 +48,22 @@ function corsHeaders(origin: string): Record<string, string> {
   };
 }
 
-function resolveStaticFile(outDir: string, pathname: string): string | null {
+export function resolveStaticFile(outDir: string, pathname: string): string | null {
   const normalized = pathname === '/' ? '/index.html' : pathname;
+  const resolvedOutDir = resolve(outDir) + sep;
   const candidates = [
     join(outDir, normalized),
     join(outDir, `${normalized}.html`),
     join(outDir, normalized, 'index.html'),
   ];
   for (const candidate of candidates) {
+    // Defense in depth: reject anything that would resolve outside outDir.
+    // In practice this never triggers for real requests — path.join (unlike
+    // path.resolve) never lets a leading slash in `normalized` escape outDir,
+    // and the WHATWG URL parser that produces url.pathname already strips
+    // literal `..` segments before it reaches this function — but this keeps
+    // the guarantee explicit rather than incidental to caller behavior.
+    if (!resolve(candidate).startsWith(resolvedOutDir)) continue;
     if (existsSync(candidate) && statSync(candidate).isFile()) return candidate;
   }
   return null;

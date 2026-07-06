@@ -1,10 +1,10 @@
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
+import { basename, join } from 'node:path';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
 import { type Db, applyMigrations, createDb } from '../db';
-import { createUiServer } from '../ui-server';
+import { createUiServer, resolveStaticFile } from '../ui-server';
 import { generateIdentity } from '../identity';
 
 const TEST_DB_PATH = './data/test-ui-server.db';
@@ -93,5 +93,20 @@ describe('createUiServer', () => {
     );
     expect(res.status).toBe(204);
     expect(res.headers.get('Access-Control-Allow-Origin')).toBe('http://localhost:3001');
+  });
+
+  it('rejects a raw pathname that would escape outDir via traversal', async () => {
+    // The browser-facing handler never sees an unnormalized `..` in
+    // practice (new URL() strips it before url.pathname is built), but
+    // resolveStaticFile is exercised directly here with a raw string to
+    // prove its own boundary check independently, in case some other
+    // future caller passes an unnormalized path.
+    const secretDir = await mkdtemp(join(tmpdir(), 'filenet-secret-'));
+    await writeFile(join(secretDir, 'secret.txt'), 'top secret');
+    const traversal = `/../${basename(secretDir)}/secret.txt`;
+
+    expect(resolveStaticFile(outDir, traversal)).toBeNull();
+
+    await rm(secretDir, { recursive: true, force: true });
   });
 });

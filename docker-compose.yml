@@ -3,7 +3,7 @@ services:
     build: .
     restart: unless-stopped
     ports:
-      - "3009:3000"   # UI + management API — access the app at http://localhost:3000
+      - "3009:3000"   # UI + management API — access the app at http://localhost:3009
       - "7734:7734"   # P2P WebSocket — forward this port on your router
     volumes:
       - filenet-data:/app/data          # SQLite database + keys (persistent)

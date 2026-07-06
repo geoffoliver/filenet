@@ -73,7 +73,9 @@ Configuration is via environment variables, same as Docker:
 listening port configured in Settings), `DATABASE_URL` (default:
 `./data/filenet.db`, relative to wherever you run the executable from).
 
-To build these yourself: `bun run build:binaries` (requires Bun installed).
+To build these yourself: `bun run build:binaries` (requires Bun, plus
+`bash`, `tar`, and `zip` on your PATH — all standard on macOS/Linux;
+on Windows, run it under WSL or Git Bash).
 
 ## Configuration
 
