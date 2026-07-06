@@ -1,3 +1,9 @@
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? '';
+
+function apiUrl(path: string): string {
+  return `${API_BASE_URL}${path}`;
+}
+
 export function formatSpeed(bps: number): string {
   if (bps === 0) return '–';
   return `${formatBytes(bps)}/s`;
@@ -63,25 +69,25 @@ export type SettingsPatch = {
 };
 
 export async function getMyInfo(): Promise<{ nodeId: string }> {
-  const res = await fetch('/api/me');
+  const res = await fetch(apiUrl('/api/me'));
   if (!res.ok) throw new Error('Failed to load identity');
   return res.json();
 }
 
 export async function getSettings(): Promise<Settings> {
-  const res = await fetch('/api/settings');
+  const res = await fetch(apiUrl('/api/settings'));
   if (!res.ok) throw new Error('Failed to load settings');
   return res.json();
 }
 
 export async function getEnvConfig(): Promise<EnvConfig> {
-  const res = await fetch('/api/settings/env');
+  const res = await fetch(apiUrl('/api/settings/env'));
   if (!res.ok) return { sharedFolders: [], downloadFolder: null };
   return res.json();
 }
 
 export async function patchSettings(patch: SettingsPatch): Promise<Settings> {
-  const res = await fetch('/api/settings', {
+  const res = await fetch(apiUrl('/api/settings'), {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(patch),
@@ -118,13 +124,13 @@ export type AddFriendParams = {
 };
 
 export async function getFriends(): Promise<Friend[]> {
-  const res = await fetch('/api/friends');
+  const res = await fetch(apiUrl('/api/friends'));
   if (!res.ok) throw new Error('Failed to load friends');
   return res.json();
 }
 
 export async function addFriend(params: AddFriendParams): Promise<Friend> {
-  const res = await fetch('/api/friends', {
+  const res = await fetch(apiUrl('/api/friends'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(params),
@@ -137,7 +143,7 @@ export async function addFriend(params: AddFriendParams): Promise<Friend> {
 }
 
 export async function acceptFriend(id: string): Promise<Friend> {
-  const res = await fetch(`/api/friends/${id}`, {
+  const res = await fetch(apiUrl(`/api/friends/${id}`), {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ action: 'accept' }),
@@ -150,7 +156,7 @@ export async function acceptFriend(id: string): Promise<Friend> {
 }
 
 export async function rejectFriend(id: string): Promise<void> {
-  const res = await fetch(`/api/friends/${id}`, {
+  const res = await fetch(apiUrl(`/api/friends/${id}`), {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ action: 'reject' }),
@@ -162,7 +168,7 @@ export async function rejectFriend(id: string): Promise<void> {
 }
 
 export async function removeFriend(id: string): Promise<void> {
-  const res = await fetch(`/api/friends/${id}`, { method: 'DELETE' });
+  const res = await fetch(apiUrl(`/api/friends/${id}`), { method: 'DELETE' });
   if (!res.ok) {
     const msg = await res.text();
     throw new Error(msg || 'Failed to remove friend');
@@ -176,7 +182,7 @@ export type Stats = {
 };
 
 export async function getStats(): Promise<Stats> {
-  const res = await fetch('/api/stats');
+  const res = await fetch(apiUrl('/api/stats'));
   if (!res.ok) throw new Error('Failed to load stats');
   return res.json();
 }
@@ -207,7 +213,7 @@ export type Transfer = {
 };
 
 export async function getTransfers(): Promise<Transfer[]> {
-  const res = await fetch('/api/transfers');
+  const res = await fetch(apiUrl('/api/transfers'));
   if (!res.ok) throw new Error('Failed to load transfers');
   return res.json();
 }
@@ -219,7 +225,7 @@ export async function startDownload(params: {
   mimeType?: string | null;
   sources: string[];
 }): Promise<{ id: string }> {
-  const res = await fetch('/api/transfers', {
+  const res = await fetch(apiUrl('/api/transfers'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(params),
@@ -235,7 +241,7 @@ export async function controlTransfer(
   id: string,
   action: 'pause' | 'resume' | 'cancel',
 ): Promise<void> {
-  const res = await fetch(`/api/transfers/${id}`, {
+  const res = await fetch(apiUrl(`/api/transfers/${id}`), {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ action }),
@@ -257,13 +263,13 @@ export type Upload = {
 };
 
 export async function getUploads(): Promise<Upload[]> {
-  const res = await fetch('/api/uploads');
+  const res = await fetch(apiUrl('/api/uploads'));
   if (!res.ok) throw new Error('Failed to load uploads');
   return res.json();
 }
 
 export async function dismissTransfer(id: string): Promise<void> {
-  const res = await fetch(`/api/transfers/${id}`, { method: 'DELETE' });
+  const res = await fetch(apiUrl(`/api/transfers/${id}`), { method: 'DELETE' });
   if (!res.ok) {
     const msg = await res.text();
     throw new Error(msg || 'Failed to dismiss transfer');
@@ -278,13 +284,13 @@ export type PostDownloadScript = {
 };
 
 export async function getScripts(): Promise<PostDownloadScript[]> {
-  const res = await fetch('/api/scripts');
+  const res = await fetch(apiUrl('/api/scripts'));
   if (!res.ok) throw new Error('Failed to load scripts');
   return res.json();
 }
 
 export async function addScript(path: string): Promise<PostDownloadScript> {
-  const res = await fetch('/api/scripts', {
+  const res = await fetch(apiUrl('/api/scripts'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ path }),
@@ -300,7 +306,7 @@ export async function reorderScript(
   id: string,
   direction: 'up' | 'down',
 ): Promise<PostDownloadScript[]> {
-  const res = await fetch(`/api/scripts/${id}`, {
+  const res = await fetch(apiUrl(`/api/scripts/${id}`), {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ direction }),
@@ -314,7 +320,7 @@ export async function reorderScript(
 }
 
 export async function removeScript(id: string): Promise<void> {
-  const res = await fetch(`/api/scripts/${id}`, { method: 'DELETE' });
+  const res = await fetch(apiUrl(`/api/scripts/${id}`), { method: 'DELETE' });
   if (!res.ok) {
     const msg = await res.text();
     throw new Error(msg || 'Failed to remove script');
@@ -332,7 +338,7 @@ export type FsListing = {
 
 export async function listDirectory(path?: string, signal?: AbortSignal): Promise<FsListing> {
   const qs = path ? `?path=${encodeURIComponent(path)}` : '';
-  const res = await fetch(`/api/fs${qs}`, { signal });
+  const res = await fetch(apiUrl(`/api/fs${qs}`), { signal });
   if (!res.ok) {
     const msg = await res.text();
     throw new Error(msg || 'Cannot read directory');
@@ -341,7 +347,7 @@ export async function listDirectory(path?: string, signal?: AbortSignal): Promis
 }
 
 export async function triggerRescan(): Promise<{ indexed: number; removed: number }> {
-  const res = await fetch('/api/rescan', { method: 'POST' });
+  const res = await fetch(apiUrl('/api/rescan'), { method: 'POST' });
   if (!res.ok) throw new Error('Rescan failed');
   return res.json();
 }
@@ -405,13 +411,13 @@ export type Conversation = {
 };
 
 export async function getConversations(): Promise<Conversation[]> {
-  const res = await fetch('/api/conversations');
+  const res = await fetch(apiUrl('/api/conversations'));
   if (!res.ok) throw new Error('Failed to load conversations');
   return res.json();
 }
 
 export async function openDmConversation(peerNodeId: string): Promise<Conversation> {
-  const res = await fetch('/api/conversations', {
+  const res = await fetch(apiUrl('/api/conversations'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ peerNodeId }),
@@ -424,7 +430,7 @@ export async function openDmConversation(peerNodeId: string): Promise<Conversati
 }
 
 export async function createGroupConversation(name: string): Promise<Conversation> {
-  const res = await fetch('/api/conversations', {
+  const res = await fetch(apiUrl('/api/conversations'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ name }),
@@ -443,13 +449,13 @@ export async function getMessages(
   const qs = new URLSearchParams();
   if (opts?.limit != null) qs.set('limit', String(opts.limit));
   if (opts?.before) qs.set('before', opts.before);
-  const res = await fetch(`/api/conversations/${convId}/messages?${qs}`);
+  const res = await fetch(apiUrl(`/api/conversations/${convId}/messages?${qs}`));
   if (!res.ok) throw new Error('Failed to load messages');
   return res.json();
 }
 
 export async function sendMessage(convId: string, body: string): Promise<Message> {
-  const res = await fetch(`/api/conversations/${convId}/messages`, {
+  const res = await fetch(apiUrl(`/api/conversations/${convId}/messages`), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ body }),
@@ -462,7 +468,7 @@ export async function sendMessage(convId: string, body: string): Promise<Message
 }
 
 export async function deleteConversation(convId: string): Promise<void> {
-  const res = await fetch(`/api/conversations/${convId}`, {
+  const res = await fetch(apiUrl(`/api/conversations/${convId}`), {
     method: 'DELETE',
   });
   if (!res.ok) {
@@ -481,7 +487,7 @@ export async function searchFiles(
   if (params.limit != null) qs.set('limit', String(params.limit));
   if (params.offset != null) qs.set('offset', String(params.offset));
   if (params.network) qs.set('network', 'true');
-  const res = await fetch(`/api/search?${qs}`, { signal });
+  const res = await fetch(apiUrl(`/api/search?${qs}`), { signal });
   if (!res.ok) throw new Error('Search failed');
   return res.json();
 }
