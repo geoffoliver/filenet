@@ -22,5 +22,12 @@ export default defineConfig({
     url: 'http://localhost:3001',
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,
+    env: {
+      // e2e tests mock /api/* via page.route('/api/...'), which Playwright
+      // resolves relative to `baseURL`. Keep API calls same-origin during
+      // e2e runs regardless of what .env.development sets for real
+      // full-stack local dev, so those mocks keep matching.
+      NEXT_PUBLIC_API_BASE_URL: '',
+    },
   },
 });

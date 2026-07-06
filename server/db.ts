@@ -1,10 +1,9 @@
-import { join } from 'node:path';
-
 import { Database } from 'bun:sqlite';
 import { drizzle } from 'drizzle-orm/bun-sqlite';
 import { migrate } from 'drizzle-orm/bun-sqlite/migrator';
 
 import * as schema from './schema';
+import { resolveAssetPath } from './runtime-paths';
 
 export type Db = ReturnType<typeof createDb>;
 
@@ -18,5 +17,5 @@ export function createDb(path?: string): ReturnType<typeof drizzle<typeof schema
 }
 
 export function applyMigrations(db: Db): void {
-  migrate(db, { migrationsFolder: join(import.meta.dir, '../drizzle/migrations') });
+  migrate(db, { migrationsFolder: resolveAssetPath('drizzle/migrations', import.meta.dir) });
 }

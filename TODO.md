@@ -72,10 +72,10 @@
 - [x] `ChatMessageSchema` (Zod) validates inbound peer messages; deduplication + atomic transaction
 - [x] Online presence: track which friends are currently connected
 
-### API (Next.js → P2P server bridge)
+### API (management + P2P bridge)
 
-- [x] Management REST API on `127.0.0.1:7735` (localhost-only, no CORS)
-- [x] Next.js catch-all proxy (`/api/[...path]`) forwarding UI requests to P2P server
+- [x] Management REST API — originally its own process on `127.0.0.1:7735` (localhost-only, no CORS), superseded below
+- [x] Management API served in-process by the unified UI server (`server/ui-server.ts`) — replaced the earlier Next.js catch-all proxy now that the UI is a static export
 - [x] Settings endpoints: `GET/PATCH /api/settings`
 - [x] Search endpoint: `GET /api/search` (local + network)
 - [x] Expose remaining endpoints as features are built: friends, transfers, chat, stats
@@ -173,6 +173,6 @@
 - [ ] Improve backend test coverage as features are added
 - [x] CHANGELOG (start and maintain)
 - [x] README: installation, configuration, running, scripting API docs
-- [x] Create necessary files to spin the app up in a Docker container (full `next start`, not a static export or anything dumb)
-- [ ] Database migrations
-- [ ] Single-binary distribution (à la Sonarr/Radarr) — now that Prisma is gone, only one blocker remains: switch Next.js to `output: 'export'` so the frontend becomes static files the Bun server can serve directly. Once done, `bun build --compile` produces a single platform executable with no external dependencies. Cross-compile targets: `bun-linux-x64`, `bun-linux-arm64`, `bun-darwin-x64`, `bun-darwin-arm64`, `bun-windows-x64`.
+- [x] Create necessary files to spin the app up in a Docker container — now serves the static export (`out/`) via the unified Bun server, not `next start`
+- [x] Database migrations — Drizzle migrations (`drizzle/migrations/*.sql`) applied automatically at server startup via `applyMigrations()`
+- [x] Single-binary distribution (à la Sonarr/Radarr) — Next.js builds via `output: 'export'`; `bun build --compile` packages the app + `out/` + `drizzle/migrations/` for all 5 targets via `bun run build:binaries`

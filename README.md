@@ -37,18 +37,57 @@ Open [http://localhost:3000](http://localhost:3000). The database is persisted i
 ### Manual
 
 ```bash
-bun run dev
+bun run build
+bun run server
 ```
 
 Open [http://localhost:3000](http://localhost:3000). On first launch the setup wizard walks you through the initial configuration.
 
-The application runs two servers:
+For local development with hot reload, run the backend and the Next.js dev
+server side by side instead:
 
-| Server         | Default | Purpose                                    |
-| -------------- | ------- | ------------------------------------------ |
-| Next.js        | `:3000` | Web UI + API proxy                         |
-| P2P server     | `:7734` | Encrypted WebSocket connections to peers   |
-| Management API | `:7735` | Localhost-only REST API consumed by the UI |
+```bash
+bun run server   # UI + management API (:3000) + P2P (:7734)
+bun run dev      # Next.js dev server with HMR (:3001)
+```
+
+Open [http://localhost:3001](http://localhost:3001) — `.env.development`
+points the dev server's API calls at the backend on `:3000`.
+
+The application runs two listeners in a single process:
+
+| Listener   | Default | Purpose                                         |
+| ---------- | ------- | ----------------------------------------------- |
+| UI + API   | `:3000` | Static web UI and management API (same process) |
+| P2P server | `:7734` | Encrypted WebSocket connections to peers        |
+
+## Running as a standalone executable
+
+If you don't want to run Docker, Filenet also ships as a standalone
+executable with no external runtime dependency — no separate Node/Bun/npm
+install required.
+
+1. Download `filenet-<platform>.tar.gz` (or `.zip` for Windows) from the
+   Releases page for your platform (`linux-x64`, `linux-arm64`,
+   `darwin-x64`, `darwin-arm64`, `windows-x64`).
+2. Extract it — you'll get `filenet` (the executable), an `out/` folder
+   (the UI), and a `drizzle/migrations/` folder. Keep these three together.
+3. Run the executable from that folder:
+
+   ```bash
+   ./filenet
+   ```
+
+4. Open `http://localhost:3000` in a browser to finish setup.
+
+Configuration is via environment variables, same as Docker:
+`PORT` (UI + management API, default `3000`), `P2P_PORT` (default: the
+listening port configured in Settings), `DATABASE_URL` (default:
+`./data/filenet.db`, relative to wherever you run the executable from).
+
+To build these yourself: `bun run build:binaries` (requires Bun, plus
+`bash`, `tar`, and `zip` on your PATH — all standard on macOS/Linux;
+on Windows, run it under WSL or Git Bash).
 
 ## Configuration
 
