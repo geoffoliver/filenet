@@ -1,5 +1,7 @@
 import {
   type PeerData,
+  dispatchChatMessage,
+  dispatchGroupCreateMessage,
   dispatchSearchMessage,
   dispatchVouchMessage,
   handleMessage,
@@ -66,6 +68,8 @@ const connectPeerFn = (
     await dispatchSearchMessage(msg, nodeId, db, identity);
     await dispatchTransferMessage(msg, nodeId, db);
     await dispatchVouchMessage(msg, nodeId, db);
+    await dispatchChatMessage(msg, nodeId, db, identity.nodeId);
+    await dispatchGroupCreateMessage(msg, nodeId, db);
   });
 
 const stopReconnect = startReconnectLoop(db, identity, connectPeerFn);

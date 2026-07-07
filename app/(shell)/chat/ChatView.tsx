@@ -132,6 +132,7 @@ export default function ChatView() {
   const mountedRef = useRef(true);
   const pollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const activeConvIdRef = useRef<string | null>(null);
   const prevMsgCountRef = useRef(0);
   const lastFriendsFetchRef = useRef(0);
@@ -139,6 +140,12 @@ export default function ChatView() {
   useEffect(() => {
     activeConvIdRef.current = activeConvId;
   }, [activeConvId]);
+
+  // The textarea is disabled while sending (to prevent double-submit), which
+  // forces the browser to blur it. Restore focus once it's re-enabled.
+  useEffect(() => {
+    if (!sending) textareaRef.current?.focus();
+  }, [sending]);
 
   const scrollToBottom = useCallback(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -242,7 +249,11 @@ export default function ChatView() {
 
   async function handleDelete() {
     if (!activeConvId) return;
-    if (!window.confirm('Delete this conversation and all its messages?')) return;
+    const confirmMessage =
+      activeConv?.type === 'GROUP'
+        ? "Leave this group chat? This removes it from your device — you'll only see it again if a new message arrives."
+        : 'Delete this conversation and all its messages?';
+    if (!window.confirm(confirmMessage)) return;
     try {
       await deleteConversation(activeConvId);
       setActiveConvId(null);
@@ -335,7 +346,7 @@ export default function ChatView() {
             <div className={styles.mainHeader}>
               <span className={styles.mainTitle}>{convLabel(activeConv, localNodeId)}</span>
               <button className={styles.deleteBtn} onClick={handleDelete}>
-                Delete
+                {activeConv.type === 'GROUP' ? 'Leave' : 'Delete'}
               </button>
             </div>
 
@@ -345,12 +356,13 @@ export default function ChatView() {
               )}
               {messages.map((msg) => {
                 const isOwn = localNodeId !== null && msg.fromNodeId === localNodeId;
+                const senderName = friendsByNodeId.get(msg.fromNodeId)?.name ?? msg.fromNodeId;
                 return (
                   <div
                     key={msg.id}
                     className={`${styles.bubble} ${isOwn ? styles.bubbleOwn : styles.bubblePeer}`}
                   >
-                    {!isOwn && <span className={styles.bubbleMeta}>{msg.fromNodeId}</span>}
+                    {!isOwn && <span className={styles.bubbleMeta}>{senderName}</span>}
                     <div
                       className={`${styles.bubbleBody} ${isOwn ? styles.bubbleBodyOwn : styles.bubbleBodyPeer}`}
                     >
@@ -365,6 +377,7 @@ export default function ChatView() {
 
             <div className={styles.inputBar}>
               <textarea
+                ref={textareaRef}
                 className={styles.textarea}
                 rows={1}
                 placeholder="Message…"

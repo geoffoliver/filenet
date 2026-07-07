@@ -150,6 +150,19 @@ export const ChatMessageSchema = z.object({
   ),
 });
 
+export const GroupCreateMessageSchema = z.object({
+  type: z.literal('group-create'),
+  conversationId: z
+    .string()
+    .max(500)
+    .regex(
+      /^group:[-a-zA-Z0-9:._~]+$/,
+      'conversationId must be group: followed by URL-safe path characters',
+    ),
+  name: z.string().trim().min(1).max(200),
+  createdAt: z.number().int().min(1).max(8_640_000_000_000_000),
+});
+
 export const AddScriptBodySchema = z.object({
   path: z
     .string()

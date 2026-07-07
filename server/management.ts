@@ -695,17 +695,36 @@ export function createManagementFetch(deps: ManagementDeps): (req: Request) => P
           }
           const convId = `group:${randomUUID()}`;
           const now = new Date();
+          const groupName = truncateToBytes(name.trim(), 200);
           const conv = db
             .insert(conversations)
             .values({
               id: convId,
               type: 'GROUP',
-              name: truncateToBytes(name.trim(), 200),
+              name: groupName,
               createdAt: now,
               updatedAt: now,
             })
             .returning()
             .get();
+
+          try {
+            const peers = await getAcceptedConnectedPeers(db);
+            const groupCreateMsg = {
+              type: 'group-create' as const,
+              conversationId: convId,
+              name: groupName,
+              createdAt: now.getTime(),
+            };
+            for (const peer of peers) {
+              try {
+                sendToPeer(peer, groupCreateMsg);
+              } catch {}
+            }
+          } catch (broadcastErr) {
+            console.error('Failed to broadcast group creation:', broadcastErr);
+          }
+
           return Response.json({ ...conv, messages: [] }, { status: 201 });
         }
       }

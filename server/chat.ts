@@ -8,6 +8,30 @@ export function dmConversationId(nodeA: string, nodeB: string): string {
   return `dm:${[nodeA, nodeB].sort().join(':')}`;
 }
 
+export async function handleGroupCreate(
+  msg: { conversationId: string; name: string; createdAt: number },
+  db: Db,
+): Promise<void> {
+  if (!msg.conversationId.startsWith('group:')) return;
+
+  const createdAt = new Date(msg.createdAt);
+  if (isNaN(createdAt.getTime())) return;
+
+  const name = msg.name.trim();
+  if (!name) return;
+
+  db.insert(conversations)
+    .values({
+      id: msg.conversationId,
+      type: 'GROUP',
+      name,
+      createdAt,
+      updatedAt: createdAt,
+    })
+    .onConflictDoNothing()
+    .run();
+}
+
 export async function handleChatMessage(
   msg: ChatMessage,
   senderNodeId: string,

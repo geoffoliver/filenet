@@ -102,7 +102,20 @@ export const TRANSFERS = [
   },
 ];
 
-export const CONVERSATIONS = [
+export const CONVERSATIONS: {
+  id: string;
+  type: 'DM' | 'GROUP';
+  name: string | null;
+  createdAt: string;
+  updatedAt: string;
+  messages: {
+    id: string;
+    conversationId: string;
+    fromNodeId: string;
+    body: string;
+    sentAt: string;
+  }[];
+}[] = [
   {
     id: 'dm:node-alice:self',
     type: 'DM',
@@ -113,7 +126,7 @@ export const CONVERSATIONS = [
       {
         id: 'msg-2',
         conversationId: 'dm:node-alice:self',
-        senderNodeId: 'self',
+        fromNodeId: 'self',
         body: 'Hi Alice!',
         sentAt: '2024-01-01T12:01:00.000Z',
       },
@@ -125,14 +138,14 @@ export const MESSAGES = [
   {
     id: 'msg-1',
     conversationId: 'dm:node-alice:self',
-    senderNodeId: 'node-alice',
+    fromNodeId: 'node-alice',
     body: 'Hey there!',
     sentAt: '2024-01-01T12:00:00.000Z',
   },
   {
     id: 'msg-2',
     conversationId: 'dm:node-alice:self',
-    senderNodeId: 'self',
+    fromNodeId: 'self',
     body: 'Hi Alice!',
     sentAt: '2024-01-01T12:01:00.000Z',
   },

@@ -7,6 +7,7 @@ import {
   FriendResponseMessageSchema,
   FriendVouchRequestMessageSchema,
   FriendVouchResponseMessageSchema,
+  GroupCreateMessageSchema,
   SearchRequestMessageSchema,
   SearchResultMessageSchema,
 } from './schemas';
@@ -30,13 +31,13 @@ import {
   finalizeHandshake,
   generateEphemeralKeypair,
 } from './handshake';
+import { handleChatMessage, handleGroupCreate } from './chat';
 import { handleSearchRequest, handleSearchResult } from './search-protocol';
 import type { Db } from './db';
 import type { Identity } from './identity';
 import { acceptFriendRequest } from './friends';
 import { dispatchTransferMessage } from './transfer-protocol';
 import { friends } from './schema';
-import { handleChatMessage } from './chat';
 
 type PeerState =
   | { phase: 'pending' }
@@ -190,15 +191,12 @@ export async function dispatchMessage(
   }
 
   if (msg.type === 'chat-message') {
-    const result = ChatMessageSchema.safeParse(msg);
-    if (!result.success) return;
-    const isFriend = db
-      .select()
-      .from(friends)
-      .where(and(eq(friends.nodeId, state.peerNodeId), eq(friends.status, 'ACCEPTED')))
-      .get();
-    if (!isFriend) return;
-    await handleChatMessage(result.data, state.peerNodeId, db, ws.data.identity.nodeId);
+    await dispatchChatMessage(msg, state.peerNodeId, db, ws.data.identity.nodeId);
+    return;
+  }
+
+  if (msg.type === 'group-create') {
+    await dispatchGroupCreateMessage(msg, state.peerNodeId, db);
     return;
   }
 
@@ -238,6 +236,41 @@ export async function dispatchSearchMessage(
     if (!isFriend) return;
     handleSearchResult({ ...result.data, viaNodeId: senderNodeId });
   }
+}
+
+export async function dispatchChatMessage(
+  msg: InnerMessage,
+  senderNodeId: string,
+  db: Db,
+  localNodeId: string,
+): Promise<void> {
+  if (msg.type !== 'chat-message') return;
+  const result = ChatMessageSchema.safeParse(msg);
+  if (!result.success) return;
+  const isFriend = db
+    .select()
+    .from(friends)
+    .where(and(eq(friends.nodeId, senderNodeId), eq(friends.status, 'ACCEPTED')))
+    .get();
+  if (!isFriend) return;
+  await handleChatMessage(result.data, senderNodeId, db, localNodeId);
+}
+
+export async function dispatchGroupCreateMessage(
+  msg: InnerMessage,
+  senderNodeId: string,
+  db: Db,
+): Promise<void> {
+  if (msg.type !== 'group-create') return;
+  const result = GroupCreateMessageSchema.safeParse(msg);
+  if (!result.success) return;
+  const isFriend = db
+    .select()
+    .from(friends)
+    .where(and(eq(friends.nodeId, senderNodeId), eq(friends.status, 'ACCEPTED')))
+    .get();
+  if (!isFriend) return;
+  await handleGroupCreate(result.data, db);
 }
 
 export function sendEncrypted(ws: ServerWebSocket<PeerData>, msg: InnerMessage): void {

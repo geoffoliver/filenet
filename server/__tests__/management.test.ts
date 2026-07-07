@@ -1713,6 +1713,42 @@ describe('POST /api/conversations — group', () => {
     expect(await res.text()).toBe('either peerNodeId or name is required');
   });
 
+  it('broadcasts a group-create message to connected accepted peers so the room appears immediately, without waiting for a first chat message', async () => {
+    const nodeId = 'group-create-broadcast-peer';
+    db.insert(friends)
+      .values({
+        id: randomUUID(),
+        addedAt: new Date(),
+        updatedAt: new Date(),
+        name: 'Peer',
+        nodeId,
+        address: '10.0.0.30',
+        port: 7734,
+        status: 'ACCEPTED',
+      })
+      .run();
+    const sends: Buffer[] = [];
+    const fakePeer = registerPeer(
+      {
+        send: (d: string | Uint8Array) => sends.push(Buffer.from(d as Uint8Array)),
+        close: () => {},
+      },
+      Buffer.alloc(32),
+      nodeId,
+      Buffer.alloc(32),
+      '10.0.0.30',
+      7734,
+    );
+    try {
+      const res = await makeHandler()(jsonReq('/api/conversations', 'POST', { name: 'Dev Chat' }));
+      expect(res.status).toBe(201);
+      expect(sends.length).toBe(1);
+    } finally {
+      unregisterPeer(nodeId);
+      void fakePeer;
+    }
+  });
+
   it('response includes messages array', async () => {
     const res = await makeHandler()(
       jsonReq('/api/conversations', 'POST', { name: 'With Messages' }),

@@ -88,6 +88,13 @@ export type ChatMessage = {
   conversationName?: string; // group display name, helps receiver create the conversation
 };
 
+export type GroupCreateMessage = {
+  type: 'group-create';
+  conversationId: string; // group:{uuid}
+  name: string;
+  createdAt: number; // unix ms
+};
+
 export type ChunkRequestMessage = {
   type: 'chunk-request';
   transferId: string; // UUID, routes response back to waiting promise
@@ -136,7 +143,8 @@ export type InnerMessage =
   | ChunkRequestMessage
   | ChunkResponseMessage
   | ChunkErrorMessage
-  | ChatMessage;
+  | ChatMessage
+  | GroupCreateMessage;
 
 export type WireMessage = HelloMessage | HelloAckMessage | { type: 'encrypted'; payload: string };
 

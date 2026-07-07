@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os';
 import { unlinkSync } from 'fs';
 
 import type { ServerWebSocket } from 'bun';
+import { eq } from 'drizzle-orm';
 
 import {
   type ConnectedPeer,
@@ -22,8 +23,13 @@ import {
 } from '../search-protocol';
 import { type Db, applyMigrations, createDb } from '../db';
 import type { InnerMessage, SearchRequestMessage, SearchResultMessage } from '../types';
-import { type PeerData, dispatchMessage } from '../peer';
-import { friends, sharedFiles } from '../schema';
+import {
+  type PeerData,
+  dispatchChatMessage,
+  dispatchGroupCreateMessage,
+  dispatchMessage,
+} from '../peer';
+import { conversations, friends, messages, sharedFiles } from '../schema';
 import { indexFile } from '../indexer';
 
 const TEST_DB_URL = 'file:./data/test-peer.db';
@@ -495,5 +501,96 @@ describe('dispatchMessage — friend-vouch-response', () => {
       vouched: true,
     });
     unregisterPeer(friendNodeId);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// dispatchChatMessage — the reusable chat dispatcher shared by inbound
+// (dispatchMessage) and outbound (connectToPeer's onMessage callback) paths
+// ---------------------------------------------------------------------------
+
+describe('dispatchChatMessage', () => {
+  it('drops a chat-message from a peer with no accepted friend record', async () => {
+    const strangerNodeId = 'chat-stranger-' + crypto.randomUUID();
+    const msgId = randomUUID();
+
+    await dispatchChatMessage(
+      {
+        type: 'chat-message',
+        messageId: msgId,
+        conversationId: `group:${randomUUID()}`,
+        fromNodeId: strangerNodeId,
+        body: 'Hi',
+        sentAt: Date.now(),
+      },
+      strangerNodeId,
+      db,
+      identity.nodeId,
+    );
+
+    expect(db.select().from(messages).where(eq(messages.id, msgId)).get()).toBeUndefined();
+  });
+
+  it('stores a chat-message from an accepted friend, independent of any ws/inbound wiring', async () => {
+    const friendNodeId = 'chat-friend-' + crypto.randomUUID();
+    insertFriend({ nodeId: friendNodeId, status: 'ACCEPTED', address: '127.0.0.1' });
+    const msgId = randomUUID();
+    const convId = `group:${randomUUID()}`;
+
+    await dispatchChatMessage(
+      {
+        type: 'chat-message',
+        messageId: msgId,
+        conversationId: convId,
+        fromNodeId: friendNodeId,
+        body: 'Hello over an outbound-initiated connection',
+        sentAt: Date.now(),
+      },
+      friendNodeId,
+      db,
+      identity.nodeId,
+    );
+
+    const stored = db.select().from(messages).where(eq(messages.id, msgId)).get();
+    expect(stored).not.toBeUndefined();
+    expect(stored!.body).toBe('Hello over an outbound-initiated connection');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// dispatchGroupCreateMessage — lets a newly created group sync to peers
+// immediately, instead of waiting for a first chat message
+// ---------------------------------------------------------------------------
+
+describe('dispatchGroupCreateMessage', () => {
+  it('drops a group-create from a peer with no accepted friend record', async () => {
+    const strangerNodeId = 'group-create-stranger-' + crypto.randomUUID();
+    const convId = `group:${randomUUID()}`;
+
+    await dispatchGroupCreateMessage(
+      { type: 'group-create', conversationId: convId, name: 'Sneaky Room', createdAt: Date.now() },
+      strangerNodeId,
+      db,
+    );
+
+    expect(
+      db.select().from(conversations).where(eq(conversations.id, convId)).get(),
+    ).toBeUndefined();
+  });
+
+  it('creates the group conversation when sent by an accepted friend', async () => {
+    const friendNodeId = 'group-create-friend-' + crypto.randomUUID();
+    insertFriend({ nodeId: friendNodeId, status: 'ACCEPTED', address: '127.0.0.1' });
+    const convId = `group:${randomUUID()}`;
+
+    await dispatchGroupCreateMessage(
+      { type: 'group-create', conversationId: convId, name: 'Dev Chat', createdAt: Date.now() },
+      friendNodeId,
+      db,
+    );
+
+    const conv = db.select().from(conversations).where(eq(conversations.id, convId)).get();
+    expect(conv).not.toBeUndefined();
+    expect(conv!.name).toBe('Dev Chat');
   });
 });

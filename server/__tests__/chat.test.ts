@@ -6,7 +6,7 @@ import { unlinkSync } from 'fs';
 
 import { type Db, applyMigrations, createDb } from '../db';
 import { conversations, messages } from '../schema';
-import { dmConversationId, handleChatMessage } from '../chat';
+import { dmConversationId, handleChatMessage, handleGroupCreate } from '../chat';
 
 const TEST_DB_URL = 'file:./data/test-chat.db';
 let db: Db;
@@ -370,5 +370,47 @@ describe('handleChatMessage — group', () => {
       NODE_A,
     );
     expect(db.select().from(messages).where(eq(messages.id, msgId)).get()).not.toBeUndefined();
+  });
+});
+
+describe('handleGroupCreate', () => {
+  test('creates the group conversation so it appears without waiting for a first message', async () => {
+    const convId = `group:${randomUUID()}`;
+    await handleGroupCreate(
+      { conversationId: convId, name: 'Dev Chat', createdAt: Date.now() },
+      db,
+    );
+
+    const conv = db.select().from(conversations).where(eq(conversations.id, convId)).get();
+    expect(conv).not.toBeUndefined();
+    expect(conv!.type).toBe('GROUP');
+    expect(conv!.name).toBe('Dev Chat');
+  });
+
+  test('does not overwrite an existing conversation (first message already created it)', async () => {
+    const convId = `group:${randomUUID()}`;
+    const now = new Date();
+    db.insert(conversations)
+      .values({ id: convId, type: 'GROUP', name: 'Already Named', createdAt: now, updatedAt: now })
+      .run();
+
+    await handleGroupCreate(
+      { conversationId: convId, name: 'Late Broadcast', createdAt: Date.now() },
+      db,
+    );
+
+    const conv = db.select().from(conversations).where(eq(conversations.id, convId)).get()!;
+    expect(conv.name).toBe('Already Named');
+  });
+
+  test('ignores non-group conversation ids', async () => {
+    const convId = dmConversationId(NODE_A, NODE_B);
+    await handleGroupCreate(
+      { conversationId: convId, name: 'Should not apply', createdAt: Date.now() },
+      db,
+    );
+    expect(
+      db.select().from(conversations).where(eq(conversations.id, convId)).get(),
+    ).toBeUndefined();
   });
 });
