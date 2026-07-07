@@ -38,6 +38,10 @@ yarn-error.log*
 .pnpm-debug.log*
 bun-error.log*
 
+# playwright
+playwright-report/
+test-results/
+
 # lock files not in use
 .pnp
 .pnp.*
