@@ -184,3 +184,4 @@
   - [ ] When updates are available/ready to install
   - [ ] Other things?
 - [ ] Auto-open browser on app start (setting, defaults to true)
+- [ ] GitHub "Pages" page (light and dark mode, include screenshots, "docs" section for installation, configuration, etc. with screenshot examples)
