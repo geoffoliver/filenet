@@ -178,7 +178,7 @@
 - [x] Create necessary files to spin the app up in a Docker container — now serves the static export (`out/`) via the unified Bun server, not `next start`
 - [x] Database migrations — Drizzle migrations (`drizzle/migrations/*.sql`) applied automatically at server startup via `applyMigrations()`
 - [x] Single-binary distribution (à la Sonarr/Radarr) — Next.js builds via `output: 'export'`; `bun build --compile` packages the app + `out/` + `drizzle/migrations/` for all 5 targets via `bun run build:binaries`
-- [ ] Auto-update mechanism (detect new release on Github, download, prompt user to restart)
+- [ ] Auto-update mechanism (detect new release on Github (configurable repo URL in case someone wants to fork it), download, prompt user to restart)
 - [ ] Notifications (toast or desktop (desktop preferred))
   - [ ] Incoming friend requests that need approval
   - [ ] When updates are available/ready to install
