@@ -170,7 +170,7 @@
 
 - [x] Pre-commit hooks: lint + format check (Prettier / ESLint via lint-staged + husky)
 - [x] GitHub Actions: run tests on push / PR
-- [ ] GitHub Actions: release workflow (bump version, tag `v#.#.#`, publish)
+- [x] GitHub Actions: release workflow — manual `workflow_dispatch` (`.github/workflows/release.yml`) bumps `package.json`, cuts `CHANGELOG.md`'s `[Unreleased]` section into a versioned one, tags `v#.#.#`, builds all 5 binaries, publishes a GitHub Release; verified end-to-end with a real run (v0.1.1)
 - [x] Playwright frontend tests (54 tests across all major views; all API calls mocked via `page.route()`)
 - [ ] Improve backend test coverage as features are added
 - [x] CHANGELOG (start and maintain)
