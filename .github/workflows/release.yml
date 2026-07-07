@@ -60,6 +60,9 @@ jobs:
         id: version
         run: echo "version=$(jq -r .version package.json)" >> "$GITHUB_OUTPUT"
 
+      - name: Build binaries
+        run: bun run build:binaries
+
       - name: Commit, tag, and push
         run: |
           git config user.name "github-actions[bot]"
@@ -68,9 +71,6 @@ jobs:
           git commit -m "chore: release v${{ steps.version.outputs.version }}"
           git tag -a "v${{ steps.version.outputs.version }}" -m "v${{ steps.version.outputs.version }}"
           git push origin master --follow-tags
-
-      - name: Build binaries
-        run: bun run build:binaries
 
       - name: Publish GitHub Release
         env:
