@@ -1,3 +1,5 @@
+import { readFile, writeFile } from 'node:fs/promises';
+
 export type Bump = 'patch' | 'minor' | 'major';
 
 export function bumpVersion(current: string, bump: Bump): string {
@@ -46,4 +48,53 @@ export function cutChangelog(
   const updatedChangelog = `${before}## [Unreleased]\n\n## [${version}] - ${date}\n\n${body}\n${after}`;
 
   return { updatedChangelog, releaseNotes: body };
+}
+
+export type CutReleaseOptions = {
+  packageJsonPath: string;
+  changelogPath: string;
+  notesOutPath: string;
+  bump: Bump;
+  date: string;
+};
+
+export async function runCutRelease(opts: CutReleaseOptions): Promise<{ version: string }> {
+  const packageJsonText = await readFile(opts.packageJsonPath, 'utf8');
+  const pkg = JSON.parse(packageJsonText) as { version: string; [key: string]: unknown };
+
+  const newVersion = bumpVersion(pkg.version, opts.bump);
+
+  const changelogText = await readFile(opts.changelogPath, 'utf8');
+  const { updatedChangelog, releaseNotes } = cutChangelog(changelogText, newVersion, opts.date);
+
+  pkg.version = newVersion;
+  await writeFile(opts.packageJsonPath, JSON.stringify(pkg, null, 2) + '\n');
+  await writeFile(opts.changelogPath, updatedChangelog);
+  await writeFile(opts.notesOutPath, releaseNotes);
+
+  return { version: newVersion };
+}
+
+if (import.meta.main) {
+  const bump = process.argv[2];
+  const notesOutPath = process.argv[3];
+
+  if (bump !== 'patch' && bump !== 'minor' && bump !== 'major') {
+    console.error('Usage: bun scripts/cut-release.ts <patch|minor|major> <notes-out-path>');
+    process.exit(1);
+  }
+  if (!notesOutPath) {
+    console.error('Usage: bun scripts/cut-release.ts <patch|minor|major> <notes-out-path>');
+    process.exit(1);
+  }
+
+  const date = new Date().toISOString().slice(0, 10);
+  const { version } = await runCutRelease({
+    packageJsonPath: 'package.json',
+    changelogPath: 'CHANGELOG.md',
+    notesOutPath,
+    bump,
+    date,
+  });
+  console.log(`Bumped to v${version}`);
 }
