@@ -181,4 +181,5 @@
 - [ ] Auto-update mechanism (detect new release on Github, download, prompt user to restart)
 - [ ] Notifications (toast or desktop (desktop preferred))
   - [ ] Incoming friend requests that need approval
+  - [ ] When updates are available/ready to install
   - [ ] Other things?
