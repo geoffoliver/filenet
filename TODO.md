@@ -183,3 +183,4 @@
   - [ ] Incoming friend requests that need approval
   - [ ] When updates are available/ready to install
   - [ ] Other things?
+- [ ] Auto-open browser on app start (setting, defaults to true)
