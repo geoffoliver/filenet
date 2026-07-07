@@ -819,6 +819,35 @@ describe('PATCH /api/settings', () => {
     });
   });
 
+  it('indexes shared folders immediately when they are patched, with no separate rescan call', async () => {
+    const dir = join(tmpDir, 'settings-auto-scan');
+    await mkdir(dir);
+    await writeFile(join(dir, 'song.txt'), 'content');
+
+    const res = await makeHandler()(jsonReq('/api/settings', 'PATCH', { sharedFolders: [dir] }));
+    expect(res.status).toBe(200);
+
+    const statsRes = await makeHandler()(req('/api/stats'));
+    const stats = await statsRes.json();
+    expect(stats.sharedFiles.count).toBe(1);
+  });
+
+  it('does not scan when sharedFolders is not part of the patch', async () => {
+    const dir = join(tmpDir, 'settings-no-scan');
+    await mkdir(dir);
+    await writeFile(join(dir, 'song.txt'), 'content');
+    await makeHandler()(jsonReq('/api/settings', 'PATCH', { sharedFolders: [dir] }));
+
+    // A patch that omits sharedFolders shouldn't re-trigger a scan — add a
+    // second file that a scan would pick up, then patch an unrelated field.
+    await writeFile(join(dir, 'second.txt'), 'more content');
+    await makeHandler()(jsonReq('/api/settings', 'PATCH', { name: 'Unrelated' }));
+
+    const statsRes = await makeHandler()(req('/api/stats'));
+    const stats = await statsRes.json();
+    expect(stats.sharedFiles.count).toBe(1);
+  });
+
   it('updates listenPort and returns it', async () => {
     const res = await makeHandler()(jsonReq('/api/settings', 'PATCH', { listenPort: 8080 }));
     expect(res.status).toBe(200);

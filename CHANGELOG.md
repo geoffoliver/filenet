@@ -15,6 +15,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `bun run build:binaries` compiles and packages all five targets (`linux-x64`, `linux-arm64`, `darwin-x64`, `darwin-arm64`, `windows-x64`) as `dist/filenet-<target>.tar.gz`/`.zip`, each containing the executable alongside its `out/` and `drizzle/migrations/` folders
   - Docker continues to run from source, now serving the static export instead of a Next.js server; `docker-entrypoint.sh` simplified to a single process
 
+### Fixed
+
+- **Standalone binary failed to start on first run** — `new Database(path, { create: true })` only creates the database file, not missing parent directories; the default `./data/filenet.db` path worked in every previously-tested deployment (a tracked `data/.gitkeep` in git checkouts, an explicit `mkdir -p /app/data` in Docker) but a freshly extracted binary archive has no `data/` folder, so first launch crashed with `SQLITE_CANTOPEN`. `createDb()` now creates the parent directory itself
+- **Shared folders weren't scanned until manually triggered** — finishing the setup wizard or saving shared folders in Settings only saved the setting; nothing scanned the newly configured folders until the user found the "Force rescan" button. `PATCH /api/settings` now scans immediately when `sharedFolders` is included in the patch, matching the existing blocking/spinner UX of the manual rescan button
+
 - **Transfers view overhaul** — Napster-style split pane with resizable drag handle; downloads pane (top) and uploads pane (bottom); dense table-style rows showing inline progress bar, bytes received/total, speed, ETA, and source count; status bar at bottom showing concurrent download/upload counts; "Clear Finished" button; live upload session tracking (in-memory, per peer/file, 30 s idle expiry) exposed via new `GET /api/uploads` endpoint
 
 - **Search download feedback** — after clicking Download in search results, the button polls `/api/transfers` every 2 s and reflects live state: Starting… → Queued → 42% → Done ✓; re-enables on failure or cancellation so the user can retry
