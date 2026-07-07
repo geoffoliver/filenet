@@ -315,6 +315,15 @@ export function createManagementFetch(deps: ManagementDeps): (req: Request) => P
             );
           }
           const updated = await updateSettings(db, result.data);
+          if (result.data.sharedFolders !== undefined) {
+            // Shared folders were just (re)configured — scan them now rather
+            // than waiting for the user to notice nothing is indexed and
+            // find the manual "Force rescan" button. Matches the existing
+            // blocking-with-spinner UX of that button; both the setup
+            // wizard and Settings already show a saving/spinner state while
+            // this request is in flight, so no client changes are needed.
+            await scanAndIndex(db, parseSharedFolders(updated.sharedFolders));
+          }
           return Response.json(sanitizeSettings(updated));
         }
       }
