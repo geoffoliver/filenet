@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-07-07
+
 ### Added
 
 - **Single-binary distribution** — the app now builds and runs as a standalone executable via `bun build --compile`, with no external Node/Bun/npm dependency required at runtime
