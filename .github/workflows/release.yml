@@ -48,7 +48,7 @@ jobs:
         run: bunx prettier --check .
 
       - name: Test
-        run: bun test server/__tests__ scripts/__tests__ app/lib/__tests__
+        run: bun test server/__tests__ scripts/__tests__ app/lib/__tests__ app/hooks/__tests__
 
       - name: Cut release (bump version + changelog)
         run: bun scripts/cut-release.ts ${{ inputs.bump }} /tmp/release-notes.md

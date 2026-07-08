@@ -6,7 +6,7 @@
     "dev": "PORT=3001 bun --bun next dev",
     "build": "bun --bun next build",
     "server": "exec bun server/index.ts",
-    "test": "bun test server/__tests__ scripts/__tests__ app/lib/__tests__",
+    "test": "bun test server/__tests__ scripts/__tests__ app/lib/__tests__ app/hooks/__tests__",
     "test:e2e": "bunx playwright test",
     "lint": "eslint",
     "format": "prettier --write .",
