@@ -15,7 +15,7 @@ const NAV_LINKS = [
   { href: '/settings', label: 'Settings' },
 ];
 
-export default function Navbar() {
+export default function Navbar({ pendingRequestCount = 0 }: { pendingRequestCount?: number }) {
   const pathname = usePathname();
   const router = useRouter();
   const [query, setQuery] = useState('');
@@ -40,6 +40,9 @@ export default function Navbar() {
             className={`${styles.navLink} ${pathname.startsWith(href) ? styles.active : ''}`}
           >
             {label}
+            {href === '/friends' && pendingRequestCount > 0 && (
+              <span className={styles.badge}>{pendingRequestCount}</span>
+            )}
           </Link>
         ))}
       </div>

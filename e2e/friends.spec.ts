@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 
-import { FRIENDS, mockBaseApp, mockFriends } from './helpers';
+import { FRIENDS, FRIENDS_WITH_INCOMING_REQUEST, mockBaseApp, mockFriends } from './helpers';
 
 test.beforeEach(async ({ page }) => {
   await mockBaseApp(page);
@@ -20,24 +20,33 @@ test('shows online indicator for connected friends', async ({ page }) => {
 });
 
 test('shows incoming pending request with accept and decline buttons', async ({ page }) => {
+  await mockFriends(page, FRIENDS_WITH_INCOMING_REQUEST);
   await page.goto('/friends');
-  await expect(page.getByText('Carol')).toBeVisible();
+  // Exact match: the shell's global notification toast ("Carol wants to be
+  // your friend") also contains the substring "Carol", so a non-exact
+  // getByText('Carol') would match both it and the friend-list row.
+  await expect(page.getByText('Carol', { exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: /accept/i }).first()).toBeVisible();
   await expect(page.getByRole('button', { name: /decline/i }).first()).toBeVisible();
 });
 
 test('accepting a friend request calls the API and refreshes', async ({ page }) => {
   const accepted = { ...FRIENDS[2], status: 'ACCEPTED', acceptedAt: new Date().toISOString() };
+  let hasAccepted = false;
   await page.route('/api/friends/friend-3', (route) => {
-    if (route.request().method() === 'PUT') return route.fulfill({ json: accepted });
+    if (route.request().method() === 'PUT') {
+      hasAccepted = true;
+      return route.fulfill({ json: accepted });
+    }
     return route.continue();
   });
-  // After accept, mock the refresh returning updated list
-  let callCount = 0;
+  // Key off whether the PUT actually happened, not a raw GET call count —
+  // the shell's own friend-request-notification poll and this page's poll
+  // both hit this same route independently, so a naive counter can't tell
+  // "before the user clicked" from "after".
   await page.route('/api/friends', (route) => {
     if (route.request().method() === 'GET') {
-      callCount++;
-      const list = callCount === 1 ? FRIENDS : [...FRIENDS.slice(0, 2), accepted];
+      const list = hasAccepted ? [...FRIENDS.slice(0, 2), accepted] : FRIENDS_WITH_INCOMING_REQUEST;
       return route.fulfill({ json: list });
     }
     return route.continue();
@@ -53,15 +62,17 @@ test('accepting a friend request calls the API and refreshes', async ({ page }) 
 });
 
 test('rejecting a friend request removes them from the list', async ({ page }) => {
+  let hasRejected = false;
   await page.route('/api/friends/friend-3', (route) => {
-    if (route.request().method() === 'PUT') return route.fulfill({ status: 200, body: '' });
+    if (route.request().method() === 'PUT') {
+      hasRejected = true;
+      return route.fulfill({ status: 200, body: '' });
+    }
     return route.continue();
   });
-  let callCount = 0;
   await page.route('/api/friends', (route) => {
     if (route.request().method() === 'GET') {
-      callCount++;
-      const list = callCount === 1 ? FRIENDS : FRIENDS.slice(0, 2);
+      const list = hasRejected ? FRIENDS.slice(0, 2) : FRIENDS_WITH_INCOMING_REQUEST;
       return route.fulfill({ json: list });
     }
     return route.continue();
@@ -72,7 +83,11 @@ test('rejecting a friend request removes them from the list', async ({ page }) =
     .getByRole('button', { name: /decline/i })
     .first()
     .click();
-  await expect(page.getByText('Carol')).not.toBeVisible();
+  // Exact match: after rejecting, the friend-list row for Carol is gone, but
+  // the shell's global notification toast ("Carol wants to be your friend")
+  // may still be visible/fading from this same fixture — it also contains
+  // the substring "Carol", so a non-exact match would false-negative here.
+  await expect(page.getByText('Carol', { exact: true })).not.toBeVisible();
 });
 
 test('add friend form submits to the API', async ({ page }) => {

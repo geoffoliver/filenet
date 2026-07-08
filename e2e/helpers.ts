@@ -1,5 +1,7 @@
 import type { Page } from '@playwright/test';
 
+import type { Friend } from '../app/lib/api';
+
 // ---------------------------------------------------------------------------
 // Canonical mock fixtures
 // ---------------------------------------------------------------------------
@@ -22,7 +24,7 @@ export const STATS = {
   downloads: { count: 7, totalSize: '536870912' },
 };
 
-export const FRIENDS = [
+export const FRIENDS: Friend[] = [
   {
     id: 'friend-1',
     name: 'Alice',
@@ -54,18 +56,31 @@ export const FRIENDS = [
   {
     id: 'friend-3',
     name: 'Carol',
-    nodeId: null,
+    nodeId: 'node-carol',
     address: '10.0.0.4',
     port: 7734,
-    status: 'INCOMING_PENDING',
+    status: 'ACCEPTED',
     addedAt: '2024-03-01T00:00:00.000Z',
-    acceptedAt: null,
-    updatedAt: '2024-03-01T00:00:00.000Z',
+    acceptedAt: '2024-03-01T01:00:00.000Z',
+    updatedAt: '2024-03-01T01:00:00.000Z',
     online: false,
     downloads: { count: 0, totalSize: '0' },
     uploads: { count: 0, totalSize: '0' },
   },
 ];
+
+// A variant of FRIENDS where Carol is an incoming pending request instead of
+// an accepted friend — used only by tests that specifically exercise the
+// incoming-request flow (friends.spec.ts) or the friend-request
+// notification feature (notifications.spec.ts). Kept separate from the
+// default FRIENDS fixture so the rest of the e2e suite (which uses
+// mockBaseApp's default) doesn't incidentally trigger a friend-request
+// notification/toast on every page.
+export const FRIENDS_WITH_INCOMING_REQUEST = FRIENDS.map((f) =>
+  f.id === 'friend-3'
+    ? { ...f, nodeId: null, status: 'INCOMING_PENDING' as const, acceptedAt: null }
+    : f,
+);
 
 export const TRANSFERS = [
   {
