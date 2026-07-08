@@ -6,6 +6,11 @@ import FolderPicker from '../../components/FolderPicker/FolderPicker';
 
 import type { EnvConfig, PostDownloadScript, Settings } from '../../lib/api';
 import {
+  type NotificationPermissionState,
+  getNotificationPermission,
+  requestNotificationPermission,
+} from '../../lib/notifications';
+import {
   addScript,
   getEnvConfig,
   getScripts,
@@ -594,6 +599,45 @@ function MaintenanceSection() {
   );
 }
 
+// ── Notifications section ───────────────────────────────────────────────────
+
+function NotificationsSection() {
+  const [permission, setPermission] = useState<NotificationPermissionState>(() =>
+    getNotificationPermission(),
+  );
+
+  async function handleEnable() {
+    const result = await requestNotificationPermission();
+    setPermission(result);
+  }
+
+  return (
+    <Section title="Notifications">
+      <div className={styles.form}>
+        {permission === 'unsupported' && (
+          <p className={styles.hint}>Desktop notifications are not supported in this browser.</p>
+        )}
+        {permission === 'granted' && (
+          <p className={styles.hint}>Desktop notifications are enabled.</p>
+        )}
+        {permission === 'denied' && (
+          <p className={styles.hint}>
+            Desktop notifications are blocked. Check your browser&apos;s site settings to enable
+            them.
+          </p>
+        )}
+        {permission === 'default' && (
+          <div className={styles.formFooter}>
+            <button type="button" className="btn btn-primary" onClick={handleEnable}>
+              Enable desktop notifications
+            </button>
+          </div>
+        )}
+      </div>
+    </Section>
+  );
+}
+
 // ── Root component ────────────────────────────────────────────────────────────
 
 export default function SettingsView() {
@@ -633,6 +677,7 @@ export default function SettingsView() {
       <NetworkingSection initial={settings} />
       <ScriptsSection />
       <MaintenanceSection />
+      <NotificationsSection />
     </div>
   );
 }
