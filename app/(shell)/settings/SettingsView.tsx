@@ -602,9 +602,11 @@ function MaintenanceSection() {
 // ── Notifications section ───────────────────────────────────────────────────
 
 function NotificationsSection() {
-  const [permission, setPermission] = useState<NotificationPermissionState>(() =>
-    getNotificationPermission(),
-  );
+  const [permission, setPermission] = useState<NotificationPermissionState>('unsupported');
+
+  useEffect(() => {
+    Promise.resolve().then(() => setPermission(getNotificationPermission()));
+  }, []);
 
   async function handleEnable() {
     const result = await requestNotificationPermission();
