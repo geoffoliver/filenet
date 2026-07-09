@@ -15,6 +15,13 @@ test('shows a toast and a nav badge when an incoming friend request appears', as
 
   await expect(page.getByText('Carol wants to be your friend')).toBeVisible();
   await expect(page.getByRole('link', { name: /friends/i }).getByText('1')).toBeVisible();
+
+  // The visible badge concatenated straight into the link's text would give
+  // an ambiguous accessible name like "Friends1" — assert the real
+  // accessible name is well-formed instead of just checking for the digit.
+  await expect(
+    page.getByRole('link', { name: /friends.*1 pending friend request/i }),
+  ).toBeVisible();
 });
 
 test('does not show a toast when there are no incoming pending requests', async ({ page }) => {

@@ -33,18 +33,28 @@ export default function Navbar({ pendingRequestCount = 0 }: { pendingRequestCoun
       </Link>
 
       <div className={styles.nav}>
-        {NAV_LINKS.map(({ href, label }) => (
-          <Link
-            key={href}
-            href={href}
-            className={`${styles.navLink} ${pathname.startsWith(href) ? styles.active : ''}`}
-          >
-            {label}
-            {href === '/friends' && pendingRequestCount > 0 && (
-              <span className={styles.badge}>{pendingRequestCount}</span>
-            )}
-          </Link>
-        ))}
+        {NAV_LINKS.map(({ href, label }) => {
+          const showBadge = href === '/friends' && pendingRequestCount > 0;
+          return (
+            <Link
+              key={href}
+              href={href}
+              className={`${styles.navLink} ${pathname.startsWith(href) ? styles.active : ''}`}
+              aria-label={
+                showBadge
+                  ? `${label} (${pendingRequestCount} pending friend request${pendingRequestCount === 1 ? '' : 's'})`
+                  : undefined
+              }
+            >
+              {label}
+              {showBadge && (
+                <span className={styles.badge} aria-hidden="true">
+                  {pendingRequestCount}
+                </span>
+              )}
+            </Link>
+          );
+        })}
       </div>
 
       <form className={styles.searchForm} onSubmit={handleSearch}>
