@@ -2,8 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 
+import { getNewlyPendingIds, pruneStaleIds } from './friendRequestDiff';
 import { getFriends } from '../lib/api';
-import { getNewlyPendingIds } from './friendRequestDiff';
 import { showDesktopNotification } from '../lib/notifications';
 import { useToast } from '../components/Toast/ToastProvider';
 
@@ -42,13 +42,19 @@ export function useFriendRequestNotifications(): number {
       if (!mountedRef.current) return;
 
       const pending = friends.filter((f) => f.status === 'INCOMING_PENDING');
+      const pendingIds = pending.map((f) => f.id);
       setCount(pending.length);
 
-      const notifiedIds = loadNotifiedIds();
-      const newIds = getNewlyPendingIds(
-        pending.map((f) => f.id),
-        notifiedIds,
-      );
+      const loadedIds = loadNotifiedIds();
+      // Prune ids that are no longer pending (accepted/declined since) so a
+      // friend that re-enters INCOMING_PENDING under the same id later (e.g.
+      // server/friends.ts upgrading an existing row) is treated as a new
+      // request rather than silently suppressed forever, and so the
+      // persisted set doesn't grow unboundedly.
+      const notifiedIds = pruneStaleIds(loadedIds, pendingIds);
+      let changed = notifiedIds.size !== loadedIds.size;
+
+      const newIds = getNewlyPendingIds(pendingIds, notifiedIds);
 
       for (const id of newIds) {
         const friend = pending.find((f) => f.id === id);
@@ -63,9 +69,10 @@ export function useFriendRequestNotifications(): number {
         );
         if (!shown) toast.show(`${friend.name} wants to be your friend`);
         notifiedIds.add(id);
+        changed = true;
       }
 
-      if (newIds.length > 0) saveNotifiedIds(notifiedIds);
+      if (changed) saveNotifiedIds(notifiedIds);
     } catch {
       // silent retry, matches app/(shell)/friends/page.tsx's poll-failure convention
     }

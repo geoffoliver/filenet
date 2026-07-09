@@ -605,12 +605,18 @@ function NotificationsSection() {
   const [permission, setPermission] = useState<NotificationPermissionState | 'loading'>('loading');
 
   useEffect(() => {
+    let active = true;
     // Deferred a microtask, not called synchronously: reading Notification
     // must stay client-only (the server always sees it as undefined, so a
     // direct read here would mismatch hydration), and a bare synchronous
     // setState in an effect body trips this project's
     // react-hooks/set-state-in-effect lint rule.
-    Promise.resolve().then(() => setPermission(getNotificationPermission()));
+    Promise.resolve().then(() => {
+      if (active) setPermission(getNotificationPermission());
+    });
+    return () => {
+      active = false;
+    };
   }, []);
 
   async function handleEnable() {
