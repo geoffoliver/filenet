@@ -602,7 +602,7 @@ function MaintenanceSection() {
 // ── Notifications section ───────────────────────────────────────────────────
 
 function NotificationsSection() {
-  const [permission, setPermission] = useState<NotificationPermissionState>('unsupported');
+  const [permission, setPermission] = useState<NotificationPermissionState | 'loading'>('loading');
 
   useEffect(() => {
     // Deferred a microtask, not called synchronously: reading Notification
@@ -621,6 +621,9 @@ function NotificationsSection() {
   return (
     <Section title="Notifications">
       <div className={styles.form}>
+        {/* 'loading' renders nothing — avoids briefly flashing an incorrect
+            status (e.g. "not supported") before the client-only permission
+            read resolves, one tick after mount. */}
         {permission === 'unsupported' && (
           <p className={styles.hint}>Desktop notifications are not supported in this browser.</p>
         )}

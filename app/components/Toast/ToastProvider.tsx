@@ -1,6 +1,14 @@
 'use client';
 
-import { createContext, useCallback, useContext, useMemo, useRef, useState } from 'react';
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 
 import styles from './Toast.module.css';
 
@@ -20,13 +28,27 @@ export function useToast(): ToastContextValue {
 export function ToastProvider({ children }: { children: React.ReactNode }) {
   const [toasts, setToasts] = useState<ToastItem[]>([]);
   const idRef = useRef(0);
+  const timeoutsRef = useRef<Set<ReturnType<typeof setTimeout>>>(new Set());
+
+  // Clear any pending dismiss timers on unmount, so a stale timeout can't
+  // fire against a ToastProvider instance that's no longer mounted (e.g.
+  // navigating out of the (shell) route group entirely, to /setup).
+  useEffect(() => {
+    const timeouts = timeoutsRef.current;
+    return () => {
+      timeouts.forEach(clearTimeout);
+      timeouts.clear();
+    };
+  }, []);
 
   const show = useCallback((message: string) => {
     const id = String(idRef.current++);
     setToasts((current) => [...current, { id, message }]);
-    setTimeout(() => {
+    const timeoutId = setTimeout(() => {
+      timeoutsRef.current.delete(timeoutId);
       setToasts((current) => current.filter((t) => t.id !== id));
     }, TOAST_DURATION_MS);
+    timeoutsRef.current.add(timeoutId);
   }, []);
 
   // Memoized so the context value's identity only changes when `show` does
