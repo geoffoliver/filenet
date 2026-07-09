@@ -83,10 +83,19 @@ test('re-notifies for the same friend id if it leaves and re-enters the pending 
   await expect(page.getByText('Carol wants to be your friend')).toBeVisible();
   await expect(page.getByText('Carol wants to be your friend')).not.toBeVisible({ timeout: 7_000 });
 
-  // Flip to accepted and wait for a poll to actually observe that state —
-  // this is what should prune Carol's id out of the notified set.
+  // Flip to accepted and wait for a poll response that actually reflects
+  // that state — not just any /api/friends response. POLL_MS and
+  // TOAST_DURATION_MS are both exactly 5s, so a poll can be in flight
+  // (dispatched under the old 'pending' phase) at the exact moment we flip
+  // the variable; that in-flight response would still satisfy a URL-only
+  // predicate without the hook ever having observed 'accepted'. Inspecting
+  // the body makes this deterministic regardless of that overlap.
   phase = 'accepted';
-  await page.waitForResponse((res) => res.url().endsWith('/api/friends'));
+  await page.waitForResponse(async (res) => {
+    if (!res.url().endsWith('/api/friends') || res.request().method() !== 'GET') return false;
+    const body: unknown = await res.json().catch(() => null);
+    return Array.isArray(body) && !body.some((f) => f.status === 'INCOMING_PENDING');
+  });
 
   // Flip back to pending — the next poll should treat this as new again.
   phase = 'pending';
