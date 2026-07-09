@@ -15,7 +15,8 @@ function loadNotifiedIds(): Set<string> {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return new Set();
     const parsed: unknown = JSON.parse(raw);
-    return Array.isArray(parsed) ? new Set(parsed) : new Set();
+    if (!Array.isArray(parsed)) return new Set();
+    return new Set(parsed.filter((id): id is string => typeof id === 'string'));
   } catch {
     return new Set();
   }

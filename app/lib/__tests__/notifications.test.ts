@@ -78,4 +78,20 @@ describe('showDesktopNotification', () => {
     expect(instances[0].title).toBe('Title');
     expect(instances[0].body).toBe('Body');
   });
+
+  test('returns false instead of throwing when the Notification constructor itself throws', () => {
+    class ThrowingNotification {
+      static permission = 'granted';
+      static requestPermission = async () => 'granted';
+      constructor() {
+        // Some browsers (e.g. older Android Chrome) throw here even when
+        // permission is 'granted', requiring the ServiceWorker-based API.
+        throw new TypeError("Failed to construct 'Notification': Illegal constructor");
+      }
+    }
+    (globalThis as any).Notification = ThrowingNotification;
+
+    expect(() => showDesktopNotification('Title', 'Body')).not.toThrow();
+    expect(showDesktopNotification('Title', 'Body')).toBe(false);
+  });
 });

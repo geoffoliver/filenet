@@ -16,7 +16,14 @@ export function showDesktopNotification(
   onClick?: () => void,
 ): boolean {
   if (getNotificationPermission() !== 'granted') return false;
-  const notification = new Notification(title, { body });
-  if (onClick) notification.onclick = onClick;
-  return true;
+  try {
+    const notification = new Notification(title, { body });
+    if (onClick) notification.onclick = onClick;
+    return true;
+  } catch {
+    // Some browsers (e.g. older Android Chrome) throw from the Notification
+    // constructor even when permission is 'granted', requiring the
+    // ServiceWorker-based API instead. Fall back to the caller's toast path.
+    return false;
+  }
 }

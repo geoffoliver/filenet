@@ -19,8 +19,16 @@ test('shows a toast and a nav badge when an incoming friend request appears', as
 
 test('does not show a toast when there are no incoming pending requests', async ({ page }) => {
   await mockFriends(page, FRIENDS);
-  await page.goto('/home');
-  await page.waitForTimeout(500);
+  await Promise.all([
+    page.waitForResponse(
+      (res) => res.url().endsWith('/api/friends') && res.request().method() === 'GET',
+    ),
+    page.goto('/home'),
+  ]);
+  // The poll's response has definitely arrived at this point (unlike a blind
+  // sleep); this last bit just gives React a moment to commit the resulting
+  // state update before we assert on the DOM.
+  await page.waitForTimeout(100);
   await expect(page.getByText(/wants to be your friend/i)).toHaveCount(0);
 });
 
@@ -39,8 +47,13 @@ test('does not re-notify for a request already seen in this browser', async ({ p
 
   // Reload — same browser context, same localStorage. The poll fires again
   // on mount; Carol must not be re-notified.
-  await page.reload();
-  await page.waitForTimeout(500);
+  await Promise.all([
+    page.waitForResponse(
+      (res) => res.url().endsWith('/api/friends') && res.request().method() === 'GET',
+    ),
+    page.reload(),
+  ]);
+  await page.waitForTimeout(100);
   await expect(page.getByText('Carol wants to be your friend')).toHaveCount(0);
   // The badge, however, is derived fresh from the poll every time and
   // should still reflect the still-pending request.
