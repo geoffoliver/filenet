@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 
-import { compareVersions, isNewerVersion, targetName } from '../updater';
+import { compareVersions, fetchLatestRelease, isNewerVersion, targetName } from '../updater';
 
 describe('compareVersions', () => {
   it('returns 0 for equal versions', () => {
@@ -61,5 +61,53 @@ describe('targetName', () => {
     expect(() => targetName('win32', 'arm64')).toThrow(
       /Unsupported platform\/arch for auto-update: win32\/arm64/,
     );
+  });
+});
+
+describe('fetchLatestRelease', () => {
+  function fakeFetch(response: unknown, status = 200): typeof fetch {
+    return (async () =>
+      new Response(JSON.stringify(response), { status })) as unknown as typeof fetch;
+  }
+
+  it('parses tag_name, html_url, and assets from a real-shaped response', async () => {
+    const release = await fetchLatestRelease(
+      'geoffoliver/filenet',
+      fakeFetch({
+        tag_name: 'v0.2.0',
+        html_url: 'https://github.com/geoffoliver/filenet/releases/tag/v0.2.0',
+        assets: [
+          {
+            name: 'filenet-bun-linux-x64.zip',
+            browser_download_url: 'https://example.com/filenet-bun-linux-x64.zip',
+          },
+          { name: 'SHA256SUMS.txt', browser_download_url: 'https://example.com/SHA256SUMS.txt' },
+        ],
+      }),
+    );
+
+    expect(release).toEqual({
+      version: '0.2.0',
+      notesUrl: 'https://github.com/geoffoliver/filenet/releases/tag/v0.2.0',
+      assets: [
+        { name: 'filenet-bun-linux-x64.zip', url: 'https://example.com/filenet-bun-linux-x64.zip' },
+        { name: 'SHA256SUMS.txt', url: 'https://example.com/SHA256SUMS.txt' },
+      ],
+    });
+  });
+
+  it('returns null when the repo has no releases (404)', async () => {
+    const release = await fetchLatestRelease('geoffoliver/filenet', fakeFetch({}, 404));
+    expect(release).toBeNull();
+  });
+
+  it('throws on a non-404 error status', async () => {
+    await expect(fetchLatestRelease('geoffoliver/filenet', fakeFetch({}, 500))).rejects.toThrow();
+  });
+
+  it('throws when the response has no tag_name', async () => {
+    await expect(
+      fetchLatestRelease('geoffoliver/filenet', fakeFetch({ assets: [] })),
+    ).rejects.toThrow();
   });
 });
