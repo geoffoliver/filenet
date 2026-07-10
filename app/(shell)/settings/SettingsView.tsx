@@ -603,25 +603,28 @@ function MaintenanceSection() {
 
 function NotificationsSection() {
   const [permission, setPermission] = useState<NotificationPermissionState | 'loading'>('loading');
+  // Shared across the mount effect and handleEnable — either one's deferred
+  // setPermission() must become a no-op once the section unmounts.
+  const mountedRef = useRef(true);
 
   useEffect(() => {
-    let active = true;
+    mountedRef.current = true;
     // Deferred a microtask, not called synchronously: reading Notification
     // must stay client-only (the server always sees it as undefined, so a
     // direct read here would mismatch hydration), and a bare synchronous
     // setState in an effect body trips this project's
     // react-hooks/set-state-in-effect lint rule.
     Promise.resolve().then(() => {
-      if (active) setPermission(getNotificationPermission());
+      if (mountedRef.current) setPermission(getNotificationPermission());
     });
     return () => {
-      active = false;
+      mountedRef.current = false;
     };
   }, []);
 
   async function handleEnable() {
     const result = await requestNotificationPermission();
-    setPermission(result);
+    if (mountedRef.current) setPermission(result);
   }
 
   return (
