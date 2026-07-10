@@ -6,6 +6,11 @@ import FolderPicker from '../../components/FolderPicker/FolderPicker';
 
 import type { EnvConfig, PostDownloadScript, Settings } from '../../lib/api';
 import {
+  type NotificationPermissionState,
+  getNotificationPermission,
+  requestNotificationPermission,
+} from '../../lib/notifications';
+import {
   addScript,
   getEnvConfig,
   getScripts,
@@ -594,6 +599,64 @@ function MaintenanceSection() {
   );
 }
 
+// ── Notifications section ───────────────────────────────────────────────────
+
+function NotificationsSection() {
+  const [permission, setPermission] = useState<NotificationPermissionState | 'loading'>('loading');
+  // Shared across the mount effect and handleEnable — either one's deferred
+  // setPermission() must become a no-op once the section unmounts.
+  const mountedRef = useRef(true);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    // Deferred a microtask, not called synchronously: reading Notification
+    // must stay client-only (the server always sees it as undefined, so a
+    // direct read here would mismatch hydration), and a bare synchronous
+    // setState in an effect body trips this project's
+    // react-hooks/set-state-in-effect lint rule.
+    Promise.resolve().then(() => {
+      if (mountedRef.current) setPermission(getNotificationPermission());
+    });
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+  async function handleEnable() {
+    const result = await requestNotificationPermission();
+    if (mountedRef.current) setPermission(result);
+  }
+
+  return (
+    <Section title="Notifications">
+      <div className={styles.form}>
+        {/* 'loading' renders nothing — avoids briefly flashing an incorrect
+            status (e.g. "not supported") before the client-only permission
+            read resolves, one tick after mount. */}
+        {permission === 'unsupported' && (
+          <p className={styles.hint}>Desktop notifications are not supported in this browser.</p>
+        )}
+        {permission === 'granted' && (
+          <p className={styles.hint}>Desktop notifications are enabled.</p>
+        )}
+        {permission === 'denied' && (
+          <p className={styles.hint}>
+            Desktop notifications are blocked. Check your browser&apos;s site settings to enable
+            them.
+          </p>
+        )}
+        {permission === 'default' && (
+          <div className={styles.formFooter}>
+            <button type="button" className="btn btn-primary" onClick={handleEnable}>
+              Enable desktop notifications
+            </button>
+          </div>
+        )}
+      </div>
+    </Section>
+  );
+}
+
 // ── Root component ────────────────────────────────────────────────────────────
 
 export default function SettingsView() {
@@ -633,6 +696,7 @@ export default function SettingsView() {
       <NetworkingSection initial={settings} />
       <ScriptsSection />
       <MaintenanceSection />
+      <NotificationsSection />
     </div>
   );
 }

@@ -1,11 +1,10 @@
-import Navbar from '../components/Navbar/Navbar';
-import styles from './layout.module.css';
+import { ShellContent } from './ShellContent';
+import { ToastProvider } from '../components/Toast/ToastProvider';
 
 export default function ShellLayout({ children }: { children: React.ReactNode }) {
   return (
-    <div className={styles.shell}>
-      <Navbar />
-      <main className={styles.main}>{children}</main>
-    </div>
+    <ToastProvider>
+      <ShellContent>{children}</ShellContent>
+    </ToastProvider>
   );
 }

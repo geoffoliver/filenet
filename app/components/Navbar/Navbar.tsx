@@ -15,7 +15,7 @@ const NAV_LINKS = [
   { href: '/settings', label: 'Settings' },
 ];
 
-export default function Navbar() {
+export default function Navbar({ pendingRequestCount = 0 }: { pendingRequestCount?: number }) {
   const pathname = usePathname();
   const router = useRouter();
   const [query, setQuery] = useState('');
@@ -33,15 +33,28 @@ export default function Navbar() {
       </Link>
 
       <div className={styles.nav}>
-        {NAV_LINKS.map(({ href, label }) => (
-          <Link
-            key={href}
-            href={href}
-            className={`${styles.navLink} ${pathname.startsWith(href) ? styles.active : ''}`}
-          >
-            {label}
-          </Link>
-        ))}
+        {NAV_LINKS.map(({ href, label }) => {
+          const showBadge = href === '/friends' && pendingRequestCount > 0;
+          return (
+            <Link
+              key={href}
+              href={href}
+              className={`${styles.navLink} ${pathname.startsWith(href) ? styles.active : ''}`}
+              aria-label={
+                showBadge
+                  ? `${label} (${pendingRequestCount} pending friend request${pendingRequestCount === 1 ? '' : 's'})`
+                  : undefined
+              }
+            >
+              {label}
+              {showBadge && (
+                <span className={styles.badge} aria-hidden="true">
+                  {pendingRequestCount}
+                </span>
+              )}
+            </Link>
+          );
+        })}
       </div>
 
       <form className={styles.searchForm} onSubmit={handleSearch}>

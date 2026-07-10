@@ -61,6 +61,21 @@
     text-[var(--text-primary)];
 }
 
+.badge {
+  @apply inline-flex
+    items-center
+    justify-center
+    ml-1.5
+    min-w-[18px]
+    h-[18px]
+    px-1
+    rounded-full
+    text-xs
+    font-semibold
+    text-white
+    bg-[var(--color-danger)];
+}
+
 .searchForm {
   @apply flex
     items-center

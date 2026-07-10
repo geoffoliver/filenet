@@ -82,3 +82,56 @@ test('rescan interval field is rendered', async ({ page }) => {
   // Default value from SETTINGS is 60 minutes
   await expect(page.locator('input[type="number"][min="0"]')).toHaveValue('60');
 });
+
+test('shows enable button when notification permission is default', async ({ page }) => {
+  await page.addInitScript(() => {
+    (window as any).Notification = class {
+      static permission = 'default';
+      static requestPermission = async () => 'granted';
+    };
+  });
+  await page.goto('/settings');
+  await expect(page.getByRole('button', { name: /enable desktop notifications/i })).toBeVisible();
+});
+
+test('shows an enabled message when notification permission is granted', async ({ page }) => {
+  await page.addInitScript(() => {
+    (window as any).Notification = class {
+      static permission = 'granted';
+      static requestPermission = async () => 'granted';
+    };
+  });
+  await page.goto('/settings');
+  await expect(page.getByText(/desktop notifications are enabled/i)).toBeVisible();
+});
+
+test('shows a blocked message when notification permission is denied', async ({ page }) => {
+  await page.addInitScript(() => {
+    (window as any).Notification = class {
+      static permission = 'denied';
+      static requestPermission = async () => 'denied';
+    };
+  });
+  await page.goto('/settings');
+  await expect(page.getByText(/desktop notifications are blocked/i)).toBeVisible();
+});
+
+test('shows an unsupported message when the Notification API is unavailable', async ({ page }) => {
+  await page.addInitScript(() => {
+    (window as any).Notification = undefined;
+  });
+  await page.goto('/settings');
+  await expect(page.getByText(/not supported/i)).toBeVisible();
+});
+
+test('clicking enable requests permission and updates the UI', async ({ page }) => {
+  await page.addInitScript(() => {
+    (window as any).Notification = class {
+      static permission = 'default';
+      static requestPermission = async () => 'granted';
+    };
+  });
+  await page.goto('/settings');
+  await page.getByRole('button', { name: /enable desktop notifications/i }).click();
+  await expect(page.getByText(/desktop notifications are enabled/i)).toBeVisible();
+});

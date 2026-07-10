@@ -1,0 +1,25 @@
+@reference 'tailwindcss';
+
+.container {
+  @apply fixed
+    bottom-4
+    right-4
+    z-100
+    flex
+    flex-col
+    gap-2
+    pointer-events-none;
+}
+
+.toast {
+  @apply px-4
+    py-3
+    rounded-[var(--radius-md)]
+    bg-[var(--bg-elevated)]
+    text-[var(--text-primary)]
+    text-sm
+    shadow-[var(--shadow-md)]
+    border
+    border-[var(--border)];
+  max-width: 320px;
+}
