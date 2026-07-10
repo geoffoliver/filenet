@@ -37,6 +37,12 @@ export const PatchSettingsBodySchema = z
       .min(1, 'listenPort must be between 1 and 65535')
       .max(65535, 'listenPort must be between 1 and 65535')
       .optional(),
+    updateRepo: z
+      .string()
+      .trim()
+      .regex(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/, 'updateRepo must be in the form owner/repo')
+      .optional(),
+    updateCheckIntervalMinutes: z.int().min(0).max(35791).optional(),
   })
   .strict();
 

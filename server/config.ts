@@ -40,6 +40,8 @@ export type SettingsPatch = {
   downloadFolder?: string | null;
   rescanIntervalMinutes?: number;
   listenPort?: number;
+  updateRepo?: string;
+  updateCheckIntervalMinutes?: number;
 };
 
 export type SafeSettings = Omit<Settings, 'invitePassword' | 'sharedFolders'> & {
