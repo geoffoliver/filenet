@@ -15,6 +15,13 @@
       "when": 1782668929481,
       "tag": "0001_breezy_cloak",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1783664778808,
+      "tag": "0002_overrated_boomer",
+      "breakpoints": true
     }
   ]
 }

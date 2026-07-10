@@ -88,6 +88,8 @@ export const settings = sqliteTable('Settings', {
   downloadFolder: text('downloadFolder'),
   rescanIntervalMinutes: integer('rescanIntervalMinutes').notNull().default(0),
   listenPort: integer('listenPort').notNull().default(7734),
+  updateRepo: text('updateRepo').notNull().default('geoffoliver/filenet'),
+  updateCheckIntervalMinutes: integer('updateCheckIntervalMinutes').notNull().default(1440),
 });
 
 export type Settings = typeof settings.$inferSelect;
