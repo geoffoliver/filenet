@@ -33,6 +33,14 @@ describe('targetName', () => {
     expect(targetName('darwin', 'x64')).toBe('bun-darwin-x64');
   });
 
+  it('maps darwin/arm64 to bun-darwin-arm64', () => {
+    expect(targetName('darwin', 'arm64')).toBe('bun-darwin-arm64');
+  });
+
+  it('maps linux/x64 to bun-linux-x64', () => {
+    expect(targetName('linux', 'x64')).toBe('bun-linux-x64');
+  });
+
   it('maps linux/arm64 to bun-linux-arm64', () => {
     expect(targetName('linux', 'arm64')).toBe('bun-linux-arm64');
   });
@@ -47,5 +55,11 @@ describe('targetName', () => {
 
   it('throws on an unsupported architecture', () => {
     expect(() => targetName('linux', 'ia32')).toThrow();
+  });
+
+  it('throws on invalid platform/arch combination (win32/arm64)', () => {
+    expect(() => targetName('win32', 'arm64')).toThrow(
+      /Unsupported platform\/arch for auto-update: win32\/arm64/,
+    );
   });
 });

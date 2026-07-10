@@ -12,12 +12,19 @@ export function isNewerVersion(candidate: string, current: string): boolean {
   return compareVersions(candidate, current) > 0;
 }
 
-const TARGET_OS: Record<string, string> = { darwin: 'darwin', linux: 'linux', win32: 'windows' };
-const TARGET_ARCH: Record<string, string> = { x64: 'x64', arm64: 'arm64' };
+// Explicit whitelist of valid (platform, arch) → targetName mappings
+// These are the only 5 targets built by scripts/build-binaries.sh
+const VALID_TARGETS: Record<string, string> = {
+  'darwin:x64': 'bun-darwin-x64',
+  'darwin:arm64': 'bun-darwin-arm64',
+  'linux:x64': 'bun-linux-x64',
+  'linux:arm64': 'bun-linux-arm64',
+  'win32:x64': 'bun-windows-x64',
+};
 
 export function targetName(platform: string, arch: string): string {
-  const os = TARGET_OS[platform];
-  const a = TARGET_ARCH[arch];
-  if (!os || !a) throw new Error(`Unsupported platform/arch for auto-update: ${platform}/${arch}`);
-  return `bun-${os}-${a}`;
+  const key = `${platform}:${arch}`;
+  const target = VALID_TARGETS[key];
+  if (!target) throw new Error(`Unsupported platform/arch for auto-update: ${platform}/${arch}`);
+  return target;
 }
