@@ -1,6 +1,20 @@
-import { describe, expect, it } from 'bun:test';
+import { afterEach, describe, expect, it } from 'bun:test';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, statSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 
-import { compareVersions, fetchLatestRelease, isNewerVersion, targetName } from '../updater';
+import JSZip from 'jszip';
+
+import {
+  compareVersions,
+  downloadAndStage,
+  extractZip,
+  fetchLatestRelease,
+  isNewerVersion,
+  targetName,
+  verifySha256,
+} from '../updater';
 
 describe('compareVersions', () => {
   it('returns 0 for equal versions', () => {
@@ -109,5 +123,182 @@ describe('fetchLatestRelease', () => {
     await expect(
       fetchLatestRelease('geoffoliver/filenet', fakeFetch({ assets: [] })),
     ).rejects.toThrow();
+  });
+});
+
+describe('verifySha256', () => {
+  const tmpDirs: string[] = [];
+  afterEach(() => {
+    for (const d of tmpDirs.splice(0)) rmSync(d, { recursive: true, force: true });
+  });
+
+  it('returns true when the hash matches the SHA256SUMS.txt line', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'filenet-sha-'));
+    tmpDirs.push(dir);
+    const filePath = join(dir, 'asset.zip');
+    await Bun.write(filePath, 'hello world');
+    // sha256("hello world") — precomputed, stable for any test environment
+    const hash = 'b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9';
+    const ok = await verifySha256(filePath, `${hash}  asset.zip\n`, 'asset.zip');
+    expect(ok).toBe(true);
+  });
+
+  it('returns false when the hash does not match', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'filenet-sha-'));
+    tmpDirs.push(dir);
+    const filePath = join(dir, 'asset.zip');
+    await Bun.write(filePath, 'hello world');
+    const ok = await verifySha256(filePath, `${'0'.repeat(64)}  asset.zip\n`, 'asset.zip');
+    expect(ok).toBe(false);
+  });
+
+  it('returns false when the asset has no line in the checksums file', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'filenet-sha-'));
+    tmpDirs.push(dir);
+    const filePath = join(dir, 'asset.zip');
+    await Bun.write(filePath, 'hello world');
+    const ok = await verifySha256(filePath, `${'a'.repeat(64)}  other.zip\n`, 'asset.zip');
+    expect(ok).toBe(false);
+  });
+});
+
+describe('extractZip', () => {
+  const tmpDirs: string[] = [];
+  afterEach(() => {
+    for (const d of tmpDirs.splice(0)) rmSync(d, { recursive: true, force: true });
+  });
+
+  it('extracts nested files flat under destDir and marks the binary executable', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'filenet-zip-'));
+    tmpDirs.push(dir);
+    const zip = new JSZip();
+    zip.file('filenet', 'binary-contents');
+    zip.file('out/index.html', '<html></html>');
+    zip.file('drizzle/migrations/0000_x.sql', 'CREATE TABLE x;');
+    const zipPath = join(dir, 'release.zip');
+    await Bun.write(zipPath, await zip.generateAsync({ type: 'nodebuffer' }));
+
+    const destDir = join(dir, 'dest');
+    await extractZip(zipPath, destDir);
+
+    expect(existsSync(join(destDir, 'filenet'))).toBe(true);
+    expect(existsSync(join(destDir, 'out', 'index.html'))).toBe(true);
+    expect(existsSync(join(destDir, 'drizzle', 'migrations', '0000_x.sql'))).toBe(true);
+    if (process.platform !== 'win32') {
+      const mode = statSync(join(destDir, 'filenet')).mode;
+      expect(mode & 0o111).not.toBe(0); // at least one executable bit set
+    }
+  });
+});
+
+describe('downloadAndStage', () => {
+  const tmpDirs: string[] = [];
+  afterEach(() => {
+    for (const d of tmpDirs.splice(0)) rmSync(d, { recursive: true, force: true });
+  });
+
+  function buildRelease(zipBytes: Uint8Array, sumsText: string) {
+    const fetchImpl = (async (url: string) => {
+      if (url === 'https://example.com/asset.zip') {
+        return new Response(zipBytes, { status: 200 });
+      }
+      if (url === 'https://example.com/SHA256SUMS.txt') {
+        return new Response(sumsText, { status: 200 });
+      }
+      throw new Error(`Unexpected URL in test: ${url}`);
+    }) as unknown as typeof fetch;
+    return fetchImpl;
+  }
+
+  it('downloads, verifies, and extracts a release into stagingRoot/<version>', async () => {
+    const { targetName } = await import('../updater');
+    const assetName = `filenet-${targetName(process.platform, process.arch)}.zip`;
+
+    const zip = new JSZip();
+    zip.file('filenet', 'binary-contents');
+    zip.file('out/index.html', '<html></html>');
+    const zipBuf = await zip.generateAsync({ type: 'nodebuffer' });
+
+    const hash = createHash('sha256').update(zipBuf).digest('hex');
+
+    const release = {
+      version: '0.2.0',
+      notesUrl: 'https://example.com/notes',
+      assets: [
+        { name: assetName, url: 'https://example.com/asset.zip' },
+        { name: 'SHA256SUMS.txt', url: 'https://example.com/SHA256SUMS.txt' },
+      ],
+    };
+
+    const stagingRoot = mkdtempSync(join(tmpdir(), 'filenet-stage-'));
+    tmpDirs.push(stagingRoot);
+
+    const stagingDir = await downloadAndStage(
+      release,
+      stagingRoot,
+      buildRelease(zipBuf, `${hash}  ${assetName}\n`),
+    );
+
+    expect(stagingDir).toBe(join(stagingRoot, '0.2.0'));
+    expect(existsSync(join(stagingDir, 'filenet'))).toBe(true);
+    expect(existsSync(join(stagingDir, 'out', 'index.html'))).toBe(true);
+  });
+
+  it('throws and cleans up when the checksum does not match', async () => {
+    const { targetName } = await import('../updater');
+    const assetName = `filenet-${targetName(process.platform, process.arch)}.zip`;
+    const zip = new JSZip();
+    zip.file('filenet', 'binary-contents');
+    const zipBuf = await zip.generateAsync({ type: 'nodebuffer' });
+
+    const release = {
+      version: '0.3.0',
+      notesUrl: '',
+      assets: [
+        { name: assetName, url: 'https://example.com/asset.zip' },
+        { name: 'SHA256SUMS.txt', url: 'https://example.com/SHA256SUMS.txt' },
+      ],
+    };
+
+    const stagingRoot = mkdtempSync(join(tmpdir(), 'filenet-stage-'));
+    tmpDirs.push(stagingRoot);
+
+    await expect(
+      downloadAndStage(
+        release,
+        stagingRoot,
+        buildRelease(zipBuf, `${'0'.repeat(64)}  ${assetName}\n`),
+      ),
+    ).rejects.toThrow();
+    expect(existsSync(join(stagingRoot, '0.3.0'))).toBe(false);
+  });
+
+  it('removes stale staged versions once a new one lands', async () => {
+    const { targetName } = await import('../updater');
+    const assetName = `filenet-${targetName(process.platform, process.arch)}.zip`;
+    const zip = new JSZip();
+    zip.file('filenet', 'binary-contents');
+    const zipBuf = await zip.generateAsync({ type: 'nodebuffer' });
+    const hash = createHash('sha256').update(zipBuf).digest('hex');
+
+    const stagingRoot = mkdtempSync(join(tmpdir(), 'filenet-stage-'));
+    tmpDirs.push(stagingRoot);
+    mkdirSync(join(stagingRoot, '0.1.0'), { recursive: true });
+
+    await downloadAndStage(
+      {
+        version: '0.2.0',
+        notesUrl: '',
+        assets: [
+          { name: assetName, url: 'https://example.com/asset.zip' },
+          { name: 'SHA256SUMS.txt', url: 'https://example.com/SHA256SUMS.txt' },
+        ],
+      },
+      stagingRoot,
+      buildRelease(zipBuf, `${hash}  ${assetName}\n`),
+    );
+
+    expect(existsSync(join(stagingRoot, '0.1.0'))).toBe(false);
+    expect(existsSync(join(stagingRoot, '0.2.0'))).toBe(true);
   });
 });

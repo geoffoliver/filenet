@@ -1,3 +1,8 @@
+import { chmodSync, existsSync, mkdirSync, readdirSync, rmSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+
+import { hashFile } from './indexer';
+
 export function compareVersions(a: string, b: string): number {
   const pa = a.split('.').map(Number);
   const pb = b.split('.').map(Number);
@@ -54,4 +59,96 @@ export async function fetchLatestRelease(
     notesUrl: data.html_url ?? '',
     assets: (data.assets ?? []).map((a) => ({ name: a.name, url: a.browser_download_url })),
   };
+}
+
+export async function verifySha256(
+  filePath: string,
+  checksumsText: string,
+  assetName: string,
+): Promise<boolean> {
+  const line = checksumsText
+    .split('\n')
+    .map((l) => l.trim())
+    .find((l) => l.endsWith(assetName));
+  if (!line) return false;
+  const expected = line.split(/\s+/)[0]?.toLowerCase();
+  if (!expected) return false;
+  const actual = await hashFile(filePath);
+  return actual === expected;
+}
+
+export async function extractZip(zipPath: string, destDir: string): Promise<void> {
+  const JSZip = (await import('jszip')).default;
+  const data = await Bun.file(zipPath).arrayBuffer();
+  const zip = await JSZip.loadAsync(data);
+
+  for (const [relPath, entry] of Object.entries(zip.files)) {
+    if (entry.dir) continue;
+    const outPath = join(destDir, relPath);
+    mkdirSync(dirname(outPath), { recursive: true });
+    const buf = await entry.async('nodebuffer');
+    await Bun.write(outPath, buf);
+  }
+
+  const binaryName = process.platform === 'win32' ? 'filenet.exe' : 'filenet';
+  const binaryPath = join(destDir, binaryName);
+  if (process.platform !== 'win32' && existsSync(binaryPath)) {
+    chmodSync(binaryPath, 0o755);
+  }
+}
+
+async function downloadToFile(
+  url: string,
+  destPath: string,
+  fetchImpl: typeof fetch,
+): Promise<void> {
+  const res = await fetchImpl(url);
+  if (!res.ok || !res.body) throw new Error(`Download failed (${res.status}): ${url}`);
+  const buf = await res.arrayBuffer();
+  await Bun.write(destPath, buf);
+}
+
+export async function downloadAndStage(
+  release: ReleaseInfo,
+  stagingRoot: string,
+  fetchImpl: typeof fetch = fetch,
+): Promise<string> {
+  const target = targetName(process.platform, process.arch);
+  const assetName = `filenet-${target}.zip`;
+  const asset = release.assets.find((a) => a.name === assetName);
+  if (!asset) throw new Error(`Release ${release.version} has no asset named ${assetName}`);
+  const checksumsAsset = release.assets.find((a) => a.name === 'SHA256SUMS.txt');
+  if (!checksumsAsset) throw new Error(`Release ${release.version} is missing SHA256SUMS.txt`);
+
+  const versionDir = join(stagingRoot, release.version);
+  rmSync(versionDir, { recursive: true, force: true });
+  mkdirSync(versionDir, { recursive: true });
+
+  try {
+    const zipPath = join(versionDir, assetName);
+    await downloadToFile(asset.url, zipPath, fetchImpl);
+
+    const checksumsRes = await fetchImpl(checksumsAsset.url);
+    if (!checksumsRes.ok) {
+      throw new Error(`Failed to download SHA256SUMS.txt: ${checksumsRes.status}`);
+    }
+    const checksumsText = await checksumsRes.text();
+
+    const ok = await verifySha256(zipPath, checksumsText, assetName);
+    if (!ok) throw new Error(`Checksum verification failed for ${assetName}`);
+
+    await extractZip(zipPath, versionDir);
+    rmSync(zipPath, { force: true });
+  } catch (err) {
+    rmSync(versionDir, { recursive: true, force: true });
+    throw err;
+  }
+
+  for (const entry of readdirSync(stagingRoot, { withFileTypes: true })) {
+    if (entry.isDirectory() && entry.name !== release.version) {
+      rmSync(join(stagingRoot, entry.name), { recursive: true, force: true });
+    }
+  }
+
+  return versionDir;
 }
