@@ -1,4 +1,4 @@
-import { chmodSync, existsSync, mkdirSync, readdirSync, rmSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readdirSync, renameSync, rmSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
 import { hashFile } from './indexer';
@@ -151,4 +151,34 @@ export async function downloadAndStage(
   }
 
   return versionDir;
+}
+
+const SWAPPED_ENTRIES = ['out', join('drizzle', 'migrations')];
+
+export function applyUpdateSwap(stagingDir: string, installDir: string): void {
+  const binaryName = process.platform === 'win32' ? 'filenet.exe' : 'filenet';
+  const entries = [binaryName, ...SWAPPED_ENTRIES];
+  const oldPaths: string[] = [];
+
+  for (const name of entries) {
+    const live = join(installDir, name);
+    const staged = join(stagingDir, name);
+    if (!existsSync(staged)) continue; // e.g. migrations unchanged in this release
+
+    const old = `${live}.old`;
+    rmSync(old, { recursive: true, force: true });
+    if (existsSync(live)) {
+      renameSync(live, old);
+      oldPaths.push(old);
+    }
+    renameSync(staged, live);
+  }
+
+  // Only remove the .old backups (and the now-empty staging dir) after every
+  // entry has swapped successfully — if a rename above throws, the .old
+  // siblings from entries that already succeeded are deliberately left in
+  // place so a human can recover manually rather than being left with a
+  // half-updated, possibly non-functional install.
+  for (const old of oldPaths) rmSync(old, { recursive: true, force: true });
+  rmSync(stagingDir, { recursive: true, force: true });
 }

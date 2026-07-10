@@ -1,5 +1,13 @@
 import { afterEach, describe, expect, it } from 'bun:test';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, statSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -7,6 +15,7 @@ import { tmpdir } from 'node:os';
 import JSZip from 'jszip';
 
 import {
+  applyUpdateSwap,
   compareVersions,
   downloadAndStage,
   extractZip,
@@ -300,5 +309,63 @@ describe('downloadAndStage', () => {
 
     expect(existsSync(join(stagingRoot, '0.1.0'))).toBe(false);
     expect(existsSync(join(stagingRoot, '0.2.0'))).toBe(true);
+  });
+});
+
+describe('applyUpdateSwap', () => {
+  const tmpDirs: string[] = [];
+  afterEach(() => {
+    for (const d of tmpDirs.splice(0)) rmSync(d, { recursive: true, force: true });
+  });
+
+  function makeInstall(dir: string, binaryContents: string) {
+    const binaryName = process.platform === 'win32' ? 'filenet.exe' : 'filenet';
+    writeFileSync(join(dir, binaryName), binaryContents);
+    mkdirSync(join(dir, 'out'), { recursive: true });
+    writeFileSync(join(dir, 'out', 'index.html'), 'old-ui');
+    mkdirSync(join(dir, 'drizzle', 'migrations'), { recursive: true });
+    writeFileSync(join(dir, 'drizzle', 'migrations', '0000_x.sql'), 'old-migration');
+  }
+
+  function makeStaging(dir: string, binaryContents: string) {
+    const binaryName = process.platform === 'win32' ? 'filenet.exe' : 'filenet';
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, binaryName), binaryContents);
+    mkdirSync(join(dir, 'out'), { recursive: true });
+    writeFileSync(join(dir, 'out', 'index.html'), 'new-ui');
+    mkdirSync(join(dir, 'drizzle', 'migrations'), { recursive: true });
+    writeFileSync(join(dir, 'drizzle', 'migrations', '0001_y.sql'), 'new-migration');
+  }
+
+  it('replaces the binary, out/, and drizzle/migrations, and removes the staging dir', () => {
+    const installDir = mkdtempSync(join(tmpdir(), 'filenet-install-'));
+    tmpDirs.push(installDir);
+    const stagingDir = join(installDir, '.filenet-update', '0.2.0');
+    makeInstall(installDir, 'old-binary');
+    makeStaging(stagingDir, 'new-binary');
+
+    applyUpdateSwap(stagingDir, installDir);
+
+    const binaryName = process.platform === 'win32' ? 'filenet.exe' : 'filenet';
+    expect(readFileSync(join(installDir, binaryName), 'utf8')).toBe('new-binary');
+    expect(readFileSync(join(installDir, 'out', 'index.html'), 'utf8')).toBe('new-ui');
+    expect(existsSync(join(installDir, 'drizzle', 'migrations', '0001_y.sql'))).toBe(true);
+    expect(existsSync(stagingDir)).toBe(false);
+    expect(existsSync(`${join(installDir, binaryName)}.old`)).toBe(false);
+  });
+
+  it('leaves the previous version usable if a prior failed swap left .old siblings', () => {
+    const installDir = mkdtempSync(join(tmpdir(), 'filenet-install-'));
+    tmpDirs.push(installDir);
+    const stagingDir = join(installDir, '.filenet-update', '0.2.0');
+    makeInstall(installDir, 'old-binary');
+    makeStaging(stagingDir, 'new-binary');
+    const binaryName = process.platform === 'win32' ? 'filenet.exe' : 'filenet';
+    writeFileSync(join(installDir, `${binaryName}.old`), 'leftover-from-a-previous-failed-swap');
+
+    applyUpdateSwap(stagingDir, installDir);
+
+    expect(readFileSync(join(installDir, binaryName), 'utf8')).toBe('new-binary');
+    expect(existsSync(join(installDir, `${binaryName}.old`))).toBe(false);
   });
 });
