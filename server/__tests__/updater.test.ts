@@ -1,4 +1,6 @@
-import { afterEach, describe, expect, it } from 'bun:test';
+import * as fs from 'node:fs';
+
+import { afterEach, describe, expect, it, mock } from 'bun:test';
 import {
   existsSync,
   mkdirSync,
@@ -9,7 +11,6 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { createHash } from 'node:crypto';
-import { execSync } from 'node:child_process';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
@@ -370,7 +371,7 @@ describe('applyUpdateSwap', () => {
     expect(existsSync(join(installDir, `${binaryName}.old`))).toBe(false);
   });
 
-  it("leaves the first entry's .old backup in place if a later entry's rename fails, and propagates the error", () => {
+  it("leaves the first entry's .old backup in place if a later entry's rename fails, and propagates the error", async () => {
     const installDir = mkdtempSync(join(tmpdir(), 'filenet-install-'));
     tmpDirs.push(installDir);
     const stagingDir = join(installDir, '.filenet-update', '0.2.0');
@@ -379,34 +380,43 @@ describe('applyUpdateSwap', () => {
     makeInstall(installDir, 'old-binary');
     makeStaging(stagingDir, 'new-binary');
 
-    // On macOS, create an immutable out.old directory to block rmSync in the
-    // second iteration. This causes applyUpdateSwap to fail partway through,
-    // allowing us to verify the crash-safety guarantee: entries already swapped
-    // (and their .old backups) are left in place for manual recovery.
-    let shouldRestore = false;
-    if (process.platform === 'darwin') {
-      mkdirSync(join(installDir, 'out.old'));
-      execSync(`chflags uchg ${join(installDir, 'out.old')}`);
-      shouldRestore = true;
-    }
+    // Portable failure injection (works identically on Linux CI and macOS):
+    // mock node:fs's renameSync so that the binary entry's two renames
+    // (live -> .old, then staged -> live) go through untouched — exactly
+    // mirroring the real crash-safety scenario where the first entry has
+    // already fully committed — and the very next renameSync call (the
+    // second entry's live -> .old rename, for `out`) throws. This leaves
+    // `out` completely untouched on disk (never renamed away), which is
+    // what lets us assert its original content survived.
+    const realRenameSync = fs.renameSync;
+    let renameCallCount = 0;
+    await mock.module('node:fs', () => ({
+      ...fs,
+      renameSync: (...args: Parameters<typeof fs.renameSync>) => {
+        renameCallCount += 1;
+        if (renameCallCount === 3) {
+          throw new Error('simulated rename failure for test');
+        }
+        return realRenameSync(...args);
+      },
+    }));
 
-    // Call applyUpdateSwap and expect it to throw (on macOS)
     let threwAsExpected = false;
+    let thrownError: unknown;
     try {
       applyUpdateSwap(stagingDir, installDir);
-    } catch {
+    } catch (err) {
       threwAsExpected = true;
+      thrownError = err;
     } finally {
-      // Restore immutability so afterEach cleanup can succeed
-      if (shouldRestore) {
-        execSync(`chflags nouchg ${join(installDir, 'out.old')}`);
-      }
+      // Critical: undo the module mock immediately so it cannot leak into
+      // any other test in this file (or the wider suite) that touches
+      // node:fs — restore even if the assertions below throw.
+      mock.restore();
     }
 
-    // On macOS, we expect the throw; on other platforms this test is a no-op
-    if (process.platform === 'darwin') {
-      expect(threwAsExpected).toBe(true);
-    }
+    expect(threwAsExpected).toBe(true);
+    expect((thrownError as Error).message).toBe('simulated rename failure for test');
 
     // Verify the binary was successfully swapped before the failure
     expect(readFileSync(join(installDir, binaryName), 'utf8')).toBe('new-binary');
