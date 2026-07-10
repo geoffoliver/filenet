@@ -9,6 +9,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { createHash } from 'node:crypto';
+import { execSync } from 'node:child_process';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
@@ -367,5 +368,52 @@ describe('applyUpdateSwap', () => {
 
     expect(readFileSync(join(installDir, binaryName), 'utf8')).toBe('new-binary');
     expect(existsSync(join(installDir, `${binaryName}.old`))).toBe(false);
+  });
+
+  it("leaves the first entry's .old backup in place if a later entry's rename fails, and propagates the error", () => {
+    const installDir = mkdtempSync(join(tmpdir(), 'filenet-install-'));
+    tmpDirs.push(installDir);
+    const stagingDir = join(installDir, '.filenet-update', '0.2.0');
+    const binaryName = process.platform === 'win32' ? 'filenet.exe' : 'filenet';
+
+    makeInstall(installDir, 'old-binary');
+    makeStaging(stagingDir, 'new-binary');
+
+    // On macOS, create an immutable out.old directory to block rmSync in the
+    // second iteration. This causes applyUpdateSwap to fail partway through,
+    // allowing us to verify the crash-safety guarantee: entries already swapped
+    // (and their .old backups) are left in place for manual recovery.
+    let shouldRestore = false;
+    if (process.platform === 'darwin') {
+      mkdirSync(join(installDir, 'out.old'));
+      execSync(`chflags uchg ${join(installDir, 'out.old')}`);
+      shouldRestore = true;
+    }
+
+    // Call applyUpdateSwap and expect it to throw (on macOS)
+    let threwAsExpected = false;
+    try {
+      applyUpdateSwap(stagingDir, installDir);
+    } catch {
+      threwAsExpected = true;
+    } finally {
+      // Restore immutability so afterEach cleanup can succeed
+      if (shouldRestore) {
+        execSync(`chflags nouchg ${join(installDir, 'out.old')}`);
+      }
+    }
+
+    // On macOS, we expect the throw; on other platforms this test is a no-op
+    if (process.platform === 'darwin') {
+      expect(threwAsExpected).toBe(true);
+    }
+
+    // Verify the binary was successfully swapped before the failure
+    expect(readFileSync(join(installDir, binaryName), 'utf8')).toBe('new-binary');
+    expect(existsSync(join(installDir, `${binaryName}.old`))).toBe(true);
+    expect(readFileSync(join(installDir, `${binaryName}.old`), 'utf8')).toBe('old-binary');
+
+    // Verify out was NOT swapped (still has old content) because the rename failed before it was processed
+    expect(readFileSync(join(installDir, 'out', 'index.html'), 'utf8')).toBe('old-ui');
   });
 });
