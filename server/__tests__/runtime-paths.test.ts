@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, it } from 'bun:test';
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
-import { resolveAssetPath } from '../runtime-paths';
+import { isCompiledBinary, resolveAssetPath } from '../runtime-paths';
 
 describe('resolveAssetPath', () => {
   const tmpDirs: string[] = [];
@@ -39,5 +39,34 @@ describe('resolveAssetPath', () => {
     const resolved = resolveAssetPath('drizzle/migrations', serverDir, execPath);
 
     expect(resolved).toBe(join(execDir, 'drizzle', 'migrations'));
+  });
+});
+
+describe('isCompiledBinary', () => {
+  const tmpDirs: string[] = [];
+
+  afterEach(() => {
+    for (const dir of tmpDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('returns false when running from source (package.json present at repo root)', () => {
+    const repoRoot = mkdtempSync(join(tmpdir(), 'filenet-binmode-'));
+    tmpDirs.push(repoRoot);
+    const serverDir = join(repoRoot, 'server');
+    mkdirSync(serverDir, { recursive: true });
+    writeFileSync(join(repoRoot, 'package.json'), '{}');
+
+    expect(isCompiledBinary(serverDir)).toBe(false);
+  });
+
+  it('returns true when no package.json exists next to the caller (compiled binary)', () => {
+    const repoRoot = mkdtempSync(join(tmpdir(), 'filenet-binmode-'));
+    tmpDirs.push(repoRoot);
+    const serverDir = join(repoRoot, 'server');
+    mkdirSync(serverDir, { recursive: true });
+    // No package.json written — simulates the synthetic import.meta.dir
+    // inside a `bun build --compile` binary.
+
+    expect(isCompiledBinary(serverDir)).toBe(true);
   });
 });
