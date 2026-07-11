@@ -182,3 +182,74 @@ export function applyUpdateSwap(stagingDir: string, installDir: string): void {
   for (const old of oldPaths) rmSync(old, { recursive: true, force: true });
   rmSync(stagingDir, { recursive: true, force: true });
 }
+
+export function isProcessRunning(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    return (err as NodeJS.ErrnoException).code !== 'ESRCH';
+  }
+}
+
+export async function waitForPidExit(
+  pid: number,
+  opts: { pollMs?: number; timeoutMs?: number } = {},
+): Promise<void> {
+  const pollMs = opts.pollMs ?? 200;
+  const timeoutMs = opts.timeoutMs ?? 30_000;
+  const start = Date.now();
+  while (isProcessRunning(pid)) {
+    if (Date.now() - start > timeoutMs) {
+      throw new Error(`Timed out waiting for process ${pid} to exit`);
+    }
+    await new Promise((resolve) => setTimeout(resolve, pollMs));
+  }
+}
+
+export function parseFinishUpdateArgs(
+  argv: string[],
+): { oldPid: number; stagingDir: string; installDir: string } | null {
+  const idx = argv.indexOf('--finish-update');
+  if (idx === -1) return null;
+  const oldPid = Number(argv[idx + 1]);
+  const stagingDir = argv[idx + 2];
+  const installDir = argv[idx + 3];
+  if (!Number.isInteger(oldPid) || !stagingDir || !installDir) {
+    throw new Error('Malformed --finish-update arguments');
+  }
+  return { oldPid, stagingDir, installDir };
+}
+
+export type FinishUpdateDeps = {
+  waitForExit?: typeof waitForPidExit;
+  applySwap?: typeof applyUpdateSwap;
+  spawnImpl?: typeof Bun.spawn;
+  exitImpl?: (code: number) => void;
+};
+
+export async function runFinishUpdate(
+  oldPid: number,
+  stagingDir: string,
+  installDir: string,
+  deps: FinishUpdateDeps = {},
+): Promise<void> {
+  const {
+    waitForExit = waitForPidExit,
+    applySwap = applyUpdateSwap,
+    spawnImpl = Bun.spawn,
+    exitImpl = process.exit,
+  } = deps;
+
+  await waitForExit(oldPid);
+  applySwap(stagingDir, installDir);
+
+  const binaryName = process.platform === 'win32' ? 'filenet.exe' : 'filenet';
+  const child = spawnImpl({
+    cmd: [join(installDir, binaryName)],
+    cwd: installDir,
+    stdio: ['ignore', 'ignore', 'ignore'],
+  });
+  child.unref();
+  exitImpl(0);
+}

@@ -23,8 +23,12 @@ import {
   extractZip,
   fetchLatestRelease,
   isNewerVersion,
+  isProcessRunning,
+  parseFinishUpdateArgs,
+  runFinishUpdate,
   targetName,
   verifySha256,
+  waitForPidExit,
 } from '../updater';
 
 describe('compareVersions', () => {
@@ -425,5 +429,71 @@ describe('applyUpdateSwap', () => {
 
     // Verify out was NOT swapped (still has old content) because the rename failed before it was processed
     expect(readFileSync(join(installDir, 'out', 'index.html'), 'utf8')).toBe('old-ui');
+  });
+});
+
+describe('isProcessRunning', () => {
+  it('is true for the current process', () => {
+    expect(isProcessRunning(process.pid)).toBe(true);
+  });
+
+  it('is false for a pid that does not exist', () => {
+    // A pid astronomically unlikely to be in use; ESRCH is the reliable signal.
+    expect(isProcessRunning(999999)).toBe(false);
+  });
+});
+
+describe('waitForPidExit', () => {
+  it('resolves once the process is no longer running', async () => {
+    await waitForPidExit(999999, { pollMs: 5, timeoutMs: 1000 });
+    // No assertion needed — resolving without throwing is the pass condition.
+  });
+
+  it('throws if the process never exits within the timeout', async () => {
+    await expect(waitForPidExit(process.pid, { pollMs: 5, timeoutMs: 20 })).rejects.toThrow();
+  });
+});
+
+describe('parseFinishUpdateArgs', () => {
+  it('returns null when --finish-update is absent', () => {
+    expect(parseFinishUpdateArgs(['bun', 'server/index.ts'])).toBeNull();
+  });
+
+  it('parses oldPid/stagingDir/installDir when present', () => {
+    expect(
+      parseFinishUpdateArgs(['filenet', '--finish-update', '1234', '/staging', '/install']),
+    ).toEqual({ oldPid: 1234, stagingDir: '/staging', installDir: '/install' });
+  });
+
+  it('throws when arguments are missing', () => {
+    expect(() => parseFinishUpdateArgs(['filenet', '--finish-update', '1234'])).toThrow();
+  });
+});
+
+describe('runFinishUpdate', () => {
+  it('waits for the old pid, swaps files, spawns the new binary, and exits', async () => {
+    const calls: string[] = [];
+    const fakeChild = { unref: () => calls.push('unref') };
+    await runFinishUpdate(1234, '/staging', '/install', {
+      waitForExit: async (pid) => {
+        calls.push(`wait:${pid}`);
+      },
+      applySwap: (staging, install) => {
+        calls.push(`swap:${staging}:${install}`);
+      },
+      spawnImpl: ((opts: { cmd: string[] }) => {
+        calls.push(`spawn:${opts.cmd.join(',')}`);
+        return fakeChild;
+      }) as unknown as typeof Bun.spawn,
+      exitImpl: (code) => calls.push(`exit:${code}`),
+    });
+
+    expect(calls).toEqual([
+      'wait:1234',
+      'swap:/staging:/install',
+      process.platform === 'win32' ? 'spawn:/install/filenet.exe' : 'spawn:/install/filenet',
+      'unref',
+      'exit:0',
+    ]);
   });
 });
