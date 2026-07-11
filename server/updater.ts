@@ -253,3 +253,169 @@ export async function runFinishUpdate(
   child.unref();
   exitImpl(0);
 }
+
+export type UpdatePhase = 'idle' | 'checking' | 'available' | 'downloading' | 'ready' | 'error';
+
+export type UpdateState = {
+  mode: 'binary' | 'source';
+  currentVersion: string;
+  phase: UpdatePhase;
+  latestVersion: string | null;
+  releaseNotesUrl: string | null;
+  error: string | null;
+  lastCheckedAt: string | null;
+};
+
+export type UpdateManagerOptions = {
+  mode: 'binary' | 'source';
+  currentVersion: string;
+  installDir: string;
+  getRepo: () => Promise<string>;
+  fetchImpl?: typeof fetch;
+  spawnImpl?: typeof Bun.spawn;
+  exitImpl?: (code: number) => void;
+};
+
+export type UpdateManager = {
+  getState(): UpdateState;
+  checkNow(): Promise<UpdateState>;
+  startPeriodicChecks(getIntervalMinutes: () => Promise<number>): () => void;
+  applyAndRestart(): Promise<void>;
+};
+
+const MAX_UPDATE_CHECK_INTERVAL_MINUTES = 35791;
+
+export function createUpdateManager(opts: UpdateManagerOptions): UpdateManager {
+  const fetchImpl = opts.fetchImpl ?? fetch;
+  const spawnImpl = opts.spawnImpl ?? Bun.spawn;
+  const exitImpl = opts.exitImpl ?? process.exit;
+
+  let state: UpdateState = {
+    mode: opts.mode,
+    currentVersion: opts.currentVersion,
+    phase: 'idle',
+    latestVersion: null,
+    releaseNotesUrl: null,
+    error: null,
+    lastCheckedAt: null,
+  };
+  let stagingDir: string | null = null;
+
+  function getState(): UpdateState {
+    return { ...state };
+  }
+
+  async function checkNow(): Promise<UpdateState> {
+    state = { ...state, phase: 'checking', error: null };
+    try {
+      const repo = await opts.getRepo();
+      const release = await fetchLatestRelease(repo, fetchImpl);
+      const now = new Date().toISOString();
+
+      if (!release || !isNewerVersion(release.version, opts.currentVersion)) {
+        stagingDir = null;
+        state = {
+          ...state,
+          phase: 'idle',
+          latestVersion: null,
+          releaseNotesUrl: null,
+          lastCheckedAt: now,
+        };
+        return getState();
+      }
+
+      state = {
+        ...state,
+        phase: 'available',
+        latestVersion: release.version,
+        releaseNotesUrl: release.notesUrl,
+        lastCheckedAt: now,
+      };
+      if (opts.mode !== 'binary') return getState();
+
+      state = { ...state, phase: 'downloading' };
+      stagingDir = await downloadAndStage(
+        release,
+        join(opts.installDir, '.filenet-update'),
+        fetchImpl,
+      );
+      state = { ...state, phase: 'ready' };
+      return getState();
+    } catch (err) {
+      state = { ...state, phase: 'error', error: err instanceof Error ? err.message : String(err) };
+      return getState();
+    }
+  }
+
+  function startPeriodicChecks(getIntervalMinutes: () => Promise<number>): () => void {
+    let stopped = false;
+    let timerId: ReturnType<typeof setTimeout> | null = null;
+
+    async function tick() {
+      if (stopped) return;
+      await checkNow().catch((err) => console.error('Update check failed:', err));
+      if (!stopped) scheduleNext();
+    }
+
+    async function scheduleNext() {
+      if (stopped) return;
+      let intervalMinutes = 0;
+      try {
+        intervalMinutes = await getIntervalMinutes();
+      } catch (err) {
+        console.error('Failed to read update check interval:', err);
+      }
+      if (stopped) return;
+      if (
+        !Number.isFinite(intervalMinutes) ||
+        intervalMinutes <= 0 ||
+        intervalMinutes > MAX_UPDATE_CHECK_INTERVAL_MINUTES
+      ) {
+        timerId = setTimeout(
+          () => scheduleNext().catch((err) => console.error('Update check schedule failed:', err)),
+          60_000,
+        );
+        return;
+      }
+      timerId = setTimeout(
+        () => tick().catch((err) => console.error('Update check tick failed:', err)),
+        intervalMinutes * 60_000,
+      );
+    }
+
+    tick().catch((err) => console.error('Update check init failed:', err));
+
+    return () => {
+      stopped = true;
+      if (timerId !== null) {
+        clearTimeout(timerId);
+        timerId = null;
+      }
+    };
+  }
+
+  async function applyAndRestart(): Promise<void> {
+    if (state.phase !== 'ready' || !stagingDir) {
+      throw new Error('No update ready to apply');
+    }
+    const binaryName = process.platform === 'win32' ? 'filenet.exe' : 'filenet';
+    const child = spawnImpl({
+      cmd: [
+        join(stagingDir, binaryName),
+        '--finish-update',
+        String(process.pid),
+        stagingDir,
+        opts.installDir,
+      ],
+      cwd: stagingDir,
+      stdio: ['ignore', 'ignore', 'ignore'],
+    });
+    child.unref();
+    // exitImpl is process.exit by default, which terminates the process
+    // here in production. Injected test doubles just record the call and
+    // return normally instead.
+    exitImpl(0);
+  }
+
+  return { getState, checkNow, startPeriodicChecks, applyAndRestart };
+}

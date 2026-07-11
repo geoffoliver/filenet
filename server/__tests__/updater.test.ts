@@ -19,6 +19,7 @@ import JSZip from 'jszip';
 import {
   applyUpdateSwap,
   compareVersions,
+  createUpdateManager,
   downloadAndStage,
   extractZip,
   fetchLatestRelease,
@@ -495,5 +496,144 @@ describe('runFinishUpdate', () => {
       'unref',
       'exit:0',
     ]);
+  });
+});
+
+describe('createUpdateManager', () => {
+  function fakeFetch(version: string | null): typeof fetch {
+    return (async () => {
+      if (version === null) return new Response('', { status: 404 });
+      return new Response(
+        JSON.stringify({ tag_name: `v${version}`, html_url: 'https://example.com', assets: [] }),
+        { status: 200 },
+      );
+    }) as unknown as typeof fetch;
+  }
+
+  it('starts idle and reports currentVersion/mode', () => {
+    const manager = createUpdateManager({
+      mode: 'binary',
+      currentVersion: '0.1.0',
+      installDir: '/install',
+      getRepo: async () => 'geoffoliver/filenet',
+    });
+    expect(manager.getState()).toMatchObject({
+      mode: 'binary',
+      currentVersion: '0.1.0',
+      phase: 'idle',
+      latestVersion: null,
+    });
+  });
+
+  it('goes to idle when no newer release exists', async () => {
+    const manager = createUpdateManager({
+      mode: 'binary',
+      currentVersion: '0.1.0',
+      installDir: '/install',
+      getRepo: async () => 'geoffoliver/filenet',
+      fetchImpl: fakeFetch('0.1.0'),
+    });
+    const state = await manager.checkNow();
+    expect(state.phase).toBe('idle');
+    expect(state.lastCheckedAt).not.toBeNull();
+  });
+
+  it('in source mode, stops at "available" without downloading', async () => {
+    const manager = createUpdateManager({
+      mode: 'source',
+      currentVersion: '0.1.0',
+      installDir: '/install',
+      getRepo: async () => 'geoffoliver/filenet',
+      fetchImpl: fakeFetch('0.2.0'),
+    });
+    const state = await manager.checkNow();
+    expect(state.phase).toBe('available');
+    expect(state.latestVersion).toBe('0.2.0');
+  });
+
+  it('surfaces a failed check as phase "error"', async () => {
+    const manager = createUpdateManager({
+      mode: 'binary',
+      currentVersion: '0.1.0',
+      installDir: '/install',
+      getRepo: async () => 'geoffoliver/filenet',
+      fetchImpl: (async () => {
+        throw new Error('network down');
+      }) as unknown as typeof fetch,
+    });
+    const state = await manager.checkNow();
+    expect(state.phase).toBe('error');
+    expect(state.error).toContain('network down');
+  });
+
+  it('applyAndRestart throws when no update is ready', async () => {
+    const manager = createUpdateManager({
+      mode: 'binary',
+      currentVersion: '0.1.0',
+      installDir: '/install',
+      getRepo: async () => 'geoffoliver/filenet',
+    });
+    await expect(manager.applyAndRestart()).rejects.toThrow();
+  });
+
+  it('applyAndRestart spawns the staged binary with --finish-update and exits, once ready', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'filenet-mgr-'));
+    try {
+      const target = (await import('../updater')).targetName(process.platform, process.arch);
+      const assetName = `filenet-${target}.zip`;
+      const zip = new JSZip();
+      zip.file('filenet', 'bin');
+      const zipBuf = await zip.generateAsync({ type: 'nodebuffer' });
+      const hash = createHash('sha256').update(zipBuf).digest('hex');
+
+      const fetchImpl = (async (url: string) => {
+        if (url.includes('/releases/latest')) {
+          return new Response(
+            JSON.stringify({
+              tag_name: 'v0.2.0',
+              html_url: 'https://example.com',
+              assets: [
+                { name: assetName, browser_download_url: 'https://example.com/asset.zip' },
+                { name: 'SHA256SUMS.txt', browser_download_url: 'https://example.com/sums.txt' },
+              ],
+            }),
+            { status: 200 },
+          );
+        }
+        if (url === 'https://example.com/asset.zip') return new Response(zipBuf, { status: 200 });
+        if (url === 'https://example.com/sums.txt') {
+          return new Response(`${hash}  ${assetName}\n`, { status: 200 });
+        }
+        throw new Error(`Unexpected URL: ${url}`);
+      }) as unknown as typeof fetch;
+
+      const spawnCalls: unknown[] = [];
+      const exitCalls: number[] = [];
+      const manager = createUpdateManager({
+        mode: 'binary',
+        currentVersion: '0.1.0',
+        installDir: dir,
+        getRepo: async () => 'geoffoliver/filenet',
+        fetchImpl,
+        spawnImpl: ((opts: unknown) => {
+          spawnCalls.push(opts);
+          return { unref: () => {} };
+        }) as unknown as typeof Bun.spawn,
+        exitImpl: (code) => exitCalls.push(code),
+      });
+
+      const state = await manager.checkNow();
+      expect(state.phase).toBe('ready');
+
+      await manager.applyAndRestart();
+
+      expect(spawnCalls).toHaveLength(1);
+      const cmd = (spawnCalls[0] as { cmd: string[] }).cmd;
+      expect(cmd[1]).toBe('--finish-update');
+      expect(cmd[2]).toBe(String(process.pid));
+      expect(exitCalls).toEqual([0]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
