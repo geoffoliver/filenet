@@ -9,6 +9,7 @@ import { unlinkSync } from 'fs';
 
 import { type Db, applyMigrations, createDb } from '../db';
 import type { DownloadState, FriendStatus } from '../schema';
+import type { UpdateManager, UpdateState } from '../updater';
 import {
   conversations,
   downloads,
@@ -33,8 +34,39 @@ const neverConnect = async (): Promise<never> => {
   throw new Error('no real connections in tests');
 };
 
-function makeHandler() {
-  return createManagementFetch({ identity, db, connectPeer: neverConnect });
+function makeFakeUpdater(overrides: Partial<UpdateState> = {}): UpdateManager & {
+  checkNowCalls: number;
+  applyAndRestartCalls: number;
+} {
+  const state: UpdateState = {
+    mode: 'binary',
+    currentVersion: '0.1.0',
+    phase: 'idle',
+    latestVersion: null,
+    releaseNotesUrl: null,
+    error: null,
+    lastCheckedAt: null,
+    ...overrides,
+  };
+  const fake = {
+    checkNowCalls: 0,
+    applyAndRestartCalls: 0,
+    getState: () => state,
+    checkNow: async () => {
+      fake.checkNowCalls++;
+      return state;
+    },
+    startPeriodicChecks: () => () => {},
+    applyAndRestart: async () => {
+      fake.applyAndRestartCalls++;
+      throw new Error('test double: applyAndRestart should not actually be awaited by the route');
+    },
+  };
+  return fake;
+}
+
+function makeHandler(updater: UpdateManager = makeFakeUpdater()) {
+  return createManagementFetch({ identity, db, connectPeer: neverConnect, updater });
 }
 
 function req(path: string, options?: RequestInit) {
@@ -280,7 +312,12 @@ describe('POST /api/friends', () => {
     const syncThrow = (): Promise<never> => {
       throw new Error('sync throw'); // no Promise returned — throws before returning
     };
-    const handler = createManagementFetch({ identity, db, connectPeer: syncThrow });
+    const handler = createManagementFetch({
+      identity,
+      db,
+      connectPeer: syncThrow,
+      updater: makeFakeUpdater(),
+    });
     const res = await handler(
       jsonReq('/api/friends', 'POST', { name: 'SyncFail', address: '10.0.0.99', port: 7734 }),
     );
@@ -1215,6 +1252,7 @@ describe('GET /api/search', () => {
       identity,
       db,
       connectPeer: neverConnect,
+      updater: makeFakeUpdater(),
       networkSearch: async () => [fakeNetworkResult],
     });
 
@@ -2506,5 +2544,52 @@ describe('unknown routes', () => {
   it('returns 404 for unrecognised path', async () => {
     const res = await makeHandler()(req('/api/unknown'));
     expect(res.status).toBe(404);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Update endpoints
+// ---------------------------------------------------------------------------
+
+describe('update endpoints', () => {
+  it('GET /api/update-status returns the current state', async () => {
+    const updater = makeFakeUpdater({ phase: 'ready', latestVersion: '0.2.0' });
+    const res = await makeHandler(updater)(req('/api/update-status'));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.phase).toBe('ready');
+    expect(body.latestVersion).toBe('0.2.0');
+  });
+
+  it('POST /api/update-check triggers an immediate check', async () => {
+    const updater = makeFakeUpdater();
+    const res = await makeHandler(updater)(req('/api/update-check', { method: 'POST' }));
+    expect(res.status).toBe(200);
+    expect(updater.checkNowCalls).toBe(1);
+  });
+
+  it('POST /api/update-restart returns 409 when no update is ready', async () => {
+    const updater = makeFakeUpdater({ phase: 'idle' });
+    const res = await makeHandler(updater)(req('/api/update-restart', { method: 'POST' }));
+    expect(res.status).toBe(409);
+    expect(updater.applyAndRestartCalls).toBe(0);
+  });
+
+  it('POST /api/update-restart returns 409 in source mode even if phase is ready', async () => {
+    const updater = makeFakeUpdater({ phase: 'ready', mode: 'source', latestVersion: '0.2.0' });
+    const res = await makeHandler(updater)(req('/api/update-restart', { method: 'POST' }));
+    expect(res.status).toBe(409);
+  });
+
+  it('POST /api/update-restart returns 200 immediately and schedules the restart when ready', async () => {
+    const updater = makeFakeUpdater({ phase: 'ready', latestVersion: '0.2.0' });
+    const res = await makeHandler(updater)(req('/api/update-restart', { method: 'POST' }));
+    expect(res.status).toBe(200);
+    // applyAndRestart is deliberately scheduled via setTimeout (not awaited
+    // inline) so the HTTP response below can flush before the process
+    // exits — see the route implementation. Give it a moment, then confirm
+    // it was in fact triggered.
+    await new Promise((resolve) => setTimeout(resolve, 350));
+    expect(updater.applyAndRestartCalls).toBe(1);
   });
 });

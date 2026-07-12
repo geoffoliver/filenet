@@ -60,6 +60,7 @@ import {
 import type { Db } from './db';
 import type { Identity } from './identity';
 import type { SharedFile } from './schema';
+import type { UpdateManager } from './updater';
 import { dmConversationId } from './chat';
 import { initiateNetworkSearch } from './search-protocol';
 import { scanAndIndex } from './indexer';
@@ -103,11 +104,12 @@ export type ManagementDeps = {
   identity: Identity;
   db: Db;
   connectPeer: ConnectPeerFn;
+  updater: UpdateManager;
   networkSearch?: typeof initiateNetworkSearch;
 };
 
 export function createManagementFetch(deps: ManagementDeps): (req: Request) => Promise<Response> {
-  const { identity, db, connectPeer, networkSearch = initiateNetworkSearch } = deps;
+  const { identity, db, connectPeer, updater, networkSearch = initiateNetworkSearch } = deps;
 
   return async function fetch(req: Request): Promise<Response> {
     const url = new URL(req.url);
@@ -610,6 +612,30 @@ export function createManagementFetch(deps: ManagementDeps): (req: Request) => P
           return new Response('Scan already in progress', { status: 409 });
         }
         return Response.json({ indexed: result.indexed, removed: result.removed });
+      }
+
+      if (url.pathname === '/api/update-status' && req.method === 'GET') {
+        return Response.json(updater.getState());
+      }
+
+      if (url.pathname === '/api/update-check' && req.method === 'POST') {
+        const result = await updater.checkNow();
+        return Response.json(result);
+      }
+
+      if (url.pathname === '/api/update-restart' && req.method === 'POST') {
+        const current = updater.getState();
+        if (current.phase !== 'ready' || current.mode !== 'binary') {
+          return new Response('No update ready to apply', { status: 409 });
+        }
+        // Schedule rather than await: applyAndRestart spawns the new
+        // process and calls process.exit() almost immediately, which would
+        // otherwise race the HTTP response for *this* request being
+        // flushed back to the client before the process dies.
+        setTimeout(() => {
+          updater.applyAndRestart().catch((err) => console.error('Failed to apply update:', err));
+        }, 250);
+        return Response.json({ ok: true });
       }
 
       // ── Chat ──────────────────────────────────────────────────────────────
