@@ -600,7 +600,8 @@ describe('createUpdateManager', () => {
             { status: 200 },
           );
         }
-        if (url === 'https://example.com/asset.zip') return new Response(zipBuf, { status: 200 });
+        if (url === 'https://example.com/asset.zip')
+          return new Response(new Uint8Array(zipBuf), { status: 200 });
         if (url === 'https://example.com/sums.txt') {
           return new Response(`${hash}  ${assetName}\n`, { status: 200 });
         }
