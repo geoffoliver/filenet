@@ -28,6 +28,7 @@ if (finishUpdateArgs) {
     finishUpdateArgs.oldPid,
     finishUpdateArgs.stagingDir,
     finishUpdateArgs.installDir,
+    finishUpdateArgs.launchCwd,
   );
   // runFinishUpdate calls process.exit(0) on success; nothing below this
   // point should ever run when --finish-update was passed.

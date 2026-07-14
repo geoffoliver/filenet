@@ -431,6 +431,47 @@ describe('applyUpdateSwap', () => {
     // Verify out was NOT swapped (still has old content) because the rename failed before it was processed
     expect(readFileSync(join(installDir, 'out', 'index.html'), 'utf8')).toBe('old-ui');
   });
+
+  it('completes successfully even when removing the staging dir fails (Windows-safe cleanup)', async () => {
+    const installDir = mkdtempSync(join(tmpdir(), 'filenet-install-'));
+    tmpDirs.push(installDir);
+    const stagingDir = join(installDir, '.filenet-update', '0.2.0');
+    const binaryName = process.platform === 'win32' ? 'filenet.exe' : 'filenet';
+
+    makeInstall(installDir, 'old-binary');
+    makeStaging(stagingDir, 'new-binary');
+
+    // Portable failure injection matching the pattern used above: mock
+    // node:fs's rmSync so it throws specifically for the stagingDir path
+    // (simulating e.g. Windows refusing to delete a process's own cwd),
+    // while every other rmSync call (the .old backup cleanup) behaves
+    // normally.
+    const realRmSync = fs.rmSync;
+    await mock.module('node:fs', () => ({
+      ...fs,
+      rmSync: (path: fs.PathLike, options?: fs.RmOptions) => {
+        if (path === stagingDir) {
+          throw new Error('simulated EBUSY: directory is the current working directory');
+        }
+        return realRmSync(path, options);
+      },
+    }));
+
+    let threw = false;
+    try {
+      applyUpdateSwap(stagingDir, installDir);
+    } catch {
+      threw = true;
+    } finally {
+      mock.restore();
+    }
+
+    expect(threw).toBe(false);
+    expect(readFileSync(join(installDir, binaryName), 'utf8')).toBe('new-binary');
+    expect(readFileSync(join(installDir, 'out', 'index.html'), 'utf8')).toBe('new-ui');
+    expect(existsSync(join(installDir, 'drizzle', 'migrations', '0001_y.sql'))).toBe(true);
+    expect(existsSync(`${join(installDir, binaryName)}.old`)).toBe(false);
+  });
 });
 
 describe('isProcessRunning', () => {
@@ -460,30 +501,50 @@ describe('parseFinishUpdateArgs', () => {
     expect(parseFinishUpdateArgs(['bun', 'server/index.ts'])).toBeNull();
   });
 
-  it('parses oldPid/stagingDir/installDir when present', () => {
+  it('parses oldPid/stagingDir/installDir/launchCwd when present', () => {
     expect(
-      parseFinishUpdateArgs(['filenet', '--finish-update', '1234', '/staging', '/install']),
-    ).toEqual({ oldPid: 1234, stagingDir: '/staging', installDir: '/install' });
+      parseFinishUpdateArgs([
+        'filenet',
+        '--finish-update',
+        '1234',
+        '/staging',
+        '/install',
+        '/launch/cwd',
+      ]),
+    ).toEqual({
+      oldPid: 1234,
+      stagingDir: '/staging',
+      installDir: '/install',
+      launchCwd: '/launch/cwd',
+    });
   });
 
   it('throws when arguments are missing', () => {
     expect(() => parseFinishUpdateArgs(['filenet', '--finish-update', '1234'])).toThrow();
   });
+
+  it('throws when launchCwd is missing', () => {
+    expect(() =>
+      parseFinishUpdateArgs(['filenet', '--finish-update', '1234', '/staging', '/install']),
+    ).toThrow('Malformed --finish-update arguments');
+  });
 });
 
 describe('runFinishUpdate', () => {
-  it('waits for the old pid, swaps files, spawns the new binary, and exits', async () => {
+  it('waits for the old pid, swaps files, spawns the new binary with launchCwd, and exits', async () => {
     const calls: string[] = [];
+    const spawnCwds: (string | undefined)[] = [];
     const fakeChild = { unref: () => calls.push('unref') };
-    await runFinishUpdate(1234, '/staging', '/install', {
+    await runFinishUpdate(1234, '/staging', '/install', '/launch/cwd', {
       waitForExit: async (pid) => {
         calls.push(`wait:${pid}`);
       },
       applySwap: (staging, install) => {
         calls.push(`swap:${staging}:${install}`);
       },
-      spawnImpl: ((opts: { cmd: string[] }) => {
+      spawnImpl: ((opts: { cmd: string[]; cwd?: string }) => {
         calls.push(`spawn:${opts.cmd.join(',')}`);
+        spawnCwds.push(opts.cwd);
         return fakeChild;
       }) as unknown as typeof Bun.spawn,
       exitImpl: (code) => calls.push(`exit:${code}`),
@@ -496,6 +557,7 @@ describe('runFinishUpdate', () => {
       'unref',
       'exit:0',
     ]);
+    expect(spawnCwds).toEqual(['/launch/cwd']);
   });
 });
 
@@ -566,6 +628,124 @@ describe('createUpdateManager', () => {
     expect(state.error).toContain('network down');
   });
 
+  it('guards against overlapping checkNow() calls performing two download cycles', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'filenet-mgr-'));
+    try {
+      const target = (await import('../updater')).targetName(process.platform, process.arch);
+      const assetName = `filenet-${target}.zip`;
+      const zip = new JSZip();
+      zip.file('filenet', 'bin');
+      const zipBuf = await zip.generateAsync({ type: 'nodebuffer' });
+      const hash = createHash('sha256').update(zipBuf).digest('hex');
+
+      let assetFetchCount = 0;
+      const fetchImpl = (async (url: string) => {
+        if (url.includes('/releases/latest')) {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+          return new Response(
+            JSON.stringify({
+              tag_name: 'v0.2.0',
+              html_url: 'https://example.com',
+              assets: [
+                { name: assetName, browser_download_url: 'https://example.com/asset.zip' },
+                { name: 'SHA256SUMS.txt', browser_download_url: 'https://example.com/sums.txt' },
+              ],
+            }),
+            { status: 200 },
+          );
+        }
+        if (url === 'https://example.com/asset.zip') {
+          assetFetchCount += 1;
+          await new Promise((resolve) => setTimeout(resolve, 10));
+          return new Response(new Uint8Array(zipBuf), { status: 200 });
+        }
+        if (url === 'https://example.com/sums.txt') {
+          return new Response(`${hash}  ${assetName}\n`, { status: 200 });
+        }
+        throw new Error(`Unexpected URL: ${url}`);
+      }) as unknown as typeof fetch;
+
+      const manager = createUpdateManager({
+        mode: 'binary',
+        currentVersion: '0.1.0',
+        installDir: dir,
+        getRepo: async () => 'geoffoliver/filenet',
+        fetchImpl,
+      });
+
+      const [first, second] = await Promise.all([manager.checkNow(), manager.checkNow()]);
+
+      // Only one call should have actually driven a download cycle; the
+      // other must have short-circuited via the re-entrancy guard instead
+      // of racing a second downloadAndStage against the first.
+      expect(assetFetchCount).toBe(1);
+      const phases = [first.phase, second.phase];
+      expect(phases).toContain('ready');
+      // The overlapping call bailed out early rather than completing its own
+      // full check/download cycle.
+      expect(phases.filter((p) => p === 'ready')).toHaveLength(1);
+      expect(manager.getState().phase).toBe('ready');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('does not re-download when the latest version is already staged and ready', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'filenet-mgr-'));
+    try {
+      const target = (await import('../updater')).targetName(process.platform, process.arch);
+      const assetName = `filenet-${target}.zip`;
+      const zip = new JSZip();
+      zip.file('filenet', 'bin');
+      const zipBuf = await zip.generateAsync({ type: 'nodebuffer' });
+      const hash = createHash('sha256').update(zipBuf).digest('hex');
+
+      let assetFetchCount = 0;
+      const fetchImpl = (async (url: string) => {
+        if (url.includes('/releases/latest')) {
+          return new Response(
+            JSON.stringify({
+              tag_name: 'v0.2.0',
+              html_url: 'https://example.com',
+              assets: [
+                { name: assetName, browser_download_url: 'https://example.com/asset.zip' },
+                { name: 'SHA256SUMS.txt', browser_download_url: 'https://example.com/sums.txt' },
+              ],
+            }),
+            { status: 200 },
+          );
+        }
+        if (url === 'https://example.com/asset.zip') {
+          assetFetchCount += 1;
+          return new Response(new Uint8Array(zipBuf), { status: 200 });
+        }
+        if (url === 'https://example.com/sums.txt') {
+          return new Response(`${hash}  ${assetName}\n`, { status: 200 });
+        }
+        throw new Error(`Unexpected URL: ${url}`);
+      }) as unknown as typeof fetch;
+
+      const manager = createUpdateManager({
+        mode: 'binary',
+        currentVersion: '0.1.0',
+        installDir: dir,
+        getRepo: async () => 'geoffoliver/filenet',
+        fetchImpl,
+      });
+
+      const first = await manager.checkNow();
+      expect(first.phase).toBe('ready');
+      expect(assetFetchCount).toBe(1);
+
+      const second = await manager.checkNow();
+      expect(second.phase).toBe('ready');
+      expect(second.latestVersion).toBe('0.2.0');
+      expect(assetFetchCount).toBe(1);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it('applyAndRestart throws when no update is ready', async () => {
     const manager = createUpdateManager({
       mode: 'binary',
@@ -629,9 +809,12 @@ describe('createUpdateManager', () => {
       await manager.applyAndRestart();
 
       expect(spawnCalls).toHaveLength(1);
-      const cmd = (spawnCalls[0] as { cmd: string[] }).cmd;
+      const spawnOpts = spawnCalls[0] as { cmd: string[]; cwd?: string };
+      const cmd = spawnOpts.cmd;
       expect(cmd[1]).toBe('--finish-update');
       expect(cmd[2]).toBe(String(process.pid));
+      expect(cmd[5]).toBe(process.cwd());
+      expect(spawnOpts.cwd).toBe(dir);
       expect(exitCalls).toEqual([0]);
     } finally {
       rmSync(dir, { recursive: true, force: true });

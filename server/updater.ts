@@ -180,7 +180,19 @@ export function applyUpdateSwap(stagingDir: string, installDir: string): void {
   // place so a human can recover manually rather than being left with a
   // half-updated, possibly non-functional install.
   for (const old of oldPaths) rmSync(old, { recursive: true, force: true });
-  rmSync(stagingDir, { recursive: true, force: true });
+
+  // Best-effort only: on Windows a process cannot delete its own current
+  // working directory (which is what stagingDir is, for the --finish-update
+  // child that calls this function), so this can throw a sharing-violation
+  // error even though the swap above fully succeeded. A leftover staging
+  // dir is harmless — downloadAndStage's stale-version cleanup removes it
+  // the next time a check runs — but failing to remove it here must never
+  // block the relaunch that already succeeded at swapping the real files.
+  try {
+    rmSync(stagingDir, { recursive: true, force: true });
+  } catch {
+    // ignore — see comment above
+  }
 }
 
 export function isProcessRunning(pid: number): boolean {
@@ -209,16 +221,17 @@ export async function waitForPidExit(
 
 export function parseFinishUpdateArgs(
   argv: string[],
-): { oldPid: number; stagingDir: string; installDir: string } | null {
+): { oldPid: number; stagingDir: string; installDir: string; launchCwd: string } | null {
   const idx = argv.indexOf('--finish-update');
   if (idx === -1) return null;
   const oldPid = Number(argv[idx + 1]);
   const stagingDir = argv[idx + 2];
   const installDir = argv[idx + 3];
-  if (!Number.isInteger(oldPid) || !stagingDir || !installDir) {
+  const launchCwd = argv[idx + 4];
+  if (!Number.isInteger(oldPid) || !stagingDir || !installDir || !launchCwd) {
     throw new Error('Malformed --finish-update arguments');
   }
-  return { oldPid, stagingDir, installDir };
+  return { oldPid, stagingDir, installDir, launchCwd };
 }
 
 export type FinishUpdateDeps = {
@@ -232,6 +245,7 @@ export async function runFinishUpdate(
   oldPid: number,
   stagingDir: string,
   installDir: string,
+  launchCwd: string,
   deps: FinishUpdateDeps = {},
 ): Promise<void> {
   const {
@@ -245,9 +259,13 @@ export async function runFinishUpdate(
   applySwap(stagingDir, installDir);
 
   const binaryName = process.platform === 'win32' ? 'filenet.exe' : 'filenet';
+  // cwd is the ORIGINAL launch directory (not installDir) so relative paths
+  // the app resolves at startup — e.g. the default DATABASE_URL in db.ts —
+  // point at the same location they did before the update, even when the
+  // app was launched from a directory other than the install dir.
   const child = spawnImpl({
     cmd: [join(installDir, binaryName)],
-    cwd: installDir,
+    cwd: launchCwd,
     stdio: ['ignore', 'ignore', 'ignore'],
   });
   child.unref();
@@ -306,6 +324,16 @@ export function createUpdateManager(opts: UpdateManagerOptions): UpdateManager {
   }
 
   async function checkNow(): Promise<UpdateState> {
+    // Re-entrancy guard: a check is already in flight (manual POST and the
+    // periodic scheduler can both call checkNow()). Overlapping calls would
+    // both drive downloadAndStage against the same staging path — which
+    // rmSync()s and re-extracts into it — so a second call while one is
+    // already running is a no-op rather than starting a new cycle.
+    if (state.phase === 'checking' || state.phase === 'downloading') {
+      return getState();
+    }
+    const alreadyReadyVersion = state.phase === 'ready' ? state.latestVersion : null;
+
     state = { ...state, phase: 'checking', error: null };
     try {
       const repo = await opts.getRepo();
@@ -321,6 +349,14 @@ export function createUpdateManager(opts: UpdateManagerOptions): UpdateManager {
           releaseNotesUrl: null,
           lastCheckedAt: now,
         };
+        return getState();
+      }
+
+      // Already staged and ready for this exact version — avoid re-staging
+      // (and re-downloading) on every periodic tick; this also shrinks the
+      // race window the guard above closes.
+      if (alreadyReadyVersion === release.version) {
+        state = { ...state, phase: 'ready', lastCheckedAt: now };
         return getState();
       }
 
@@ -398,6 +434,10 @@ export function createUpdateManager(opts: UpdateManagerOptions): UpdateManager {
     if (state.phase !== 'ready' || !stagingDir) {
       throw new Error('No update ready to apply');
     }
+    // The currently-running (old) process's cwd — captured here, before it
+    // exits, so the --finish-update child can pass it through to the final
+    // relaunch and restore the original launch directory (see runFinishUpdate).
+    const launchCwd = process.cwd();
     const binaryName = process.platform === 'win32' ? 'filenet.exe' : 'filenet';
     const child = spawnImpl({
       cmd: [
@@ -406,8 +446,13 @@ export function createUpdateManager(opts: UpdateManagerOptions): UpdateManager {
         String(process.pid),
         stagingDir,
         opts.installDir,
+        launchCwd,
       ],
-      cwd: stagingDir,
+      // installDir, not stagingDir: this --finish-update child later removes
+      // stagingDir (see applyUpdateSwap) — on Windows a process cannot
+      // delete its own cwd, so spawning with cwd inside the directory it
+      // will delete would break that cleanup.
+      cwd: opts.installDir,
       stdio: ['ignore', 'ignore', 'ignore'],
     });
     child.unref();
