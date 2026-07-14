@@ -4,7 +4,13 @@ import { useEffect, useRef, useState } from 'react';
 
 import FolderPicker from '../../components/FolderPicker/FolderPicker';
 
-import type { EnvConfig, PostDownloadScript, Settings } from '../../lib/api';
+import type {
+  EnvConfig,
+  PostDownloadScript,
+  Settings,
+  UpdatePhase,
+  UpdateStatus,
+} from '../../lib/api';
 import {
   type NotificationPermissionState,
   getNotificationPermission,
@@ -12,12 +18,15 @@ import {
 } from '../../lib/notifications';
 import {
   addScript,
+  checkForUpdate,
   getEnvConfig,
   getScripts,
   getSettings,
+  getUpdateStatus,
   patchSettings,
   removeScript,
   reorderScript,
+  restartToUpdate,
   triggerRescan,
 } from '../../lib/api';
 
@@ -599,6 +608,167 @@ function MaintenanceSection() {
   );
 }
 
+// ── Updates section ───────────────────────────────────────────────────────
+
+const PHASE_LABEL: Record<UpdatePhase, (status: UpdateStatus) => string> = {
+  idle: () => 'Up to date',
+  checking: () => 'Checking…',
+  available: (s) =>
+    s.mode === 'source' ? `Update available: v${s.latestVersion}` : 'Update available…',
+  downloading: () => 'Downloading…',
+  ready: (s) => `Update ready: v${s.latestVersion}`,
+  error: (s) => `Error: ${s.error ?? 'unknown error'}`,
+};
+
+function UpdatesSection() {
+  const [status, setStatus] = useState<UpdateStatus | null>(null);
+  const [repo, setRepo] = useState('');
+  const [interval, setIntervalMinutes] = useState('');
+  const [checking, setChecking] = useState(false);
+  const [restarting, setRestarting] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    let active = true;
+    Promise.all([getUpdateStatus(), getSettings()])
+      .then(([s, settingsRow]) => {
+        if (!active) return;
+        setStatus(s);
+        setRepo(settingsRow.updateRepo);
+        setIntervalMinutes(String(settingsRow.updateCheckIntervalMinutes));
+      })
+      .catch(() => {
+        if (active) setError('Could not load update status.');
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  function handleCheck() {
+    setChecking(true);
+    setError('');
+    checkForUpdate()
+      .then(setStatus)
+      .catch((err: Error) => setError(err.message))
+      .finally(() => setChecking(false));
+  }
+
+  function handleRestart() {
+    if (
+      !window.confirm(
+        'Filenet will briefly go offline while it restarts on the new version. Continue?',
+      )
+    ) {
+      return;
+    }
+    setRestarting(true);
+    setError('');
+    // The server process exits right after accepting this request — leave
+    // `restarting` true rather than clearing it in a .finally(); the page
+    // will need a manual reload once the new version is back up.
+    restartToUpdate().catch((err: Error) => {
+      setError(err.message);
+      setRestarting(false);
+    });
+  }
+
+  async function handleSaveSettings(e: React.FormEvent) {
+    e.preventDefault();
+    const parsedInterval = parseInt(interval, 10);
+    if (isNaN(parsedInterval) || parsedInterval < 0) {
+      setError('Check interval must be 0 (disabled) or a positive number of minutes.');
+      return;
+    }
+    if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repo.trim())) {
+      setError('Repository must be in the form owner/repo.');
+      return;
+    }
+    setSaving(true);
+    setError('');
+    setSaved(false);
+    patchSettings({ updateRepo: repo.trim(), updateCheckIntervalMinutes: parsedInterval })
+      .then(() => {
+        setSaved(true);
+        setTimeout(() => setSaved(false), 2000);
+      })
+      .catch((err: Error) => setError(err.message))
+      .finally(() => setSaving(false));
+  }
+
+  if (!status) return null;
+
+  return (
+    <Section title="Updates">
+      <div className={styles.form}>
+        <p className={styles.hint}>
+          Running <strong>v{status.currentVersion}</strong> — {PHASE_LABEL[status.phase](status)}
+        </p>
+
+        {status.mode === 'source' ? (
+          <p className={styles.hint}>
+            Running from source — update by pulling the latest image or code.
+          </p>
+        ) : (
+          <div className={styles.formFooter}>
+            <button
+              type="button"
+              className="btn btn-ghost"
+              onClick={handleCheck}
+              disabled={checking}
+            >
+              {checking ? 'Checking…' : 'Check for updates'}
+            </button>
+            {status.phase === 'ready' && (
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={handleRestart}
+                disabled={restarting}
+              >
+                {restarting ? 'Restarting…' : `Restart to update v${status.latestVersion}`}
+              </button>
+            )}
+          </div>
+        )}
+
+        <form className={styles.form} onSubmit={handleSaveSettings}>
+          <label className={styles.field}>
+            <span className={styles.label}>Update repository</span>
+            <input
+              className="input"
+              type="text"
+              value={repo}
+              onChange={(e) => setRepo(e.target.value)}
+              placeholder="owner/repo"
+            />
+          </label>
+          <label className={styles.field}>
+            <span className={styles.label}>Check interval</span>
+            <div className={styles.intervalRow}>
+              <input
+                className={`input ${styles.intervalInput}`}
+                type="number"
+                min="0"
+                max="35791"
+                value={interval}
+                onChange={(e) => setIntervalMinutes(e.target.value)}
+              />
+              <span className={styles.intervalUnit}>minutes (0 = disabled)</span>
+            </div>
+          </label>
+          {error && <p className={styles.error}>{error}</p>}
+          <div className={styles.formFooter}>
+            <SaveButton saving={saving} saved={saved} />
+          </div>
+        </form>
+      </div>
+    </Section>
+  );
+}
+
 // ── Notifications section ───────────────────────────────────────────────────
 
 function NotificationsSection() {
@@ -696,6 +866,7 @@ export default function SettingsView() {
       <NetworkingSection initial={settings} />
       <ScriptsSection />
       <MaintenanceSection />
+      <UpdatesSection />
       <NotificationsSection />
     </div>
   );
