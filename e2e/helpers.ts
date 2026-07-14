@@ -16,6 +16,30 @@ export const SETTINGS = {
   downloadFolder: '/downloads',
   rescanIntervalMinutes: 60,
   listenPort: 7734,
+  updateRepo: 'geoffoliver/filenet',
+  updateCheckIntervalMinutes: 1440,
+};
+
+export const UPDATE_STATUS_IDLE = {
+  mode: 'binary' as const,
+  currentVersion: '0.1.1',
+  phase: 'idle' as const,
+  latestVersion: null,
+  releaseNotesUrl: null,
+  error: null,
+  lastCheckedAt: '2024-01-01T00:00:00.000Z',
+};
+
+export const UPDATE_STATUS_READY = {
+  ...UPDATE_STATUS_IDLE,
+  phase: 'ready' as const,
+  latestVersion: '0.2.0',
+  releaseNotesUrl: 'https://github.com/geoffoliver/filenet/releases/tag/v0.2.0',
+};
+
+export const UPDATE_STATUS_SOURCE_MODE = {
+  ...UPDATE_STATUS_IDLE,
+  mode: 'source' as const,
 };
 
 export const STATS = {
@@ -241,6 +265,11 @@ export async function mockMe(page: Page) {
   await page.route('/api/me', (route) => route.fulfill({ json: { nodeId: 'self' } }));
 }
 
+export async function mockUpdateStatus(page: Page, status = UPDATE_STATUS_IDLE) {
+  await page.route('/api/update-status', (route) => route.fulfill({ json: status }));
+  await page.route('/api/update-check', (route) => route.fulfill({ json: status }));
+}
+
 /** Apply the standard "logged-in, everything loaded" mocks used by most tests. */
 export async function mockBaseApp(page: Page) {
   await mockSettingsConfigured(page);
@@ -251,4 +280,5 @@ export async function mockBaseApp(page: Page) {
   await mockConversations(page);
   await mockEnvConfig(page);
   await mockMe(page);
+  await mockUpdateStatus(page);
 }
