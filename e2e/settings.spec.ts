@@ -80,7 +80,9 @@ test('rescan interval field is rendered', async ({ page }) => {
   await page.goto('/settings');
   await expect(page.getByText('Rescan interval')).toBeVisible();
   // Default value from SETTINGS is 60 minutes
-  await expect(page.locator('input[type="number"][min="0"]')).toHaveValue('60');
+  await expect(page.getByRole('spinbutton', { name: 'Rescan interval minutes (0 =' })).toHaveValue(
+    '60',
+  );
 });
 
 test('shows enable button when notification permission is default', async ({ page }) => {
