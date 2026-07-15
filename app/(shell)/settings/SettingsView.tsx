@@ -225,8 +225,8 @@ function FilesSection({ initial, envConfig }: { initial: Settings; envConfig: En
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     const interval = parseInt(rescanInterval, 10);
-    if (isNaN(interval) || interval < 0) {
-      setError('Rescan interval must be 0 (disabled) or a positive number of minutes.');
+    if (isNaN(interval) || interval < 0 || interval > 35791) {
+      setError('Rescan interval must be 0 (disabled) or a number of minutes up to 35791.');
       return;
     }
     setSaving(true);
@@ -678,8 +678,8 @@ function UpdatesSection() {
   async function handleSaveSettings(e: React.FormEvent) {
     e.preventDefault();
     const parsedInterval = parseInt(interval, 10);
-    if (isNaN(parsedInterval) || parsedInterval < 0) {
-      setError('Check interval must be 0 (disabled) or a positive number of minutes.');
+    if (isNaN(parsedInterval) || parsedInterval < 0 || parsedInterval > 35791) {
+      setError('Check interval must be 0 (disabled) or a number of minutes up to 35791.');
       return;
     }
     if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repo.trim())) {
