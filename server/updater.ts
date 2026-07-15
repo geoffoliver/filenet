@@ -219,8 +219,12 @@ export function applyUpdateSwap(stagingDir: string, installDir: string): void {
   // working directory (which is what stagingDir is, for the --finish-update
   // child that calls this function), so this can throw a sharing-violation
   // error even though the swap above fully succeeded. A leftover staging
-  // dir is harmless — downloadAndStage's stale-version cleanup removes it
-  // the next time a check runs — but failing to remove it here must never
+  // dir is harmless: downloadAndStage's stale-version cleanup will remove it
+  // whenever a future update check actually stages a newer version (that
+  // cleanup doesn't run on every check — only when downloadAndStage itself
+  // runs), so it may persist indefinitely if this is the last update ever
+  // applied. A human can also delete .filenet-update/<version>/ by hand if
+  // that ever matters. Either way, failing to remove it here must never
   // block the relaunch that already succeeded at swapping the real files.
   try {
     rmSync(stagingDir, { recursive: true, force: true });
@@ -480,32 +484,43 @@ export function createUpdateManager(opts: UpdateManagerOptions): UpdateManager {
     // --finish-update process racing the first against the same staging dir.
     if (restarting) return;
     restarting = true;
-    // The currently-running (old) process's cwd — captured here, before it
-    // exits, so the --finish-update child can pass it through to the final
-    // relaunch and restore the original launch directory (see runFinishUpdate).
-    const launchCwd = process.cwd();
-    const binaryName = process.platform === 'win32' ? 'filenet.exe' : 'filenet';
-    const child = spawnImpl({
-      cmd: [
-        join(stagingDir, binaryName),
-        '--finish-update',
-        String(process.pid),
-        stagingDir,
-        opts.installDir,
-        launchCwd,
-      ],
-      // installDir, not stagingDir: this --finish-update child later removes
-      // stagingDir (see applyUpdateSwap) — on Windows a process cannot
-      // delete its own cwd, so spawning with cwd inside the directory it
-      // will delete would break that cleanup.
-      cwd: opts.installDir,
-      stdio: ['ignore', 'ignore', 'ignore'],
-    });
-    child.unref();
-    // exitImpl is process.exit by default, which terminates the process
-    // here in production. Injected test doubles just record the call and
-    // return normally instead.
-    exitImpl(0);
+    try {
+      // The currently-running (old) process's cwd — captured here, before it
+      // exits, so the --finish-update child can pass it through to the final
+      // relaunch and restore the original launch directory (see runFinishUpdate).
+      const launchCwd = process.cwd();
+      const binaryName = process.platform === 'win32' ? 'filenet.exe' : 'filenet';
+      const child = spawnImpl({
+        cmd: [
+          join(stagingDir, binaryName),
+          '--finish-update',
+          String(process.pid),
+          stagingDir,
+          opts.installDir,
+          launchCwd,
+        ],
+        // installDir, not stagingDir: this --finish-update child later removes
+        // stagingDir (see applyUpdateSwap) — on Windows a process cannot
+        // delete its own cwd, so spawning with cwd inside the directory it
+        // will delete would break that cleanup.
+        cwd: opts.installDir,
+        stdio: ['ignore', 'ignore', 'ignore'],
+      });
+      child.unref();
+      // exitImpl is process.exit by default, which terminates the process
+      // here in production. Injected test doubles just record the call and
+      // return normally instead.
+      exitImpl(0);
+    } catch (err) {
+      // If spawning the --finish-update child throws synchronously (staged
+      // binary missing, permission error, etc.), don't leave `restarting`
+      // stuck true forever — that would permanently disable every future
+      // applyAndRestart() call, including legitimate retries after the
+      // underlying problem is fixed, with no recovery short of restarting
+      // this process. Reset the guard so the next call can try again.
+      restarting = false;
+      throw err;
+    }
   }
 
   return { getState, checkNow, startPeriodicChecks, applyAndRestart };

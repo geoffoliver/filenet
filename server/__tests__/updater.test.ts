@@ -999,4 +999,78 @@ describe('createUpdateManager', () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  it('resets the restarting guard after a failed spawn so a later retry can still succeed', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'filenet-mgr-'));
+    try {
+      const target = (await import('../updater')).targetName(process.platform, process.arch);
+      const assetName = `filenet-${target}.zip`;
+      const zip = new JSZip();
+      zip.file('filenet', 'bin');
+      const zipBuf = await zip.generateAsync({ type: 'nodebuffer' });
+      const hash = createHash('sha256').update(zipBuf).digest('hex');
+
+      const fetchImpl = (async (url: string) => {
+        if (url.includes('/releases/latest')) {
+          return new Response(
+            JSON.stringify({
+              tag_name: 'v0.2.0',
+              html_url: 'https://example.com',
+              assets: [
+                { name: assetName, browser_download_url: 'https://example.com/asset.zip' },
+                { name: 'SHA256SUMS.txt', browser_download_url: 'https://example.com/sums.txt' },
+              ],
+            }),
+            { status: 200 },
+          );
+        }
+        if (url === 'https://example.com/asset.zip')
+          return new Response(new Uint8Array(zipBuf), { status: 200 });
+        if (url === 'https://example.com/sums.txt') {
+          return new Response(`${hash}  ${assetName}\n`, { status: 200 });
+        }
+        throw new Error(`Unexpected URL: ${url}`);
+      }) as unknown as typeof fetch;
+
+      const spawnCalls: unknown[] = [];
+      const exitCalls: number[] = [];
+      // First invocation throws synchronously — e.g. the staged binary is
+      // missing or a permission error — every call after that succeeds.
+      let shouldThrow = true;
+      const manager = createUpdateManager({
+        mode: 'binary',
+        currentVersion: '0.1.0',
+        installDir: dir,
+        getRepo: async () => 'geoffoliver/filenet',
+        fetchImpl,
+        spawnImpl: ((opts: unknown) => {
+          if (shouldThrow) throw new Error('spawn failed');
+          spawnCalls.push(opts);
+          return { unref: () => {} };
+        }) as unknown as typeof Bun.spawn,
+        exitImpl: (code) => exitCalls.push(code),
+      });
+
+      const state = await manager.checkNow();
+      expect(state.phase).toBe('ready');
+
+      // First attempt: spawnImpl throws synchronously. The call must reject
+      // rather than swallow the error.
+      await expect(manager.applyAndRestart()).rejects.toThrow('spawn failed');
+      expect(spawnCalls).toHaveLength(0);
+      expect(exitCalls).toHaveLength(0);
+
+      // Fix the underlying problem and retry. If the `restarting` guard was
+      // never reset after the failed attempt, this second call would
+      // silently no-op instead of spawning — proving the flag is genuinely
+      // reset, not just that the first call threw.
+      shouldThrow = false;
+      await manager.applyAndRestart();
+
+      expect(spawnCalls).toHaveLength(1);
+      expect(exitCalls).toEqual([0]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });
