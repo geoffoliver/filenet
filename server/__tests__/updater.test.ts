@@ -588,6 +588,75 @@ describe('applyUpdateSwap', () => {
       Object.defineProperty(process, 'platform', { value: originalPlatform, configurable: true });
     }
   });
+
+  it('throws and leaves the live install completely untouched when the staged binary is missing', () => {
+    const installDir = mkdtempSync(join(tmpdir(), 'filenet-install-'));
+    tmpDirs.push(installDir);
+    const stagingDir = join(installDir, '.filenet-update', '0.2.0');
+    const binaryName = process.platform === 'win32' ? 'filenet.exe' : 'filenet';
+
+    makeInstall(installDir, 'old-binary');
+    makeStaging(stagingDir, 'new-binary');
+    // Simulate a mispackaged release: the staged binary is missing, even
+    // though `out` and `drizzle/migrations` are present.
+    rmSync(join(stagingDir, binaryName), { force: true });
+
+    expect(() => applyUpdateSwap(stagingDir, installDir)).toThrow(
+      /missing required entry.*filenet/i,
+    );
+
+    // The live install must be exactly as it was before the call: nothing
+    // renamed, no .old backups created for any entry (not even `out`, which
+    // WAS present in staging and would otherwise have been swapped first).
+    expect(readFileSync(join(installDir, binaryName), 'utf8')).toBe('old-binary');
+    expect(readFileSync(join(installDir, 'out', 'index.html'), 'utf8')).toBe('old-ui');
+    expect(readFileSync(join(installDir, 'drizzle', 'migrations', '0000_x.sql'), 'utf8')).toBe(
+      'old-migration',
+    );
+    expect(existsSync(`${join(installDir, binaryName)}.old`)).toBe(false);
+    expect(existsSync(`${join(installDir, 'out')}.old`)).toBe(false);
+    // Staging dir is untouched too — nothing was consumed from it.
+    expect(existsSync(join(stagingDir, 'out', 'index.html'))).toBe(true);
+  });
+
+  it('throws and leaves the live install completely untouched when the staged out/ directory is missing', () => {
+    const installDir = mkdtempSync(join(tmpdir(), 'filenet-install-'));
+    tmpDirs.push(installDir);
+    const stagingDir = join(installDir, '.filenet-update', '0.2.0');
+    const binaryName = process.platform === 'win32' ? 'filenet.exe' : 'filenet';
+
+    makeInstall(installDir, 'old-binary');
+    makeStaging(stagingDir, 'new-binary');
+    rmSync(join(stagingDir, 'out'), { recursive: true, force: true });
+
+    expect(() => applyUpdateSwap(stagingDir, installDir)).toThrow(/missing required entry.*out/i);
+
+    expect(readFileSync(join(installDir, binaryName), 'utf8')).toBe('old-binary');
+    expect(readFileSync(join(installDir, 'out', 'index.html'), 'utf8')).toBe('old-ui');
+    expect(existsSync(`${join(installDir, binaryName)}.old`)).toBe(false);
+  });
+
+  it('still swaps the required entries and leaves the live install alone for drizzle/migrations when it is legitimately absent from staging', () => {
+    const installDir = mkdtempSync(join(tmpdir(), 'filenet-install-'));
+    tmpDirs.push(installDir);
+    const stagingDir = join(installDir, '.filenet-update', '0.2.0');
+    const binaryName = process.platform === 'win32' ? 'filenet.exe' : 'filenet';
+
+    makeInstall(installDir, 'old-binary');
+    makeStaging(stagingDir, 'new-binary');
+    // This release didn't touch migrations — staging legitimately omits them.
+    rmSync(join(stagingDir, 'drizzle'), { recursive: true, force: true });
+
+    expect(() => applyUpdateSwap(stagingDir, installDir)).not.toThrow();
+
+    expect(readFileSync(join(installDir, binaryName), 'utf8')).toBe('new-binary');
+    expect(readFileSync(join(installDir, 'out', 'index.html'), 'utf8')).toBe('new-ui');
+    // Untouched, still has the pre-existing migration.
+    expect(readFileSync(join(installDir, 'drizzle', 'migrations', '0000_x.sql'), 'utf8')).toBe(
+      'old-migration',
+    );
+    expect(existsSync(stagingDir)).toBe(false);
+  });
 });
 
 describe('isProcessRunning', () => {

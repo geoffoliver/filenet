@@ -178,11 +178,31 @@ export async function downloadAndStage(
   return versionDir;
 }
 
-const SWAPPED_ENTRIES = ['out', join('drizzle', 'migrations')];
+// `out` and the binary are REQUIRED — per scripts/build-binaries.sh, every
+// valid release always packages both, so a release missing either is
+// mispackaged and must not be applied. `drizzle/migrations` stays OPTIONAL
+// for forward-compatibility (a release with no migration changes may
+// legitimately omit it), matching the original design intent, even though
+// in practice today's build script always includes it too.
+const OPTIONAL_ENTRIES = [join('drizzle', 'migrations')];
 
 export function applyUpdateSwap(stagingDir: string, installDir: string): void {
   const binaryName = process.platform === 'win32' ? 'filenet.exe' : 'filenet';
-  const entries = [binaryName, ...SWAPPED_ENTRIES];
+  const requiredEntries = [binaryName, 'out'];
+
+  // Fail fast, before any file on the live install is touched, if a
+  // required entry is missing from the staged release. This is safer than
+  // swapping whatever entries ARE present and then discarding their .old
+  // backups in the cleanup below — which would otherwise happen even though
+  // the update as a whole never actually completed, leaving a
+  // partially-updated install with no recovery path and no error raised.
+  for (const name of requiredEntries) {
+    if (!existsSync(join(stagingDir, name))) {
+      throw new Error(`Staged update at ${stagingDir} is missing required entry: ${name}`);
+    }
+  }
+
+  const entries = [...requiredEntries, ...OPTIONAL_ENTRIES];
   const oldPaths: string[] = [];
 
   for (const name of entries) {
