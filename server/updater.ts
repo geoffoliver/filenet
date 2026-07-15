@@ -119,9 +119,18 @@ async function downloadToFile(
   fetchImpl: typeof fetch,
 ): Promise<void> {
   const res = await fetchImpl(url);
-  if (!res.ok || !res.body) throw new Error(`Download failed (${res.status}): ${url}`);
-  const buf = await res.arrayBuffer();
-  await Bun.write(destPath, buf);
+  // Deliberately do NOT touch `res.body` here (not even a truthiness check)
+  // before handing `res` to Bun.write. In this Bun version (1.3.14),
+  // accessing the `.body` getter on a Response before passing that same
+  // Response to Bun.write() poisons Bun.write's internal fast path and
+  // causes it to hang indefinitely streaming the body — reproduced in
+  // isolation against both a synthetic Buffer-backed Response and a real
+  // network-backed Response, independent of the test runner. Checking
+  // `res.ok` alone does not trigger it, and a bad/empty download is still
+  // caught safely downstream by the SHA-256 checksum verification in
+  // downloadAndStage, so no coverage is lost by dropping the `.body` check.
+  if (!res.ok) throw new Error(`Download failed (${res.status}): ${url}`);
+  await Bun.write(destPath, res);
 }
 
 export async function downloadAndStage(
