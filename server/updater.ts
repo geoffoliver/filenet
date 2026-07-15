@@ -352,6 +352,7 @@ export function createUpdateManager(opts: UpdateManagerOptions): UpdateManager {
     lastCheckedAt: null,
   };
   let stagingDir: string | null = null;
+  let restarting = false;
 
   function getState(): UpdateState {
     return { ...state };
@@ -468,6 +469,17 @@ export function createUpdateManager(opts: UpdateManagerOptions): UpdateManager {
     if (state.phase !== 'ready' || !stagingDir) {
       throw new Error('No update ready to apply');
     }
+    // Re-entrancy guard: /api/update-restart can be hit more than once while
+    // this process is still alive (double-click, two browser tabs) — each
+    // request independently observes phase === 'ready' and schedules its own
+    // applyAndRestart() call (see management.ts), since applyAndRestart is
+    // deferred via setTimeout and doesn't itself change `phase`. Mirrors the
+    // checkNow() re-entrancy guard above: the set happens synchronously,
+    // before the function's first await, so a second call always observes
+    // `restarting` already true and no-ops rather than spawning a second
+    // --finish-update process racing the first against the same staging dir.
+    if (restarting) return;
+    restarting = true;
     // The currently-running (old) process's cwd — captured here, before it
     // exits, so the --finish-update child can pass it through to the final
     // relaunch and restore the original launch directory (see runFinishUpdate).

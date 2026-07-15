@@ -936,4 +936,67 @@ describe('createUpdateManager', () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  it('guards against overlapping applyAndRestart() calls spawning two finish-update processes', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'filenet-mgr-'));
+    try {
+      const target = (await import('../updater')).targetName(process.platform, process.arch);
+      const assetName = `filenet-${target}.zip`;
+      const zip = new JSZip();
+      zip.file('filenet', 'bin');
+      const zipBuf = await zip.generateAsync({ type: 'nodebuffer' });
+      const hash = createHash('sha256').update(zipBuf).digest('hex');
+
+      const fetchImpl = (async (url: string) => {
+        if (url.includes('/releases/latest')) {
+          return new Response(
+            JSON.stringify({
+              tag_name: 'v0.2.0',
+              html_url: 'https://example.com',
+              assets: [
+                { name: assetName, browser_download_url: 'https://example.com/asset.zip' },
+                { name: 'SHA256SUMS.txt', browser_download_url: 'https://example.com/sums.txt' },
+              ],
+            }),
+            { status: 200 },
+          );
+        }
+        if (url === 'https://example.com/asset.zip')
+          return new Response(new Uint8Array(zipBuf), { status: 200 });
+        if (url === 'https://example.com/sums.txt') {
+          return new Response(`${hash}  ${assetName}\n`, { status: 200 });
+        }
+        throw new Error(`Unexpected URL: ${url}`);
+      }) as unknown as typeof fetch;
+
+      const spawnCalls: unknown[] = [];
+      const exitCalls: number[] = [];
+      const manager = createUpdateManager({
+        mode: 'binary',
+        currentVersion: '0.1.0',
+        installDir: dir,
+        getRepo: async () => 'geoffoliver/filenet',
+        fetchImpl,
+        spawnImpl: ((opts: unknown) => {
+          spawnCalls.push(opts);
+          return { unref: () => {} };
+        }) as unknown as typeof Bun.spawn,
+        exitImpl: (code) => exitCalls.push(code),
+      });
+
+      const state = await manager.checkNow();
+      expect(state.phase).toBe('ready');
+
+      // Simulate two overlapping /api/update-restart requests (double-click,
+      // two browser tabs) both firing applyAndRestart() while phase is still
+      // 'ready' — only the first should actually spawn/exit; the second must
+      // be a silent no-op, not a second --finish-update process.
+      await Promise.all([manager.applyAndRestart(), manager.applyAndRestart()]);
+
+      expect(spawnCalls).toHaveLength(1);
+      expect(exitCalls).toEqual([0]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });
