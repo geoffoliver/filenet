@@ -86,8 +86,8 @@ listening port configured in Settings), `DATABASE_URL` (default:
 `./data/filenet.db`, relative to wherever you run the executable from).
 
 To build these yourself: `bun run build:binaries` (requires Bun, plus
-`bash` and `zip` on your PATH — all standard on macOS/Linux;
-on Windows, run it under WSL or Git Bash).
+`bash`, `zip`, and a SHA-256 tool (`sha256sum` or `shasum`) on your PATH —
+all standard on macOS/Linux; on Windows, run it under WSL or Git Bash).
 
 Filenet checks for new releases automatically (interval configurable in
 Settings, default once every 24 hours — set to `0` to disable), downloads

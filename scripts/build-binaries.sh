@@ -45,4 +45,15 @@ for target in "${TARGETS[@]}"; do
 done
 
 echo "Generating checksums..."
-(cd dist && sha256sum filenet-*.zip > SHA256SUMS.txt)
+# sha256sum is GNU coreutils and isn't on stock macOS; fall back to
+# shasum -a 256 (Perl's Digest::SHA, ships with macOS), which produces the
+# same "<hex>  <filename>" two-space-separated line format, so no
+# reformatting is needed either way.
+(
+  cd dist
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum filenet-*.zip > SHA256SUMS.txt
+  else
+    shasum -a 256 filenet-*.zip > SHA256SUMS.txt
+  fi
+)
