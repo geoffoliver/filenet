@@ -698,6 +698,13 @@ function UpdatesSection() {
       .finally(() => setSaving(false));
   }
 
+  if (error && !status) {
+    return (
+      <Section title="Updates">
+        <p className={styles.error}>{error}</p>
+      </Section>
+    );
+  }
   if (!status) return null;
 
   return (

@@ -31,6 +31,14 @@ test('source mode shows a passive message instead of check/restart controls', as
   await expect(page.getByRole('button', { name: /check for updates/i })).toHaveCount(0);
 });
 
+test('shows an error instead of silently disappearing when the status load fails', async ({
+  page,
+}) => {
+  await page.route('/api/update-status', (route) => route.fulfill({ status: 500 }));
+  await page.goto('/settings');
+  await expect(page.getByText(/could not load update status/i)).toBeVisible();
+});
+
 test('shows a toast when an update becomes ready to install', async ({ page }) => {
   await mockUpdateStatus(page, UPDATE_STATUS_READY);
   // Navigate to a page that has nothing to do with Settings, to prove the
