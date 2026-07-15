@@ -1,5 +1,13 @@
-import { chmodSync, existsSync, mkdirSync, readdirSync, renameSync, rmSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import {
+  chmodSync,
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  renameSync,
+  rmSync,
+} from 'node:fs';
+import { dirname, join, resolve, sep } from 'node:path';
 
 import { hashFile } from './indexer';
 
@@ -81,10 +89,18 @@ export async function extractZip(zipPath: string, destDir: string): Promise<void
   const JSZip = (await import('jszip')).default;
   const data = await Bun.file(zipPath).arrayBuffer();
   const zip = await JSZip.loadAsync(data);
+  const resolvedDestDir = resolve(destDir);
 
   for (const [relPath, entry] of Object.entries(zip.files)) {
     if (entry.dir) continue;
     const outPath = join(destDir, relPath);
+    // Defense-in-depth against zip slip: every archive we extract is our
+    // own SHA-256-verified GitHub release, but reject any entry whose
+    // resolved path would land outside destDir (via '../' segments or an
+    // absolute path) rather than trusting the archive contents blindly.
+    if (!resolve(outPath).startsWith(resolvedDestDir + sep)) {
+      throw new Error(`Refusing to extract zip entry outside destination directory: ${relPath}`);
+    }
     mkdirSync(dirname(outPath), { recursive: true });
     const buf = await entry.async('nodebuffer');
     await Bun.write(outPath, buf);
@@ -171,7 +187,16 @@ export function applyUpdateSwap(stagingDir: string, installDir: string): void {
       renameSync(live, old);
       oldPaths.push(old);
     }
-    renameSync(staged, live);
+    // On Windows, the intermediate --finish-update process runs from the
+    // staged binary itself (see applyAndRestart's spawn), so the binary
+    // entry can't be renamed here — Windows locks a running executable's
+    // file against rename/delete (though reading it is still fine), which
+    // renameSync would need. Directories aren't subject to this lock.
+    if (process.platform === 'win32' && name === binaryName) {
+      copyFileSync(staged, live);
+    } else {
+      renameSync(staged, live);
+    }
   }
 
   // Only remove the .old backups (and the now-empty staging dir) after every

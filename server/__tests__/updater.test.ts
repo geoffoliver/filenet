@@ -205,6 +205,63 @@ describe('extractZip', () => {
       expect(mode & 0o111).not.toBe(0); // at least one executable bit set
     }
   });
+
+  it('refuses to extract an entry whose relative path escapes destDir (zip slip)', async () => {
+    // NOTE: JSZip 3.10.1 already sanitizes '../' segments itself on load —
+    // `zip.file('../../evil.txt', ...)`, round-tripped through a real
+    // generateAsync()/loadAsync(), silently collapses to a safe key
+    // ('evil.txt') before extractZip ever sees it (verified by hand: both
+    // the writer and, independently, load.js's `utils.resolve()` on the
+    // reader side strip leading '..' segments that would go above the
+    // archive root). So a literal malicious entry built via JSZip's own
+    // API can't reach our loop to exercise the guard. To test our guard on
+    // its own merits — not JSZip's internal sanitization, which we don't
+    // control long-term — mock the 'jszip' module (this file's established
+    // mock.module pattern, used elsewhere for node:fs) to hand extractZip a
+    // files map containing a traversal key directly.
+    const dir = mkdtempSync(join(tmpdir(), 'filenet-zip-'));
+    tmpDirs.push(dir);
+    const zipPath = join(dir, 'release.zip');
+    await Bun.write(zipPath, 'irrelevant-bytes'); // must exist; contents unused by the mock
+
+    // Note: this deliberately does NOT use mock.module('jszip', ...) (the
+    // pattern used below for node:fs). We verified with a standalone repro
+    // that a full mock.module('jszip', factory) replacement leaks past
+    // mock.restore() in this Bun version (1.3.14) — restore() only resets
+    // mock *functions*, not module-registry replacements — which would
+    // permanently break every other test in this file that does `new
+    // JSZip()` via the top-level static import (a live binding to the same
+    // registry entry). The node:fs mocks below dodge this because they
+    // spread the real module (`...fs`) and only override one function, so
+    // even an unrestored mock still behaves like real fs for everything
+    // else. jszip's default export is a class, not a plain object, so the
+    // equivalent-safe move is to monkey-patch the single static method we
+    // need directly on the real (already-imported) class and restore it by
+    // hand — same net effect, no leak.
+    const originalLoadAsync = JSZip.loadAsync;
+    (JSZip as unknown as { loadAsync: typeof JSZip.loadAsync }).loadAsync = (async () => ({
+      files: {
+        filenet: { dir: false, async: async () => Buffer.from('binary-contents') },
+        '../evil.txt': { dir: false, async: async () => Buffer.from('pwned') },
+      },
+    })) as unknown as typeof JSZip.loadAsync;
+
+    // destDir = dir/dest, so '../evil.txt' would land at dir/evil.txt if
+    // unguarded — one level outside destDir, but still inside the per-test
+    // sandbox `dir` (cleaned up by afterEach), so the assertion below can't
+    // collide with anything left over elsewhere on the shared OS tmpdir.
+    const destDir = join(dir, 'dest');
+    let threw = false;
+    try {
+      await expect(extractZip(zipPath, destDir)).rejects.toThrow(/outside destination directory/);
+      threw = true;
+    } finally {
+      (JSZip as unknown as { loadAsync: typeof JSZip.loadAsync }).loadAsync = originalLoadAsync;
+    }
+
+    expect(threw).toBe(true);
+    expect(existsSync(join(dir, 'evil.txt'))).toBe(false);
+  });
 });
 
 describe('downloadAndStage', () => {
@@ -471,6 +528,65 @@ describe('applyUpdateSwap', () => {
     expect(readFileSync(join(installDir, 'out', 'index.html'), 'utf8')).toBe('new-ui');
     expect(existsSync(join(installDir, 'drizzle', 'migrations', '0001_y.sql'))).toBe(true);
     expect(existsSync(`${join(installDir, binaryName)}.old`)).toBe(false);
+  });
+
+  it('on win32, copies (not renames) the staged binary, since it may be the running --finish-update image, while directories still use renameSync', async () => {
+    // Force the win32 code path on this (non-Windows) dev machine, restoring
+    // the real value in `finally` no matter what.
+    const originalPlatform = process.platform;
+    Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
+
+    const installDir = mkdtempSync(join(tmpdir(), 'filenet-install-'));
+    tmpDirs.push(installDir);
+    const stagingDir = join(installDir, '.filenet-update', '0.2.0');
+    const binaryName = 'filenet.exe'; // win32 binary name, matching the forced platform above
+
+    try {
+      makeInstall(installDir, 'old-binary');
+      makeStaging(stagingDir, 'new-binary');
+      const stagedBinaryPath = join(stagingDir, binaryName);
+      const stagedOutPath = join(stagingDir, 'out');
+
+      // Wrap renameSync and copyFileSync so we can record which one was
+      // used for which path, while delegating to the real implementations
+      // so the swap actually completes on disk — same established pattern
+      // as the node:fs mocks above.
+      const realRenameSync = fs.renameSync;
+      const realCopyFileSync = fs.copyFileSync;
+      const renameCalls: string[] = [];
+      const copyCalls: string[] = [];
+      await mock.module('node:fs', () => ({
+        ...fs,
+        renameSync: (...args: Parameters<typeof fs.renameSync>) => {
+          renameCalls.push(String(args[0]));
+          return realRenameSync(...args);
+        },
+        copyFileSync: (...args: Parameters<typeof fs.copyFileSync>) => {
+          copyCalls.push(String(args[0]));
+          return realCopyFileSync(...args);
+        },
+      }));
+
+      try {
+        applyUpdateSwap(stagingDir, installDir);
+      } finally {
+        mock.restore();
+      }
+
+      // (a) the live binary ends up with the staged content
+      expect(readFileSync(join(installDir, binaryName), 'utf8')).toBe('new-binary');
+      expect(readFileSync(join(installDir, 'out', 'index.html'), 'utf8')).toBe('new-ui');
+
+      // (b) copyFileSync was called for the binary's staged path
+      expect(copyCalls).toContain(stagedBinaryPath);
+
+      // (c) renameSync was NOT called for the binary's staged path (but
+      // directories, e.g. `out`, still use renameSync)
+      expect(renameCalls).not.toContain(stagedBinaryPath);
+      expect(renameCalls).toContain(stagedOutPath);
+    } finally {
+      Object.defineProperty(process, 'platform', { value: originalPlatform, configurable: true });
+    }
   });
 });
 
