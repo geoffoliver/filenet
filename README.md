@@ -96,6 +96,13 @@ update** button in Settings once one is ready. Forks can point their users
 at their own releases by setting the "Update repository" field in Settings
 (`owner/repo`, default `geoffoliver/filenet`).
 
+If the app doesn't come back up after clicking **Restart to update**, the
+swap is crash-safe: the previous version is left behind as `.old` siblings
+in the install directory rather than being deleted outright. Look for
+`filenet.old` (`filenet.exe.old` on Windows), `out.old`, and
+`drizzle/migrations.old` next to their non-`.old` counterparts, and rename
+each one back over the original to restore the last working version.
+
 ## Configuration
 
 All settings are available in the **Settings** page of the UI:
