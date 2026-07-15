@@ -446,6 +446,14 @@ export function createUpdateManager(opts: UpdateManagerOptions): UpdateManager {
     let stopped = false;
     let timerId: ReturnType<typeof setTimeout> | null = null;
 
+    function isEnabledInterval(intervalMinutes: number): boolean {
+      return (
+        Number.isFinite(intervalMinutes) &&
+        intervalMinutes > 0 &&
+        intervalMinutes <= MAX_UPDATE_CHECK_INTERVAL_MINUTES
+      );
+    }
+
     async function tick() {
       if (stopped) return;
       await checkNow().catch((err) => console.error('Update check failed:', err));
@@ -461,11 +469,7 @@ export function createUpdateManager(opts: UpdateManagerOptions): UpdateManager {
         console.error('Failed to read update check interval:', err);
       }
       if (stopped) return;
-      if (
-        !Number.isFinite(intervalMinutes) ||
-        intervalMinutes <= 0 ||
-        intervalMinutes > MAX_UPDATE_CHECK_INTERVAL_MINUTES
-      ) {
+      if (!isEnabledInterval(intervalMinutes)) {
         timerId = setTimeout(
           () => scheduleNext().catch((err) => console.error('Update check schedule failed:', err)),
           60_000,
@@ -478,7 +482,42 @@ export function createUpdateManager(opts: UpdateManagerOptions): UpdateManager {
       );
     }
 
-    tick().catch((err) => console.error('Update check init failed:', err));
+    async function init() {
+      if (stopped) return;
+      let intervalMinutes = 0;
+      try {
+        intervalMinutes = await getIntervalMinutes();
+      } catch (err) {
+        console.error('Failed to read update check interval:', err);
+      }
+      if (stopped) return;
+      if (isEnabledInterval(intervalMinutes)) {
+        // Valid, positive interval — preserve the existing behavior of
+        // checking immediately on boot, then continuing on schedule.
+        await tick();
+      } else {
+        // interval is 0/disabled (or invalid/out-of-range) — don't hit
+        // GitHub on boot for a check the user explicitly turned off.
+        // scheduleNext's own bounds check will just poll every 60s waiting
+        // for a valid interval, exactly like it already does for the
+        // "became disabled mid-run" case, so this never makes a network
+        // call while disabled and picks the check back up promptly once
+        // re-enabled.
+        //
+        // Deliberately different from startPeriodicRescan in
+        // server/indexer.ts, which always ticks immediately on boot
+        // regardless of its interval — that's fine there because rescanning
+        // only walks the local filesystem into the local SQLite DB, with no
+        // external network call, no rate limits, and no "user explicitly
+        // disabled this" surprise factor. checkNow() here makes a real
+        // outbound HTTPS call to api.github.com, which is exactly what a
+        // user setting "0 = disabled" would expect to be fully suppressed,
+        // including at boot. Do not "fix" this back to match indexer.ts.
+        await scheduleNext();
+      }
+    }
+
+    init().catch((err) => console.error('Update check init failed:', err));
 
     return () => {
       stopped = true;

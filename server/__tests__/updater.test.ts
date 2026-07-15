@@ -1143,3 +1143,59 @@ describe('createUpdateManager', () => {
     }
   });
 });
+
+describe('createUpdateManager().startPeriodicChecks', () => {
+  // Let any pending microtasks (the async init/tick/scheduleNext chain)
+  // settle before asserting on fetch call counts.
+  async function flushMicrotasks(): Promise<void> {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+
+  it('does not hit the network on boot when the interval is 0 (disabled)', async () => {
+    let fetchCalls = 0;
+    const fetchImpl = (async () => {
+      fetchCalls += 1;
+      return new Response('', { status: 404 });
+    }) as unknown as typeof fetch;
+
+    const manager = createUpdateManager({
+      mode: 'binary',
+      currentVersion: '0.1.0',
+      installDir: '/install',
+      getRepo: async () => 'geoffoliver/filenet',
+      fetchImpl,
+    });
+
+    const stop = manager.startPeriodicChecks(async () => 0);
+    try {
+      await flushMicrotasks();
+      expect(fetchCalls).toBe(0);
+    } finally {
+      stop();
+    }
+  });
+
+  it('checks immediately on boot when the interval is a valid positive value', async () => {
+    let fetchCalls = 0;
+    const fetchImpl = (async () => {
+      fetchCalls += 1;
+      return new Response('', { status: 404 });
+    }) as unknown as typeof fetch;
+
+    const manager = createUpdateManager({
+      mode: 'binary',
+      currentVersion: '0.1.0',
+      installDir: '/install',
+      getRepo: async () => 'geoffoliver/filenet',
+      fetchImpl,
+    });
+
+    const stop = manager.startPeriodicChecks(async () => 60);
+    try {
+      await flushMicrotasks();
+      expect(fetchCalls).toBe(1);
+    } finally {
+      stop();
+    }
+  });
+});
