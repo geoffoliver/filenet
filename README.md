@@ -67,9 +67,9 @@ If you don't want to run Docker, Filenet also ships as a standalone
 executable with no external runtime dependency — no separate Node/Bun/npm
 install required.
 
-1. Download `filenet-<platform>.tar.gz` (or `.zip` for Windows) from the
-   Releases page for your platform (`linux-x64`, `linux-arm64`,
-   `darwin-x64`, `darwin-arm64`, `windows-x64`).
+1. Download `filenet-bun-<platform>.zip` from the Releases page for your
+   platform (`linux-x64`, `linux-arm64`, `darwin-x64`, `darwin-arm64`,
+   `windows-x64`).
 2. Extract it — you'll get `filenet` (the executable), an `out/` folder
    (the UI), and a `drizzle/migrations/` folder. Keep these three together.
 3. Run the executable from that folder:
@@ -86,8 +86,22 @@ listening port configured in Settings), `DATABASE_URL` (default:
 `./data/filenet.db`, relative to wherever you run the executable from).
 
 To build these yourself: `bun run build:binaries` (requires Bun, plus
-`bash`, `tar`, and `zip` on your PATH — all standard on macOS/Linux;
-on Windows, run it under WSL or Git Bash).
+`bash`, `zip`, and a SHA-256 tool (`sha256sum` or `shasum`) on your PATH —
+all standard on macOS/Linux; on Windows, run it under WSL or Git Bash).
+
+Filenet checks for new releases automatically (interval configurable in
+Settings, default once every 24 hours — set to `0` to disable), downloads
+and SHA-256-verifies them in the background, and shows a **Restart to
+update** button in Settings once one is ready. Forks can point their users
+at their own releases by setting the "Update repository" field in Settings
+(`owner/repo`, default `geoffoliver/filenet`).
+
+If the app doesn't come back up after clicking **Restart to update**, the
+swap is crash-safe: the previous version is left behind as `.old` siblings
+in the install directory rather than being deleted outright. Look for
+`filenet.old` (`filenet.exe.old` on Windows), `out.old`, and
+`drizzle/migrations.old` next to their non-`.old` counterparts, and rename
+each one back over the original to restore the last working version.
 
 ## Configuration
 

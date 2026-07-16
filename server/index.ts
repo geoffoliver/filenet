@@ -1,3 +1,6 @@
+import { dirname } from 'node:path';
+import { readFileSync } from 'node:fs';
+
 import {
   type PeerData,
   dispatchChatMessage,
@@ -10,19 +13,64 @@ import {
 import { applyMigrations, createDb } from './db';
 import { clearActiveUploadSessionsForPeer, dispatchTransferMessage } from './transfer-protocol';
 import { connectToPeer, getConnectedPeer, unregisterPeer } from './connections';
+import { createUpdateManager, parseFinishUpdateArgs, runFinishUpdate } from './updater';
 import { getOrCreateSettings, parseSharedFolders } from './config';
+import { isCompiledBinary, resolveAssetPath } from './runtime-paths';
 import { createUiServer } from './ui-server';
 import { getOrCreateIdentity } from './identity';
 import { pauseAllActiveDownloads } from './download-manager';
-import { resolveAssetPath } from './runtime-paths';
 import { startPeriodicRescan } from './indexer';
 import { startReconnectLoop } from './reconnect';
+
+const finishUpdateArgs = parseFinishUpdateArgs(process.argv);
+if (finishUpdateArgs) {
+  await runFinishUpdate(
+    finishUpdateArgs.oldPid,
+    finishUpdateArgs.stagingDir,
+    finishUpdateArgs.installDir,
+    finishUpdateArgs.launchCwd,
+  );
+  // runFinishUpdate calls process.exit(0) on success; nothing below this
+  // point should ever run when --finish-update was passed.
+}
 
 const db = createDb();
 applyMigrations(db);
 
 const identity = await getOrCreateIdentity(db);
 const startupSettings = await getOrCreateSettings(db);
+
+function resolveCurrentVersion(): string {
+  if (process.env.APP_VERSION) return process.env.APP_VERSION;
+  const pkgPath = resolveAssetPath('package.json', import.meta.dir);
+  try {
+    return (JSON.parse(readFileSync(pkgPath, 'utf8')) as { version: string }).version;
+  } catch (err) {
+    throw new Error(
+      `Could not determine Filenet's version: APP_VERSION is not set and ${pkgPath} could not be read. ` +
+        'This should only happen if the binary was built without going through `bun run build:binaries` (which bakes APP_VERSION in) — see README.md.',
+      { cause: err },
+    );
+  }
+}
+
+const compiledBinary = isCompiledBinary(import.meta.dir);
+const installDir = compiledBinary ? dirname(process.execPath) : process.cwd();
+
+const updateManager = createUpdateManager({
+  mode: compiledBinary ? 'binary' : 'source',
+  currentVersion: resolveCurrentVersion(),
+  installDir,
+  getRepo: async () => {
+    const s = await getOrCreateSettings(db);
+    return s.updateRepo;
+  },
+});
+
+const stopUpdateChecks = updateManager.startPeriodicChecks(async () => {
+  const s = await getOrCreateSettings(db);
+  return s.updateCheckIntervalMinutes;
+});
 
 const P2P_PORT = parseInt(process.env.P2P_PORT ?? String(startupSettings.listenPort), 10);
 if (isNaN(P2P_PORT) || P2P_PORT < 1 || P2P_PORT > 65535)
@@ -77,6 +125,7 @@ const stopReconnect = startReconnectLoop(db, identity, connectPeerFn);
 const shutdown = () => {
   stopRescan();
   stopReconnect();
+  stopUpdateChecks();
   pauseAllActiveDownloads(db)
     .catch(() => {})
     .finally(() => process.exit(0));
@@ -90,6 +139,7 @@ Bun.serve({
     identity,
     db,
     connectPeer: connectPeerFn,
+    updater: updateManager,
     outDir: resolveAssetPath('out', import.meta.dir),
   }),
 });

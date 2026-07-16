@@ -50,6 +50,8 @@ export type Settings = {
   downloadFolder: string | null;
   rescanIntervalMinutes: number;
   listenPort: number;
+  updateRepo: string;
+  updateCheckIntervalMinutes: number;
 };
 
 export type EnvConfig = {
@@ -66,6 +68,8 @@ export type SettingsPatch = {
   downloadFolder?: string | null;
   rescanIntervalMinutes?: number;
   listenPort?: number;
+  updateRepo?: string;
+  updateCheckIntervalMinutes?: number;
 };
 
 export async function getMyInfo(): Promise<{ nodeId: string }> {
@@ -97,6 +101,38 @@ export async function patchSettings(patch: SettingsPatch): Promise<Settings> {
     throw new Error(msg || 'Failed to save settings');
   }
   return res.json();
+}
+
+export type UpdatePhase = 'idle' | 'checking' | 'available' | 'downloading' | 'ready' | 'error';
+
+export type UpdateStatus = {
+  mode: 'binary' | 'source';
+  currentVersion: string;
+  phase: UpdatePhase;
+  latestVersion: string | null;
+  releaseNotesUrl: string | null;
+  error: string | null;
+  lastCheckedAt: string | null;
+};
+
+export async function getUpdateStatus(): Promise<UpdateStatus> {
+  const res = await fetch(apiUrl('/api/update-status'));
+  if (!res.ok) throw new Error('Failed to load update status');
+  return res.json();
+}
+
+export async function checkForUpdate(): Promise<UpdateStatus> {
+  const res = await fetch(apiUrl('/api/update-check'), { method: 'POST' });
+  if (!res.ok) throw new Error('Failed to check for updates');
+  return res.json();
+}
+
+export async function restartToUpdate(): Promise<void> {
+  const res = await fetch(apiUrl('/api/update-restart'), { method: 'POST' });
+  if (!res.ok) {
+    const msg = await res.text();
+    throw new Error(msg || 'Failed to restart');
+  }
 }
 
 export type FriendStatus = 'OUTGOING_PENDING' | 'INCOMING_PENDING' | 'ACCEPTED' | 'BLOCKED';

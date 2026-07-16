@@ -64,6 +64,12 @@ describe('getOrCreateSettings', () => {
     const row = db.select({ total: count() }).from(settings).get();
     expect(row?.total).toBe(1);
   });
+
+  it('defaults updateRepo and updateCheckIntervalMinutes', async () => {
+    const s = await getOrCreateSettings(db);
+    expect(s.updateRepo).toBe('geoffoliver/filenet');
+    expect(s.updateCheckIntervalMinutes).toBe(1440);
+  });
 });
 
 describe('updateSettings', () => {

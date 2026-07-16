@@ -4,6 +4,7 @@ import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 
 import { type Db, applyMigrations, createDb } from '../db';
+import type { UpdateManager, UpdateState } from '../updater';
 import { createUiServer, resolveStaticFile } from '../ui-server';
 import { generateIdentity } from '../identity';
 
@@ -16,12 +17,37 @@ const neverConnect = async (): Promise<never> => {
   throw new Error('no real connections in tests');
 };
 
+function makeFakeUpdater(): UpdateManager {
+  const state: UpdateState = {
+    mode: 'binary',
+    currentVersion: '0.1.0',
+    phase: 'idle',
+    latestVersion: null,
+    releaseNotesUrl: null,
+    error: null,
+    lastCheckedAt: null,
+  };
+  return {
+    getState: () => state,
+    checkNow: async () => state,
+    startPeriodicChecks: () => () => {},
+    applyAndRestart: async () => {},
+  };
+}
+
 function req(path: string, options?: RequestInit) {
   return new Request(`http://localhost${path}`, options);
 }
 
 function makeHandler(overrides?: Partial<{ isDev: boolean; devOrigin: string }>) {
-  return createUiServer({ identity, db, connectPeer: neverConnect, outDir, ...overrides });
+  return createUiServer({
+    identity,
+    db,
+    connectPeer: neverConnect,
+    updater: makeFakeUpdater(),
+    outDir,
+    ...overrides,
+  });
 }
 
 beforeAll(async () => {

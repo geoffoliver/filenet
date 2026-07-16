@@ -23,3 +23,15 @@ export function resolveAssetPath(
   if (existsSync(sourceCandidate)) return sourceCandidate;
   return join(dirname(execPath), repoRootRelativePath);
 }
+
+/**
+ * True when running as a `bun build --compile` executable rather than from
+ * source. `package.json` sits at the repo root in every source-mode shape
+ * (dev, Docker — see Dockerfile's `COPY --from=builder /app/package.json`)
+ * and is deliberately never packaged into a compiled binary's dist
+ * directory by scripts/build-binaries.sh, so its absence is a reliable
+ * signal.
+ */
+export function isCompiledBinary(callerDir: string): boolean {
+  return !existsSync(join(callerDir, '..', 'package.json'));
+}

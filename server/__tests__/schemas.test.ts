@@ -271,6 +271,26 @@ describe('PatchSettingsBodySchema', () => {
     const r = PatchSettingsBodySchema.safeParse({ rescanIntervalMinutes: 35791 });
     expect(r.success).toBe(true);
   });
+
+  it('accepts a valid owner/repo updateRepo', () => {
+    const result = PatchSettingsBodySchema.safeParse({ updateRepo: 'someone/fork' });
+    expect(result.success).toBe(true);
+  });
+
+  it('rejects an updateRepo without a slash', () => {
+    const result = PatchSettingsBodySchema.safeParse({ updateRepo: 'not-a-repo' });
+    expect(result.success).toBe(false);
+  });
+
+  it('accepts a valid updateCheckIntervalMinutes', () => {
+    const result = PatchSettingsBodySchema.safeParse({ updateCheckIntervalMinutes: 60 });
+    expect(result.success).toBe(true);
+  });
+
+  it('rejects a negative updateCheckIntervalMinutes', () => {
+    const result = PatchSettingsBodySchema.safeParse({ updateCheckIntervalMinutes: -1 });
+    expect(result.success).toBe(false);
+  });
 });
 
 describe('SearchQuerySchema', () => {

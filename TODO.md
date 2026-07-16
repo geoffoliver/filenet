@@ -178,10 +178,10 @@
 - [x] Create necessary files to spin the app up in a Docker container — now serves the static export (`out/`) via the unified Bun server, not `next start`
 - [x] Database migrations — Drizzle migrations (`drizzle/migrations/*.sql`) applied automatically at server startup via `applyMigrations()`
 - [x] Single-binary distribution (à la Sonarr/Radarr) — Next.js builds via `output: 'export'`; `bun build --compile` packages the app + `out/` + `drizzle/migrations/` for all 5 targets via `bun run build:binaries`
-- [ ] Auto-update mechanism (detect new release on Github (configurable repo URL in case someone wants to fork it), download, prompt user to restart)
+- [x] Auto-update mechanism (detect new release on Github (configurable repo URL in case someone wants to fork it), download, prompt user to restart)
 - [ ] Notifications (toast or desktop (desktop preferred))
   - [x] Incoming friend requests that need approval — desktop `Notification` API with an in-app toast fallback, persistent count badge on the Friends nav link, `localStorage`-deduped so a request only notifies once (with pruning so a friend re-entering the pending state under the same id notifies again); explicit opt-in via a new "Notifications" section in Settings (browsers require a real click to grant permission)
-  - [ ] When updates are available/ready to install — blocked on the auto-update mechanism below; will reuse the same notify()/toast infrastructure
+  - [x] When updates are available/ready to install — desktop notification with toast fallback, fires once per version reaching "ready" (`app/hooks/useUpdateNotifications.ts`)
   - [ ] Other things?
 - [ ] Auto-open browser on app start (setting, defaults to true)
 - [ ] GitHub "Pages" page (light and dark mode, include screenshots, "docs" section for installation, configuration, etc. with screenshot examples)
