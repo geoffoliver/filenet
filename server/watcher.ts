@@ -1,4 +1,5 @@
 import { lstat } from 'node:fs/promises';
+import { sep } from 'node:path';
 
 import { type FSWatcher, watch } from 'chokidar';
 
@@ -18,6 +19,23 @@ export interface FileWatcherOptions {
 export interface FileWatcherHandle {
   stop: () => void;
   syncFolders: (folders: string[]) => void;
+}
+
+// Mirrors scanDirectory's dotfile skip (server/indexer.ts) — only tests
+// each entry as it recurses, never the configured root folder or anything
+// above it. Strip the matching watched root off first so a shared folder
+// living under a dotted ancestor (e.g. ~/.Movies) isn't wrongly excluded.
+function isIgnoredPath(path: string, folders: Iterable<string>): boolean {
+  for (const folder of folders) {
+    if (path === folder) return false;
+    const prefix = folder.endsWith(sep) ? folder : folder + sep;
+    if (path.startsWith(prefix)) {
+      return DOTFILE_SEGMENT.test(path.slice(prefix.length));
+    }
+  }
+  // Not under any currently-watched folder (e.g. a stale event right after
+  // syncFolders removed it) — fail safe and ignore it.
+  return true;
 }
 
 async function handleAddOrChange(db: Db, path: string): Promise<void> {
@@ -49,7 +67,7 @@ export function startFileWatcher(
   const watcher: FSWatcher = watch([...folders], {
     ignoreInitial: true,
     followSymlinks: false,
-    ignored: (path: string) => DOTFILE_SEGMENT.test(path),
+    ignored: (path: string) => isIgnoredPath(path, folders),
     awaitWriteFinish: { stabilityThreshold: stabilityThresholdMs, pollInterval: 20 },
   });
 

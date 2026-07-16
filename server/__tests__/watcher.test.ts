@@ -135,4 +135,32 @@ describe('startFileWatcher — add/change', () => {
 
     expect(findFile(link)).toBeNull();
   });
+
+  it('does not index a dotfile', async () => {
+    const dir = join(tmpDir, 'watch-dotfile');
+    await mkdir(dir);
+    handle = await startWatcher([dir]);
+
+    const path = join(dir, '.hidden.txt');
+    await writeFile(path, 'hidden content');
+    await Bun.sleep(150);
+
+    expect(findFile(path)).toBeNull();
+  });
+
+  it('indexes files under a watched folder whose own path has a dotted segment', async () => {
+    // A shared folder living under a dotted ancestor (e.g. ~/.Movies) must
+    // not have its own contents excluded — only entries *within* it that
+    // themselves start with a dot should be skipped, matching scanDirectory.
+    const dottedRoot = join(tmpDir, '.dotted-root');
+    const dir = join(dottedRoot, 'nested');
+    await mkdir(dir, { recursive: true });
+    handle = await startWatcher([dir]);
+
+    const path = join(dir, 'visible.txt');
+    await writeFile(path, 'visible content');
+
+    await waitFor(() => findFile(path) !== null);
+    expect(findFile(path)?.sha256).toHaveLength(64);
+  });
 });
