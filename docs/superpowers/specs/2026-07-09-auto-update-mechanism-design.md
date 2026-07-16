@@ -189,8 +189,13 @@ New `Settings` fields (Drizzle migration), following the existing
 ### Scheduling
 
 `server/index.ts` starts a periodic loop (same shape as
-`startPeriodicRescan`): one check on boot (binary mode only), then every
-`updateCheckIntervalMinutes`. Failures (network, GitHub rate-limit) are
+`startPeriodicRescan`): a check runs immediately on boot whenever
+`updateCheckIntervalMinutes` is enabled (non-zero), in both binary and
+source mode, then again every `updateCheckIntervalMinutes` thereafter. Only
+the download/stage step is binary-mode-only — in source mode, `checkNow()`
+stops at `phase: 'available'` without ever downloading or staging. If the
+interval is `0` (disabled), no check runs on boot or on a timer; the manual
+button still works regardless. Failures (network, GitHub rate-limit) are
 silent and retried next tick — matches every other polling loop in this
 codebase.
 
@@ -264,7 +269,7 @@ date` / `Checking…` / `Downloading…` / `Update ready: vX.Y.Z` / `Error: …`
 
 ## Testing
 
-- **Backend (Jest, `server/__tests__`)**:
+- **Backend (`bun:test`, `server/__tests__`)**:
   - `checkForUpdate`: mocked fetch — newer/older/equal/malformed-response
     cases.
   - Checksum verification: matching/mismatched/missing `SHA256SUMS.txt`
