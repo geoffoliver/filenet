@@ -133,6 +133,29 @@ async function downloadToFile(
   await Bun.write(destPath, res);
 }
 
+// `release.version` is derived from the configured repo's GitHub release
+// tag_name (see fetchLatestRelease) and is about to be used as a filesystem
+// path segment (joined into stagingRoot, then recursively rmSync'd and
+// mkdirSync'd). `updateRepo` is a user-configurable Settings field — forks
+// can point their users at their own releases — so a malicious or
+// misconfigured fork could publish a release whose tag is crafted to escape
+// stagingRoot via '../' segments (git tags can legally contain '/').
+// Validate the format cheaply, then — mirroring extractZip's
+// resolvedDestDir/startsWith zip-slip guard in this same file — resolve the
+// final path and confirm it's still contained within stagingRoot before any
+// destructive operation touches it.
+function safeVersionDir(version: string, stagingRoot: string): string {
+  if (!version || /[\\/]/.test(version) || version.includes('..')) {
+    throw new Error(`Refusing to stage release with unsafe version string: ${version}`);
+  }
+  const resolvedStagingRoot = resolve(stagingRoot);
+  const versionDir = join(stagingRoot, version);
+  if (!resolve(versionDir).startsWith(resolvedStagingRoot + sep)) {
+    throw new Error(`Refusing to stage release outside staging root: ${version}`);
+  }
+  return versionDir;
+}
+
 export async function downloadAndStage(
   release: ReleaseInfo,
   stagingRoot: string,
@@ -145,7 +168,7 @@ export async function downloadAndStage(
   const checksumsAsset = release.assets.find((a) => a.name === 'SHA256SUMS.txt');
   if (!checksumsAsset) throw new Error(`Release ${release.version} is missing SHA256SUMS.txt`);
 
-  const versionDir = join(stagingRoot, release.version);
+  const versionDir = safeVersionDir(release.version, stagingRoot);
   rmSync(versionDir, { recursive: true, force: true });
   mkdirSync(versionDir, { recursive: true });
 
@@ -216,6 +239,14 @@ export function applyUpdateSwap(stagingDir: string, installDir: string): void {
       renameSync(live, old);
       oldPaths.push(old);
     }
+    // Ensure the destination's parent directory exists before the
+    // copy/rename below — renameSync/copyFileSync both require it. This
+    // matters for nested entries (e.g. drizzle/migrations, whose parent is
+    // installDir/drizzle) if that intermediate directory doesn't already
+    // exist on the live install for any reason; it's a no-op for top-level
+    // entries like the binary and `out`, since dirname(installDir/out) is
+    // just installDir, which always exists by this point.
+    mkdirSync(dirname(live), { recursive: true });
     // On Windows, the intermediate --finish-update process runs from the
     // staged binary itself (see applyAndRestart's spawn), so the binary
     // entry can't be renamed here — Windows locks a running executable's

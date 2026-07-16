@@ -346,6 +346,49 @@ describe('downloadAndStage', () => {
     expect(existsSync(join(stagingRoot, '0.3.0'))).toBe(false);
   });
 
+  it('rejects a malicious release.version that would resolve outside stagingRoot (path traversal)', async () => {
+    const stagingRoot = mkdtempSync(join(tmpdir(), 'filenet-stage-'));
+    tmpDirs.push(stagingRoot);
+
+    // Sentinel directory that a '../' traversal from stagingRoot would land
+    // on — sits as a sibling of stagingRoot, directly in the OS tmpdir. If
+    // downloadAndStage ever uses release.version as an unvalidated path
+    // segment, its `rmSync(versionDir, { recursive: true, force: true })`
+    // would delete this directory outright.
+    const sentinelDir = join(tmpdir(), 'filenet-stage-traversal-sentinel');
+    rmSync(sentinelDir, { recursive: true, force: true });
+    mkdirSync(sentinelDir, { recursive: true });
+    const sentinelFile = join(sentinelDir, 'do-not-delete.txt');
+    writeFileSync(sentinelFile, 'sentinel');
+
+    try {
+      const target = targetName(process.platform, process.arch);
+      const assetName = `filenet-${target}.zip`;
+      const maliciousRelease = {
+        version: '../filenet-stage-traversal-sentinel',
+        notesUrl: '',
+        assets: [
+          { name: assetName, url: 'https://example.com/asset.zip' },
+          { name: 'SHA256SUMS.txt', url: 'https://example.com/SHA256SUMS.txt' },
+        ],
+      };
+      // A fetchImpl that fails fast — the point of this test is that the
+      // function must never even reach the point of downloading, since the
+      // version string should be rejected before any destructive path
+      // operation runs.
+      const fetchImpl = (async () => new Response('', { status: 500 })) as unknown as typeof fetch;
+
+      await expect(downloadAndStage(maliciousRelease, stagingRoot, fetchImpl)).rejects.toThrow();
+
+      // The sentinel — which sits exactly where the traversal would land —
+      // must survive completely untouched: not deleted, not recreated empty.
+      expect(existsSync(sentinelFile)).toBe(true);
+      expect(readFileSync(sentinelFile, 'utf8')).toBe('sentinel');
+    } finally {
+      rmSync(sentinelDir, { recursive: true, force: true });
+    }
+  });
+
   it('removes stale staged versions once a new one lands', async () => {
     const { targetName } = await import('../updater');
     const assetName = `filenet-${targetName(process.platform, process.arch)}.zip`;
@@ -634,6 +677,30 @@ describe('applyUpdateSwap', () => {
     expect(readFileSync(join(installDir, binaryName), 'utf8')).toBe('old-binary');
     expect(readFileSync(join(installDir, 'out', 'index.html'), 'utf8')).toBe('old-ui');
     expect(existsSync(`${join(installDir, binaryName)}.old`)).toBe(false);
+  });
+
+  it("creates a nested entry's missing parent directory (e.g. installDir/drizzle) before swapping it in", () => {
+    const installDir = mkdtempSync(join(tmpdir(), 'filenet-install-'));
+    tmpDirs.push(installDir);
+    const stagingDir = join(installDir, '.filenet-update', '0.2.0');
+    const binaryName = process.platform === 'win32' ? 'filenet.exe' : 'filenet';
+
+    // Only the required top-level entries exist in the live install.
+    // Deliberately do NOT create installDir/drizzle at all (not even
+    // empty) — simulating a layout where that intermediate directory is
+    // absent, so the nested drizzle/migrations swap has no parent to land
+    // in.
+    writeFileSync(join(installDir, binaryName), 'old-binary');
+    mkdirSync(join(installDir, 'out'), { recursive: true });
+    writeFileSync(join(installDir, 'out', 'index.html'), 'old-ui');
+
+    makeStaging(stagingDir, 'new-binary'); // includes staged drizzle/migrations
+
+    expect(() => applyUpdateSwap(stagingDir, installDir)).not.toThrow();
+
+    expect(readFileSync(join(installDir, binaryName), 'utf8')).toBe('new-binary');
+    expect(readFileSync(join(installDir, 'out', 'index.html'), 'utf8')).toBe('new-ui');
+    expect(existsSync(join(installDir, 'drizzle', 'migrations', '0001_y.sql'))).toBe(true);
   });
 
   it('still swaps the required entries and leaves the live install alone for drizzle/migrations when it is legitimately absent from staging', () => {
