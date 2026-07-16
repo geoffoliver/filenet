@@ -89,9 +89,14 @@ periodic scan never disagree about what's indexable:
   happen _after_ it's attached.
 - `followSymlinks: false` — matches `scanDirectory`'s `isSymbolicLink()`
   skip.
-- `ignored: /(^|[/\\])\../` — matches `scanDirectory`'s
-  `entry.startsWith('.')` skip (dotfiles/dot-directories anywhere in the
-  path).
+- `ignored: (path) => isIgnoredPath(path, watchedFolders)` — matches
+  `scanDirectory`'s `entry.startsWith('.')` skip, but only for path
+  segments _below_ each watched root. Testing the regex against chokidar's
+  full absolute path directly would diverge from `scanDirectory` (which
+  never looks at the configured root or anything above it): a shared
+  folder living under a dotted ancestor (e.g. `~/.Movies`) would have every
+  file under it wrongly excluded. `isIgnoredPath` strips the matching
+  watched-root prefix off first and only tests what's left.
 - `awaitWriteFinish: { stabilityThreshold: 2000, pollInterval: 100 }` —
   chokidar's built-in debounce: waits until a file's size stops changing
   for 2s before emitting `add`/`change`. This is what keeps a large file
@@ -203,6 +208,11 @@ filesystem):
   assert a subsequent change there is _not_ picked up.
 - Create a symlink inside a watched dir → assert no row is created for it
   and no error is logged.
+- Create a dotfile inside a watched dir → assert no row is created for it.
+- Watch a folder whose own path has a dotted ancestor segment (e.g.
+  `<tmp>/.dotted-root/nested`) → assert files inside it are indexed
+  normally (the dotted segment is part of the watched root, not a nested
+  entry, so it must not exclude the folder's own contents).
 - One risk-reduction step before writing the above: a small standalone
   smoke test confirming chokidar's `add`/`change`/`unlink` events fire
   correctly under Bun's runtime (it's a new dependency from the

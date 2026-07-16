@@ -187,6 +187,34 @@ describe('startFileWatcher — add/change', () => {
 
     expect(findFile(link)).toBeNull();
   });
+
+  it('does not index a dotfile', async () => {
+    const dir = join(tmpDir, 'watch-dotfile');
+    await mkdir(dir);
+    handle = await startWatcher([dir]);
+
+    const path = join(dir, '.hidden.txt');
+    await writeFile(path, 'hidden content');
+    await Bun.sleep(150);
+
+    expect(findFile(path)).toBeNull();
+  });
+
+  it('indexes files under a watched folder whose own path has a dotted segment', async () => {
+    // A shared folder living under a dotted ancestor (e.g. ~/.Movies) must
+    // not have its own contents excluded — only entries *within* it that
+    // themselves start with a dot should be skipped, matching scanDirectory.
+    const dottedRoot = join(tmpDir, '.dotted-root');
+    const dir = join(dottedRoot, 'nested');
+    await mkdir(dir, { recursive: true });
+    handle = await startWatcher([dir]);
+
+    const path = join(dir, 'visible.txt');
+    await writeFile(path, 'visible content');
+
+    await waitFor(() => findFile(path) !== null);
+    expect(findFile(path)?.sha256).toHaveLength(64);
+  });
 });
 ```
 
@@ -206,6 +234,7 @@ Expected: FAIL — `server/watcher.ts` does not exist yet (module not found).
 
 ```ts
 import { lstat } from 'node:fs/promises';
+import { sep } from 'node:path';
 
 import { type FSWatcher, watch } from 'chokidar';
 
@@ -225,6 +254,26 @@ export interface FileWatcherOptions {
 export interface FileWatcherHandle {
   stop: () => void;
   syncFolders: (folders: string[]) => void;
+}
+
+// Mirrors scanDirectory's dotfile skip (server/indexer.ts), which only
+// tests each directory *entry* as it recurses — never the configured root
+// folder or anything above it. Testing chokidar's full absolute path
+// against DOTFILE_SEGMENT directly would diverge from that: a shared
+// folder living under any dotted ancestor (e.g. ~/.Movies) would have
+// every file under it wrongly excluded. Strip the matching watched root
+// off first and only test what's left.
+function isIgnoredPath(path: string, folders: Iterable<string>): boolean {
+  for (const folder of folders) {
+    if (path === folder) return false;
+    const prefix = folder.endsWith(sep) ? folder : folder + sep;
+    if (path.startsWith(prefix)) {
+      return DOTFILE_SEGMENT.test(path.slice(prefix.length));
+    }
+  }
+  // Not under any currently-watched folder (e.g. a stale event right after
+  // syncFolders removed it) — fail safe and ignore it.
+  return true;
 }
 
 async function handleAddOrChange(db: Db, path: string): Promise<void> {
@@ -256,7 +305,7 @@ export function startFileWatcher(
   const watcher: FSWatcher = watch([...folders], {
     ignoreInitial: true,
     followSymlinks: false,
-    ignored: (path: string) => DOTFILE_SEGMENT.test(path),
+    ignored: (path: string) => isIgnoredPath(path, folders),
     awaitWriteFinish: { stabilityThreshold: stabilityThresholdMs, pollInterval: 20 },
   });
 
@@ -286,10 +335,12 @@ export function startFileWatcher(
 
 Note: `options.deleteGraceMs` isn't read yet in this task (no-op `unlink` handler) — it's wired up in Task 2. `FileWatcherOptions` keeps the field now since the type is part of this task's public interface; the code above deliberately does **not** destructure `deleteGraceMs` (only `stabilityThresholdMs`) to avoid an unused-variable lint failure — Task 2 adds the destructuring at the same time it starts using the value.
 
+`folders` is captured directly here (Task 1 has no `syncFolders` yet, so it never changes after `startFileWatcher` returns); Task 2's full-file rewrite below switches `isIgnoredPath`'s second argument to the mutable `watched` `Set`, so `syncFolders` (Task 3) keeps this check correct as folders are added/removed live.
+
 - [ ] **Step 5: Run the tests to verify they pass**
 
 Run: `bun test server/__tests__/watcher.test.ts`
-Expected: PASS (3 tests)
+Expected: PASS (5 tests)
 
 - [ ] **Step 6: Run the full backend suite to check for regressions**
 
@@ -428,6 +479,7 @@ Replace the full contents of `server/watcher.ts` with:
 
 ```ts
 import { lstat } from 'node:fs/promises';
+import { sep } from 'node:path';
 
 import { type FSWatcher, watch } from 'chokidar';
 
@@ -447,6 +499,23 @@ export interface FileWatcherOptions {
 export interface FileWatcherHandle {
   stop: () => void;
   syncFolders: (folders: string[]) => void;
+}
+
+// Mirrors scanDirectory's dotfile skip (server/indexer.ts) — only tests
+// each entry as it recurses, never the configured root folder or anything
+// above it. Strip the matching watched root off first so a shared folder
+// living under a dotted ancestor (e.g. ~/.Movies) isn't wrongly excluded.
+function isIgnoredPath(path: string, folders: Iterable<string>): boolean {
+  for (const folder of folders) {
+    if (path === folder) return false;
+    const prefix = folder.endsWith(sep) ? folder : folder + sep;
+    if (path.startsWith(prefix)) {
+      return DOTFILE_SEGMENT.test(path.slice(prefix.length));
+    }
+  }
+  // Not under any currently-watched folder (e.g. a stale event right after
+  // syncFolders removed it) — fail safe and ignore it.
+  return true;
 }
 
 async function handleAddOrChange(db: Db, path: string): Promise<void> {
@@ -507,7 +576,7 @@ export function startFileWatcher(
   const watcher: FSWatcher = watch([...watched], {
     ignoreInitial: true,
     followSymlinks: false,
-    ignored: (path: string) => DOTFILE_SEGMENT.test(path),
+    ignored: (path: string) => isIgnoredPath(path, watched),
     awaitWriteFinish: { stabilityThreshold: stabilityThresholdMs, pollInterval: 20 },
   });
 
@@ -547,7 +616,7 @@ export function startFileWatcher(
 - [ ] **Step 8: Run to verify the tests pass**
 
 Run: `bun test server/__tests__/watcher.test.ts`
-Expected: PASS (6 tests)
+Expected: PASS (8 tests)
 
 - [ ] **Step 9: Run the full backend suite**
 
@@ -682,7 +751,7 @@ In `server/watcher.ts`, replace the `syncFolders: () => { ... }` stub inside the
 - [ ] **Step 4: Run to verify all watcher tests pass**
 
 Run: `bun test server/__tests__/watcher.test.ts`
-Expected: PASS (10 tests)
+Expected: PASS (12 tests)
 
 - [ ] **Step 5: Run the full backend suite**
 
