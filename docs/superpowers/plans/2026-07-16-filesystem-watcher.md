@@ -59,7 +59,7 @@ import { unlinkSync } from 'fs';
 
 import { type Db, applyMigrations, createDb } from '../db';
 import { sharedFiles } from '../schema';
-import { type FileWatcherHandle, startFileWatcher } from '../watcher';
+import { type FileWatcherHandle, type FileWatcherOptions, startFileWatcher } from '../watcher';
 
 const TEST_DB_URL = 'file:./data/test-watcher.db';
 let db: Db;
@@ -69,6 +69,14 @@ let handle: FileWatcherHandle | null = null;
 // Test-only tuning: fast enough to keep the suite quick, still exercises
 // the real debounce/grace-period code paths.
 const FAST_OPTIONS = { deleteGraceMs: 50, stabilityThresholdMs: 20 };
+
+// chokidar's initial readdir must finish before `ignoreInitial: true` stops
+// treating a newly-written file as part of the "initial" state. A file
+// created before this settles (or before the watcher is even started) will
+// never fire `add` — it's silently treated as pre-existing. This margin is
+// generous relative to that readdir, which is near-instant for the tiny
+// temp directories these tests use.
+const WARMUP_MS = 200;
 
 function findFile(path: string) {
   return db.select().from(sharedFiles).where(eq(sharedFiles.path, path)).get() ?? null;
@@ -80,6 +88,20 @@ async function waitFor(check: () => boolean, timeoutMs = 2000): Promise<void> {
     if (Date.now() - start > timeoutMs) throw new Error('waitFor timed out');
     await Bun.sleep(20);
   }
+}
+
+// Starts the watcher and waits out WARMUP_MS before returning, so callers
+// can immediately write files that are guaranteed to be seen as new (not
+// swallowed by ignoreInitial). Always start the watcher on an empty/already-
+// stable directory when using this helper — anything written to `folders`
+// before this resolves is still at risk of being treated as pre-existing.
+async function startWatcher(
+  folders: string[],
+  options: FileWatcherOptions = FAST_OPTIONS,
+): Promise<FileWatcherHandle> {
+  const h = startFileWatcher(db, folders, options);
+  await Bun.sleep(WARMUP_MS);
+  return h;
 }
 
 beforeAll(async () => {
@@ -109,7 +131,7 @@ describe('startFileWatcher — add/change', () => {
   it('indexes a file added after the watcher starts', async () => {
     const dir = join(tmpDir, 'watch-add');
     await mkdir(dir);
-    handle = startFileWatcher(db, [dir], FAST_OPTIONS);
+    handle = await startWatcher([dir]);
 
     const path = join(dir, 'new.txt');
     await writeFile(path, 'new content');
@@ -126,8 +148,10 @@ describe('startFileWatcher — add/change', () => {
     handle = startFileWatcher(db, [dir], FAST_OPTIONS);
 
     // ignoreInitial: true means the pre-existing file above is not indexed
-    // by the watcher itself — confirm that, then prove a real change is seen.
-    await Bun.sleep(100);
+    // by the watcher itself — confirm that. This wait also serves as the
+    // watcher's warm-up: only after it elapses is a *new* write guaranteed
+    // to be seen as a real change rather than folded into the initial scan.
+    await Bun.sleep(WARMUP_MS);
     expect(findFile(path)).toBeNull();
 
     await writeFile(path, 'changed content');
@@ -139,9 +163,10 @@ describe('startFileWatcher — add/change', () => {
   it('does not index a symlink', async () => {
     const dir = join(tmpDir, 'watch-symlink');
     await mkdir(dir);
+    handle = await startWatcher([dir]);
+
     const target = join(dir, 'target.txt');
     await writeFile(target, 'target content');
-    handle = startFileWatcher(db, [dir], FAST_OPTIONS);
     await waitFor(() => findFile(target) !== null);
 
     const link = join(dir, 'link.txt');
@@ -152,6 +177,8 @@ describe('startFileWatcher — add/change', () => {
   });
 });
 ```
+
+**Why the `startWatcher` helper and `WARMUP_MS` exist:** `ignoreInitial: true` means chokidar treats anything present when its initial `readdir` completes as pre-existing and never fires `add` for it — including a file written a few milliseconds after `watch()` is called, if that write lands before the initial scan finishes. This is real, verified chokidar v5 behavior under Bun (not a version incompatibility) — always start the watcher and let `WARMUP_MS` elapse before writing a file you expect an `add`/`change` event for. The one deliberate exception is the `'re-indexes a file after it changes'` test above, which writes _before_ starting the watcher specifically to prove `ignoreInitial` suppresses that file.
 
 - [ ] **Step 3: Run the tests to verify they fail**
 
@@ -330,9 +357,9 @@ describe('startFileWatcher — delete', () => {
   it('does not remove the record immediately on delete', async () => {
     const dir = join(tmpDir, 'watch-delete-immediate');
     await mkdir(dir);
+    handle = await startWatcher([dir]);
     const path = join(dir, 'gone.txt');
     await writeFile(path, 'content');
-    handle = startFileWatcher(db, [dir], FAST_OPTIONS);
     await waitFor(() => findFile(path) !== null);
 
     await rm(path);
@@ -344,9 +371,9 @@ describe('startFileWatcher — delete', () => {
   it('removes the record after the grace period elapses', async () => {
     const dir = join(tmpDir, 'watch-delete-grace');
     await mkdir(dir);
+    handle = await startWatcher([dir]);
     const path = join(dir, 'gone.txt');
     await writeFile(path, 'content');
-    handle = startFileWatcher(db, [dir], FAST_OPTIONS);
     await waitFor(() => findFile(path) !== null);
 
     await rm(path);
@@ -356,10 +383,10 @@ describe('startFileWatcher — delete', () => {
   it('keeps the record if the file is recreated within the grace period', async () => {
     const dir = join(tmpDir, 'watch-delete-recreate');
     await mkdir(dir);
+    // Longer grace period here so the recreate below reliably lands inside the window.
+    handle = await startWatcher([dir], { deleteGraceMs: 300, stabilityThresholdMs: 20 });
     const path = join(dir, 'flicker.txt');
     await writeFile(path, 'content');
-    // Longer grace period here so the recreate below reliably lands inside the window.
-    handle = startFileWatcher(db, [dir], { deleteGraceMs: 300, stabilityThresholdMs: 20 });
     await waitFor(() => findFile(path) !== null);
 
     await rm(path);
@@ -542,9 +569,13 @@ describe('startFileWatcher — syncFolders', () => {
     const dir2 = join(tmpDir, 'sync-add-2');
     await mkdir(dir1);
     await mkdir(dir2);
-    handle = startFileWatcher(db, [dir1], FAST_OPTIONS);
+    handle = await startWatcher([dir1]);
 
     handle.syncFolders([dir1, dir2]);
+    // chokidar's readdir for the newly-added folder needs the same
+    // warm-up as a fresh startFileWatcher() call before writes to it are
+    // guaranteed to be seen as new.
+    await Bun.sleep(WARMUP_MS);
 
     const path = join(dir2, 'new-folder-file.txt');
     await writeFile(path, 'content');
@@ -556,9 +587,11 @@ describe('startFileWatcher — syncFolders', () => {
     const dir2 = join(tmpDir, 'sync-remove-2');
     await mkdir(dir1);
     await mkdir(dir2);
-    handle = startFileWatcher(db, [dir1, dir2], FAST_OPTIONS);
+    handle = await startWatcher([dir1, dir2]);
 
     handle.syncFolders([dir1]);
+    // Give unwatch() a moment to take effect before proving dir2 is ignored.
+    await Bun.sleep(WARMUP_MS);
 
     const path = join(dir2, 'removed-folder-file.txt');
     await writeFile(path, 'content');
@@ -571,7 +604,7 @@ describe('startFileWatcher — stop', () => {
   it('stops indexing after stop() is called', async () => {
     const dir = join(tmpDir, 'stop-basic');
     await mkdir(dir);
-    const localHandle = startFileWatcher(db, [dir], FAST_OPTIONS);
+    const localHandle = await startWatcher([dir]);
     localHandle.stop();
 
     const path = join(dir, 'after-stop.txt');
@@ -583,12 +616,9 @@ describe('startFileWatcher — stop', () => {
   it('cancels pending deletes on stop() without throwing', async () => {
     const dir = join(tmpDir, 'stop-pending-delete');
     await mkdir(dir);
+    const localHandle = await startWatcher([dir], { deleteGraceMs: 500, stabilityThresholdMs: 20 });
     const path = join(dir, 'pending.txt');
     await writeFile(path, 'content');
-    const localHandle = startFileWatcher(db, [dir], {
-      deleteGraceMs: 500,
-      stabilityThresholdMs: 20,
-    });
     await waitFor(() => findFile(path) !== null, 2000);
 
     await rm(path);
