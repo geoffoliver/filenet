@@ -43,7 +43,15 @@ const startupSettings = await getOrCreateSettings(db);
 function resolveCurrentVersion(): string {
   if (process.env.APP_VERSION) return process.env.APP_VERSION;
   const pkgPath = resolveAssetPath('package.json', import.meta.dir);
-  return (JSON.parse(readFileSync(pkgPath, 'utf8')) as { version: string }).version;
+  try {
+    return (JSON.parse(readFileSync(pkgPath, 'utf8')) as { version: string }).version;
+  } catch (err) {
+    throw new Error(
+      `Could not determine Filenet's version: APP_VERSION is not set and ${pkgPath} could not be read. ` +
+        'This should only happen if the binary was built without going through `bun run build:binaries` (which bakes APP_VERSION in) — see README.md.',
+      { cause: err },
+    );
+  }
 }
 
 const compiledBinary = isCompiledBinary(import.meta.dir);
