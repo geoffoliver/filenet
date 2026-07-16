@@ -78,6 +78,14 @@ const FAST_OPTIONS = { deleteGraceMs: 50, stabilityThresholdMs: 20 };
 // temp directories these tests use.
 const WARMUP_MS = 200;
 
+// Separately: starting a watcher immediately after writing a file can make
+// macOS FSEvents replay that very-recent write as a live event once the
+// watcher attaches, bypassing ignoreInitial entirely (independently
+// verified — a longer WARMUP_MS *after* starting does not help; only a gap
+// *before* starting does, and 500ms+ eliminates it). Use this wherever a
+// test deliberately writes a file before starting the watcher.
+const PRE_EXISTING_SETTLE_MS = 600;
+
 function findFile(path: string) {
   return db.select().from(sharedFiles).where(eq(sharedFiles.path, path)).get() ?? null;
 }
@@ -145,6 +153,10 @@ describe('startFileWatcher — add/change', () => {
     await mkdir(dir);
     const path = join(dir, 'existing.txt');
     await writeFile(path, 'original');
+    // Let the write settle before starting the watcher (see
+    // PRE_EXISTING_SETTLE_MS above) so the OS doesn't replay it as a live
+    // event once chokidar attaches.
+    await Bun.sleep(PRE_EXISTING_SETTLE_MS);
     handle = startFileWatcher(db, [dir], FAST_OPTIONS);
 
     // ignoreInitial: true means the pre-existing file above is not indexed
@@ -178,7 +190,12 @@ describe('startFileWatcher — add/change', () => {
 });
 ```
 
-**Why the `startWatcher` helper and `WARMUP_MS` exist:** `ignoreInitial: true` means chokidar treats anything present when its initial `readdir` completes as pre-existing and never fires `add` for it — including a file written a few milliseconds after `watch()` is called, if that write lands before the initial scan finishes. This is real, verified chokidar v5 behavior under Bun (not a version incompatibility) — always start the watcher and let `WARMUP_MS` elapse before writing a file you expect an `add`/`change` event for. The one deliberate exception is the `'re-indexes a file after it changes'` test above, which writes _before_ starting the watcher specifically to prove `ignoreInitial` suppresses that file.
+**Why `startWatcher`/`WARMUP_MS` and `PRE_EXISTING_SETTLE_MS` exist — two distinct, independently-verified races, not one:**
+
+1. **New file written too soon after `watch()` starts:** chokidar treats anything present when its initial `readdir` completes as pre-existing and never fires `add` for it — including a file written a few milliseconds after `watch()` is called, if that write lands before the initial scan finishes. Fix: always start the watcher and let `WARMUP_MS` elapse (via the `startWatcher` helper) before writing a file you expect an `add`/`change` event for.
+2. **Watcher started too soon after a file was already written:** on macOS, FSEvents can replay a very-recent write as a _live_ event once a watcher attaches to that directory, bypassing `ignoreInitial` for that file — confirmed independently: a longer post-start warm-up does **not** fix this (tested up to 1000ms), only a gap _before_ starting the watcher does (500ms+ reliably eliminates it, tested up to 3000ms). Fix: `PRE_EXISTING_SETTLE_MS` above.
+
+Both are real, independently-reproduced chokidar v5/Bun/macOS behavior — not a library incompatibility, and not something to "fix" by removing `ignored`/`ignoreInitial` or loosening an assertion. The one test that deliberately writes a file _before_ starting the watcher (`'re-indexes a file after it changes'`) needs `PRE_EXISTING_SETTLE_MS` before `startFileWatcher` for exactly this reason — it's specifically proving `ignoreInitial` suppresses that pre-existing file, so give it a fair chance to do so.
 
 - [ ] **Step 3: Run the tests to verify they fail**
 
