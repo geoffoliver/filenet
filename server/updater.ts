@@ -134,18 +134,26 @@ async function downloadToFile(
   fetchImpl: typeof fetch,
 ): Promise<void> {
   const res = await fetchImpl(url);
-  // Deliberately do NOT touch `res.body` here (not even a truthiness check)
-  // before handing `res` to Bun.write. In this Bun version (1.3.14),
-  // accessing the `.body` getter on a Response before passing that same
-  // Response to Bun.write() poisons Bun.write's internal fast path and
-  // causes it to hang indefinitely streaming the body — reproduced in
-  // isolation against both a synthetic Buffer-backed Response and a real
-  // network-backed Response, independent of the test runner. Checking
-  // `res.ok` alone does not trigger it, and a bad/empty download is still
-  // caught safely downstream by the SHA-256 checksum verification in
-  // downloadAndStage, so no coverage is lost by dropping the `.body` check.
   if (!res.ok) throw new Error(`Download failed (${res.status}): ${url}`);
-  await Bun.write(destPath, res);
+  // Buffer fully in memory rather than streaming via Bun.write(destPath,
+  // res). A prior version of this function tried exactly that streaming
+  // approach and, based on limited testing, believed it worked — it did
+  // not: Bun.write(dest, res) hangs indefinitely in this Bun version
+  // (1.3.14) when `res` is a real network Response for a REAL compiled
+  // executable's byte content, served from a genuinely separate OS
+  // process. This was only caught by manually running a real compiled
+  // binary through the real self-relaunch flow — no combination of
+  // in-process Bun.serve()+fetch(), a synthetic buffer of any size, or
+  // cross-process serving of a synthetic buffer reproduces it; only real
+  // executable content served cross-process does (see the regression test
+  // in server/__tests__/updater.test.ts, which compiles a real binary at
+  // test time specifically to reproduce this reliably). Release archives
+  // are tens of MB, not gigabytes, so full buffering is an acceptable,
+  // deliberate tradeoff — do not attempt to "optimize" this back to
+  // streaming without first proving the fix against a real compiled
+  // binary served from a real separate process, not just a mocked Response.
+  const buf = await res.arrayBuffer();
+  await Bun.write(destPath, buf);
 }
 
 // `release.version` is derived from the configured repo's GitHub release

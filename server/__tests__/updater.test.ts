@@ -341,6 +341,107 @@ describe('downloadAndStage', () => {
     expect(existsSync(join(stagingDir, 'out', 'index.html'))).toBe(true);
   });
 
+  it('downloads a real release from a genuinely separate server process (regression test: a prior downloadToFile implementation hung indefinitely when the downloaded content was a REAL compiled Bun executable served from a genuinely separate OS process — reproduced 3/3 times under exactly these conditions during manual end-to-end testing of a real build. Neither payload size nor cross-process networking alone reproduces it: an in-process Bun.serve()+fetch() loopback never hangs regardless of size or content, and even genuine cross-process serving of a large SYNTHETIC buffer never hangs — only a real compiled-executable\'s actual byte content, served cross-process, does. This is exactly the combination every other test in this file — and the original "verification" of this exact bug two review rounds ago — used a weaker substitute for, which is how it slipped through 756 passing tests twice.)', async () => {
+    const assetName = `filenet-${targetName(process.platform, process.arch)}.zip`;
+
+    const dir = mkdtempSync(join(tmpdir(), 'filenet-realfetch-'));
+    tmpDirs.push(dir);
+
+    // Compile a genuinely real (tiny) Bun executable to get real
+    // executable byte content — a synthetic buffer of the same or even
+    // much larger size does not reproduce the hang; only real compiled
+    // binary content does (see the test name for why this was verified,
+    // not assumed).
+    const trivialScriptPath = join(dir, 'trivial.ts');
+    writeFileSync(trivialScriptPath, 'console.log("hi");');
+    const realBinaryPath = join(dir, 'real-binary');
+    const compileProc = Bun.spawn({
+      cmd: ['bun', 'build', '--compile', '--outfile', realBinaryPath, trivialScriptPath],
+      stdout: 'ignore',
+      stderr: 'inherit',
+    });
+    await compileProc.exited;
+    const realBinaryBytes = readFileSync(realBinaryPath);
+
+    const zip = new JSZip();
+    zip.file('filenet', realBinaryBytes);
+    const zipBuf = await zip.generateAsync({ type: 'nodebuffer' });
+    const hash = createHash('sha256').update(zipBuf).digest('hex');
+    const sumsText = `${hash}  ${assetName}\n`;
+
+    const zipOnDiskPath = join(dir, assetName);
+    writeFileSync(zipOnDiskPath, zipBuf);
+    const sumsOnDiskPath = join(dir, 'SHA256SUMS.txt');
+    writeFileSync(sumsOnDiskPath, sumsText);
+
+    // Serve from a genuinely separate `bun` process, not an in-process
+    // Bun.serve() — real cross-process networking (as a real GitHub
+    // download always is) is the other half of the reproduction
+    // condition, alongside the real binary content above.
+    const serverScriptPath = join(dir, 'server.ts');
+    writeFileSync(
+      serverScriptPath,
+      [
+        'const server = Bun.serve({',
+        '  port: 0,',
+        '  fetch(req) {',
+        '    const url = new URL(req.url);',
+        `    if (url.pathname === '/asset.zip') return new Response(Bun.file(process.env.ZIP_PATH!));`,
+        `    if (url.pathname === '/sums.txt') return new Response(Bun.file(process.env.SUMS_PATH!));`,
+        `    return new Response('not found', { status: 404 });`,
+        '  },',
+        '});',
+        `console.log('LISTENING:' + server.port);`,
+      ].join('\n'),
+    );
+
+    const serverProc = Bun.spawn({
+      cmd: ['bun', serverScriptPath],
+      env: { ...process.env, ZIP_PATH: zipOnDiskPath, SUMS_PATH: sumsOnDiskPath },
+      stdout: 'pipe',
+      stderr: 'inherit',
+    });
+
+    try {
+      const reader = serverProc.stdout.getReader();
+      let output = '';
+      let port: number | null = null;
+      const deadline = Date.now() + 5000;
+      while (port === null) {
+        if (Date.now() > deadline) throw new Error('server process did not start in time');
+        const { value, done } = await reader.read();
+        if (done) throw new Error('server process exited before reporting a port');
+        output += new TextDecoder().decode(value);
+        const match = output.match(/LISTENING:(\d+)/);
+        if (match) port = Number(match[1]);
+      }
+      reader.releaseLock();
+
+      const release = {
+        version: '9.9.9',
+        notesUrl: '',
+        assets: [
+          { name: assetName, url: `http://localhost:${port}/asset.zip` },
+          { name: 'SHA256SUMS.txt', url: `http://localhost:${port}/sums.txt` },
+        ],
+      };
+
+      const stagingRoot = mkdtempSync(join(tmpdir(), 'filenet-stage-'));
+      tmpDirs.push(stagingRoot);
+
+      // Deliberately omit the fetchImpl argument — real global fetch
+      // against the real separate server process above, not a mocked
+      // Response, which is the one thing every other test in this
+      // describe block does not do.
+      const stagingDir = await downloadAndStage(release, stagingRoot);
+
+      expect(existsSync(join(stagingDir, 'filenet'))).toBe(true);
+      expect(statSync(join(stagingDir, 'filenet')).size).toBe(realBinaryBytes.length);
+    } finally {
+      serverProc.kill();
+    }
+  }, 30_000); // includes a real `bun build --compile` invocation, not just I/O
+
   it('throws and cleans up when the checksum does not match', async () => {
     const { targetName } = await import('../updater');
     const assetName = `filenet-${targetName(process.platform, process.arch)}.zip`;
