@@ -281,17 +281,20 @@ export function applyUpdateSwap(stagingDir: string, installDir: string): void {
   // half-updated, possibly non-functional install.
   for (const old of oldPaths) rmSync(old, { recursive: true, force: true });
 
-  // Best-effort only: on Windows a process cannot delete its own current
-  // working directory (which is what stagingDir is, for the --finish-update
-  // child that calls this function), so this can throw a sharing-violation
-  // error even though the swap above fully succeeded. A leftover staging
-  // dir is harmless: downloadAndStage's stale-version cleanup will remove it
-  // whenever a future update check actually stages a newer version (that
-  // cleanup doesn't run on every check — only when downloadAndStage itself
-  // runs), so it may persist indefinitely if this is the last update ever
-  // applied. A human can also delete .filenet-update/<version>/ by hand if
-  // that ever matters. Either way, failing to remove it here must never
-  // block the relaunch that already succeeded at swapping the real files.
+  // Best-effort only: on Windows, stagingDir can still contain the staged
+  // binary that backs the currently-running --finish-update process image
+  // (copyFileSync, used for the win32 binary swap above, copies rather than
+  // moves it — see the comment on that branch), and deleting a directory
+  // that contains a locked, currently-executing file can throw a
+  // sharing-violation error even though the swap above fully succeeded. A
+  // leftover staging dir is harmless: downloadAndStage's stale-version
+  // cleanup will remove it whenever a future update check actually stages a
+  // newer version (that cleanup doesn't run on every check — only when
+  // downloadAndStage itself runs), so it may persist indefinitely if this
+  // is the last update ever applied. A human can also delete
+  // .filenet-update/<version>/ by hand if that ever matters. Either way,
+  // failing to remove it here must never block the relaunch that already
+  // succeeded at swapping the real files.
   try {
     rmSync(stagingDir, { recursive: true, force: true });
   } catch {
