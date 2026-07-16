@@ -45,6 +45,30 @@ describe('compareVersions', () => {
   it('returns negative when the first version is older', () => {
     expect(compareVersions('1.2.3', '1.2.4')).toBeLessThan(0);
   });
+
+  it('throws for a version string with a prerelease suffix', () => {
+    expect(() => compareVersions('0.2.0-beta.1', '0.1.0')).toThrow(
+      /Cannot compare non-semver version strings/,
+    );
+  });
+
+  it('throws for a version string with a non-numeric prefix (e.g. a fork tag)', () => {
+    expect(() => compareVersions('release-0.2.0', '0.1.0')).toThrow(
+      /Cannot compare non-semver version strings/,
+    );
+  });
+
+  it('throws for a version string with fewer than 3 numeric parts', () => {
+    expect(() => compareVersions('1.2', '1.2.3')).toThrow(
+      /Cannot compare non-semver version strings/,
+    );
+  });
+
+  it('throws when the second argument is malformed, even if the first is valid', () => {
+    expect(() => compareVersions('1.2.3', 'not-a-version')).toThrow(
+      /Cannot compare non-semver version strings/,
+    );
+  });
 });
 
 describe('isNewerVersion', () => {
@@ -880,6 +904,19 @@ describe('createUpdateManager', () => {
     expect(state.error).toContain('network down');
   });
 
+  it('surfaces a malformed release version from the update repo as phase "error"', async () => {
+    const manager = createUpdateManager({
+      mode: 'binary',
+      currentVersion: '0.1.0',
+      installDir: '/install',
+      getRepo: async () => 'geoffoliver/filenet',
+      fetchImpl: fakeFetch('release-0.2.0'),
+    });
+    const state = await manager.checkNow();
+    expect(state.phase).toBe('error');
+    expect(state.error).toContain('Cannot compare non-semver version strings');
+  });
+
   it('guards against overlapping checkNow() calls performing two download cycles', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'filenet-mgr-'));
     try {
@@ -993,6 +1030,164 @@ describe('createUpdateManager', () => {
       expect(second.phase).toBe('ready');
       expect(second.latestVersion).toBe('0.2.0');
       expect(assetFetchCount).toBe(1);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('keeps phase "ready" when a later check fails transiently after an update is already staged', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'filenet-mgr-'));
+    try {
+      const target = (await import('../updater')).targetName(process.platform, process.arch);
+      const assetName = `filenet-${target}.zip`;
+      const zip = new JSZip();
+      zip.file('filenet', 'bin');
+      const zipBuf = await zip.generateAsync({ type: 'nodebuffer' });
+      const hash = createHash('sha256').update(zipBuf).digest('hex');
+
+      let fetchImpl: typeof fetch = (async (url: string) => {
+        if (url.includes('/releases/latest')) {
+          return new Response(
+            JSON.stringify({
+              tag_name: 'v0.2.0',
+              html_url: 'https://example.com',
+              assets: [
+                { name: assetName, browser_download_url: 'https://example.com/asset.zip' },
+                { name: 'SHA256SUMS.txt', browser_download_url: 'https://example.com/sums.txt' },
+              ],
+            }),
+            { status: 200 },
+          );
+        }
+        if (url === 'https://example.com/asset.zip')
+          return new Response(new Uint8Array(zipBuf), { status: 200 });
+        if (url === 'https://example.com/sums.txt') {
+          return new Response(`${hash}  ${assetName}\n`, { status: 200 });
+        }
+        throw new Error(`Unexpected URL: ${url}`);
+      }) as unknown as typeof fetch;
+
+      const manager = createUpdateManager({
+        mode: 'binary',
+        currentVersion: '0.1.0',
+        installDir: dir,
+        getRepo: async () => 'geoffoliver/filenet',
+        fetchImpl: ((...args: Parameters<typeof fetch>) =>
+          fetchImpl(...args)) as unknown as typeof fetch,
+      });
+
+      // First check: succeeds and lands on phase "ready" with a staged update.
+      const first = await manager.checkNow();
+      expect(first.phase).toBe('ready');
+      expect(first.latestVersion).toBe('0.2.0');
+
+      // Second check: simulate a transient failure (e.g. offline, GitHub
+      // rate-limited) on a LATER check that runs after the update is already
+      // staged. This must not clobber the still-valid staged update.
+      fetchImpl = (async () => {
+        throw new Error('network down (transient)');
+      }) as unknown as typeof fetch;
+
+      const second = await manager.checkNow();
+      expect(second.phase).toBe('ready');
+      expect(second.latestVersion).toBe('0.2.0');
+      expect(second.error).toBeNull();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('restores the OLD staged version (not the newly-discovered one) when a newer release is found but downloadAndStage fails', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'filenet-mgr-'));
+    try {
+      const target = (await import('../updater')).targetName(process.platform, process.arch);
+      const assetName = `filenet-${target}.zip`;
+      const zip = new JSZip();
+      zip.file('filenet', 'bin');
+      const zipBuf = await zip.generateAsync({ type: 'nodebuffer' });
+      const hash = createHash('sha256').update(zipBuf).digest('hex');
+
+      // First check: stages 0.2.0 successfully via a working fetchImpl.
+      let fetchImpl: typeof fetch = (async (url: string) => {
+        if (url.includes('/releases/latest')) {
+          return new Response(
+            JSON.stringify({
+              tag_name: 'v0.2.0',
+              html_url: 'https://example.com/0.2.0',
+              assets: [
+                { name: assetName, browser_download_url: 'https://example.com/asset-0.2.0.zip' },
+                {
+                  name: 'SHA256SUMS.txt',
+                  browser_download_url: 'https://example.com/sums-0.2.0.txt',
+                },
+              ],
+            }),
+            { status: 200 },
+          );
+        }
+        if (url === 'https://example.com/asset-0.2.0.zip')
+          return new Response(new Uint8Array(zipBuf), { status: 200 });
+        if (url === 'https://example.com/sums-0.2.0.txt') {
+          return new Response(`${hash}  ${assetName}\n`, { status: 200 });
+        }
+        throw new Error(`Unexpected URL: ${url}`);
+      }) as unknown as typeof fetch;
+
+      const manager = createUpdateManager({
+        mode: 'binary',
+        currentVersion: '0.1.0',
+        installDir: dir,
+        getRepo: async () => 'geoffoliver/filenet',
+        fetchImpl: ((...args: Parameters<typeof fetch>) =>
+          fetchImpl(...args)) as unknown as typeof fetch,
+      });
+
+      const first = await manager.checkNow();
+      expect(first.phase).toBe('ready');
+      expect(first.latestVersion).toBe('0.2.0');
+      expect(first.releaseNotesUrl).toBe('https://example.com/0.2.0');
+
+      // Second check: release metadata now reports a genuinely NEWER version
+      // (0.3.0) — fetchLatestRelease succeeds — but the asset download that
+      // downloadAndStage attempts afterward fails (simulating a checksum
+      // mismatch/interrupted download/missing asset, all plausible transient
+      // failures). The still-valid 0.2.0 staging dir on disk is untouched.
+      fetchImpl = (async (url: string) => {
+        if (url.includes('/releases/latest')) {
+          return new Response(
+            JSON.stringify({
+              tag_name: 'v0.3.0',
+              html_url: 'https://example.com/0.3.0',
+              assets: [
+                { name: assetName, browser_download_url: 'https://example.com/asset-0.3.0.zip' },
+                {
+                  name: 'SHA256SUMS.txt',
+                  browser_download_url: 'https://example.com/sums-0.3.0.txt',
+                },
+              ],
+            }),
+            { status: 200 },
+          );
+        }
+        if (url === 'https://example.com/asset-0.3.0.zip')
+          return new Response(new Uint8Array(zipBuf), { status: 200 });
+        if (url === 'https://example.com/sums-0.3.0.txt') {
+          // Checksum mismatch: an empty checksums file has no matching line,
+          // so verifySha256 returns false and downloadAndStage throws.
+          return new Response('', { status: 200 });
+        }
+        throw new Error(`Unexpected URL: ${url}`);
+      }) as unknown as typeof fetch;
+
+      const second = await manager.checkNow();
+      expect(second.phase).toBe('ready');
+      // The bug: this used to be '0.3.0' (the never-actually-staged version
+      // that fetchLatestRelease discovered), even though what's physically
+      // staged on disk — and what applyAndRestart() would actually install —
+      // is still 0.2.0.
+      expect(second.latestVersion).toBe('0.2.0');
+      expect(second.releaseNotesUrl).toBe('https://example.com/0.2.0');
+      expect(second.error).toBeNull();
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

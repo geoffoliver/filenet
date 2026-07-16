@@ -11,7 +11,22 @@ import { dirname, join, resolve, sep } from 'node:path';
 
 import { hashFile } from './indexer';
 
+// Matches scripts/cut-release.ts's bumpVersion regex exactly: this project's
+// own releases only ever produce a 3-part non-negative-integer version. Any
+// other shape (a prerelease suffix like '0.2.0-beta.1', a non-numeric prefix
+// like 'release-0.2.0', or a partial version like '1.2') is untrusted input —
+// updateRepo is user/fork-configurable, so this string comes from whatever
+// repo the user pointed at — and must be rejected rather than silently
+// coerced via Number(), which turns non-numeric segments into NaN. NaN
+// comparisons (`NaN - NaN`, `NaN > 0`) evaluate such that the version would
+// be silently treated as OLDER than current, permanently hiding a real
+// update with no error or log.
+const VERSION_PATTERN = /^\d+\.\d+\.\d+$/;
+
 export function compareVersions(a: string, b: string): number {
+  if (!VERSION_PATTERN.test(a) || !VERSION_PATTERN.test(b)) {
+    throw new Error(`Cannot compare non-semver version strings: "${a}" vs "${b}"`);
+  }
   const pa = a.split('.').map(Number);
   const pb = b.split('.').map(Number);
   for (let i = 0; i < 3; i++) {
@@ -422,7 +437,10 @@ export function createUpdateManager(opts: UpdateManagerOptions): UpdateManager {
     if (state.phase === 'checking' || state.phase === 'downloading') {
       return getState();
     }
-    const alreadyReadyVersion = state.phase === 'ready' ? state.latestVersion : null;
+    const alreadyReady =
+      state.phase === 'ready'
+        ? { version: state.latestVersion, notesUrl: state.releaseNotesUrl }
+        : null;
 
     state = { ...state, phase: 'checking', error: null };
     try {
@@ -445,7 +463,7 @@ export function createUpdateManager(opts: UpdateManagerOptions): UpdateManager {
       // Already staged and ready for this exact version — avoid re-staging
       // (and re-downloading) on every periodic tick; this also shrinks the
       // race window the guard above closes.
-      if (alreadyReadyVersion === release.version) {
+      if (alreadyReady?.version === release.version) {
         state = { ...state, phase: 'ready', lastCheckedAt: now };
         return getState();
       }
@@ -468,7 +486,33 @@ export function createUpdateManager(opts: UpdateManagerOptions): UpdateManager {
       state = { ...state, phase: 'ready' };
       return getState();
     } catch (err) {
-      state = { ...state, phase: 'error', error: err instanceof Error ? err.message : String(err) };
+      const message = err instanceof Error ? err.message : String(err);
+      if (alreadyReady && stagingDir) {
+        // A transient failure on a check that ran AFTER an update was already
+        // staged (periodic re-check, or a manual click while ready) must not
+        // clobber phase: 'ready' — the staged update on disk is still fully
+        // valid and applicable; losing this would silently hide the Restart
+        // button for something that has nothing actually wrong with it.
+        //
+        // Restore latestVersion/releaseNotesUrl explicitly too, not just
+        // phase: if this check attempt got far enough to discover a genuinely
+        // newer release before downloadAndStage failed (see the 'available'
+        // branch above), state.latestVersion/releaseNotesUrl were already
+        // overwritten to describe that NEW, never-actually-staged version.
+        // stagingDir (the closure variable) still points at the OLD staged
+        // directory, so the restored state must describe exactly what's
+        // physically on disk — the OLD version — not what this failed
+        // attempt merely discovered.
+        console.error('Update check failed (staged update remains ready):', message);
+        state = {
+          ...state,
+          phase: 'ready',
+          latestVersion: alreadyReady.version,
+          releaseNotesUrl: alreadyReady.notesUrl,
+        };
+        return getState();
+      }
+      state = { ...state, phase: 'error', error: message };
       return getState();
     }
   }
