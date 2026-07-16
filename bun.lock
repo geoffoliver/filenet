@@ -5,6 +5,7 @@
     "": {
       "name": "filenet",
       "dependencies": {
+        "chokidar": "^5.0.0",
         "drizzle-orm": "^0.45.2",
         "exifr": "^7.1.3",
         "jszip": "^3.10.1",
