@@ -563,6 +563,49 @@ function NetworkingSection({ initial }: { initial: Settings }) {
   );
 }
 
+// ── Startup section ───────────────────────────────────────────────────────────
+
+function StartupSection({ initial }: { initial: Settings }) {
+  const [autoOpen, setAutoOpen] = useState(initial.autoOpenBrowser);
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [error, setError] = useState('');
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setSaving(true);
+    setError('');
+    setSaved(false);
+    patchSettings({ autoOpenBrowser: autoOpen })
+      .then(() => {
+        setSaved(true);
+        setTimeout(() => setSaved(false), 2000);
+      })
+      .catch((err: Error) => setError(err.message))
+      .finally(() => setSaving(false));
+  }
+
+  return (
+    <Section title="Startup">
+      <form className={styles.form} onSubmit={handleSubmit}>
+        <label className={styles.toggle}>
+          <input
+            type="checkbox"
+            checked={autoOpen}
+            onChange={(e) => setAutoOpen(e.target.checked)}
+          />
+          <span>Automatically open the app in your browser on start</span>
+        </label>
+
+        {error && <p className={styles.error}>{error}</p>}
+        <div className={styles.formFooter}>
+          <SaveButton saving={saving} saved={saved} />
+        </div>
+      </form>
+    </Section>
+  );
+}
+
 // ── Maintenance section ───────────────────────────────────────────────────────
 
 function MaintenanceSection() {
@@ -871,6 +914,7 @@ export default function SettingsView() {
       <PrivacySection initial={settings} />
       <FilesSection initial={settings} envConfig={envConfig} />
       <NetworkingSection initial={settings} />
+      <StartupSection initial={settings} />
       <ScriptsSection />
       <MaintenanceSection />
       <UpdatesSection />
