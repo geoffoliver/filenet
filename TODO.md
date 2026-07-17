@@ -183,5 +183,5 @@
   - [x] Incoming friend requests that need approval — desktop `Notification` API with an in-app toast fallback, persistent count badge on the Friends nav link, `localStorage`-deduped so a request only notifies once (with pruning so a friend re-entering the pending state under the same id notifies again); explicit opt-in via a new "Notifications" section in Settings (browsers require a real click to grant permission)
   - [x] When updates are available/ready to install — desktop notification with toast fallback, fires once per version reaching "ready" (`app/hooks/useUpdateNotifications.ts`)
   - [ ] Other things?
-- [ ] Auto-open browser on app start (setting, defaults to true)
+- [x] Auto-open browser on app start (setting, defaults to true)
 - [ ] GitHub "Pages" page (light and dark mode, include screenshots, "docs" section for installation, configuration, etc. with screenshot examples)
