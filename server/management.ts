@@ -333,9 +333,15 @@ export function createManagementFetch(deps: ManagementDeps): (req: Request) => P
             // blocking-with-spinner UX of that button; both the setup
             // wizard and Settings already show a saving/spinner state while
             // this request is in flight, so no client changes are needed.
+            // Sync the watcher's folder set first: if a folder was removed,
+            // this stops the watcher from touching files under it before
+            // scanAndIndex runs, so removeStaleEntries (which uses a
+            // scanStart captured at the start of the scan) isn't racing a
+            // live watcher event that would bump lastSeenAt past scanStart
+            // and delay the removal to the next scan cycle.
             const folders = parseSharedFolders(updated.sharedFolders);
-            await scanAndIndex(db, folders);
             watcher?.syncFolders(folders);
+            await scanAndIndex(db, folders);
           }
           return Response.json(sanitizeSettings(updated));
         }
