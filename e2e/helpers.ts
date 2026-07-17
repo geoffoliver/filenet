@@ -18,6 +18,7 @@ export const SETTINGS = {
   listenPort: 7734,
   updateRepo: 'geoffoliver/filenet',
   updateCheckIntervalMinutes: 1440,
+  autoOpenBrowser: true,
 };
 
 export const UPDATE_STATUS_IDLE = {
