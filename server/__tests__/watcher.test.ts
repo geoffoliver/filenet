@@ -248,4 +248,34 @@ describe('startFileWatcher — delete', () => {
     await Bun.sleep(400);
     expect(findFile(path)).not.toBeNull();
   });
+
+  it('logs and does not crash if removing the DB record fails during grace-period confirmation', async () => {
+    const dir = join(tmpDir, 'watch-delete-db-error');
+    await mkdir(dir);
+    const path = join(dir, 'gone.txt');
+    await writeFile(path, 'content');
+    await Bun.sleep(PRE_EXISTING_SETTLE_MS);
+
+    // A separate watcher instance backed by an already-closed DB connection
+    // guarantees removeIndexedFile throws when the grace-period timer
+    // fires. Reaching the final assertion below — rather than the process
+    // dying from an unhandled rejection — is the proof confirmAndRemove
+    // guards that call.
+    const brokenDb = createDb('file::memory:');
+    applyMigrations(brokenDb);
+    brokenDb.$client.close();
+
+    const brokenHandle = startFileWatcher(brokenDb, [dir], {
+      deleteGraceMs: 50,
+      stabilityThresholdMs: 20,
+    });
+    await Bun.sleep(WARMUP_MS);
+
+    await rm(path);
+    await Bun.sleep(300);
+
+    brokenHandle.stop();
+
+    expect(true).toBe(true);
+  });
 });

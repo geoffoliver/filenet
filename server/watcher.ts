@@ -77,7 +77,14 @@ async function confirmAndRemove(db: Db, path: string): Promise<void> {
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code;
     if (code === 'ENOENT') {
-      await removeIndexedFile(db, path);
+      try {
+        await removeIndexedFile(db, path);
+      } catch (removeErr) {
+        // This runs fire-and-forget from a setTimeout callback (see
+        // `void confirmAndRemove(...)` below) — an uncaught rejection here
+        // would be an unhandled promise rejection that crashes the process.
+        console.error(`File watcher: failed to remove deleted file ${path} from index:`, removeErr);
+      }
     } else {
       console.error(`File watcher: failed to confirm deletion of ${path}:`, err);
     }
