@@ -6,7 +6,12 @@ import { tmpdir } from 'node:os';
 import { unlinkSync } from 'fs';
 
 import { type Db, applyMigrations, createDb } from '../db';
-import { type FileWatcherHandle, type FileWatcherOptions, startFileWatcher } from '../watcher';
+import {
+  type FileWatcherHandle,
+  type FileWatcherOptions,
+  isIgnoredPath,
+  startFileWatcher,
+} from '../watcher';
 import { sharedFiles } from '../schema';
 
 const TEST_DB_URL = 'file:./data/test-watcher.db';
@@ -81,6 +86,40 @@ beforeEach(() => {
 afterEach(() => {
   handle?.stop();
   handle = null;
+});
+
+describe('isIgnoredPath', () => {
+  // Pure-logic tests, deterministic on any OS: chokidar always hands
+  // `ignored` a forward-slash-normalized path (even on Windows), while a
+  // configured folder can still be backslash-based if the app is running
+  // on Windows. These exercise that exact mismatch without needing an
+  // actual Windows machine.
+  it('does not ignore the watched root itself, given a Windows-style backslash folder', () => {
+    expect(isIgnoredPath('C:/Users/geoff/Movies', ['C:\\Users\\geoff\\Movies'])).toBe(false);
+  });
+
+  it('does not ignore a normal file below a Windows-style watched root', () => {
+    expect(isIgnoredPath('C:/Users/geoff/Movies/song.mp3', ['C:\\Users\\geoff\\Movies'])).toBe(
+      false,
+    );
+  });
+
+  it('ignores a dotfile below a Windows-style watched root', () => {
+    expect(isIgnoredPath('C:/Users/geoff/Movies/.hidden.txt', ['C:\\Users\\geoff\\Movies'])).toBe(
+      true,
+    );
+  });
+
+  it('does not ignore a watched root living under a dotted ancestor', () => {
+    expect(isIgnoredPath('/tmp/.dotted-root/nested', ['/tmp/.dotted-root/nested'])).toBe(false);
+    expect(
+      isIgnoredPath('/tmp/.dotted-root/nested/visible.txt', ['/tmp/.dotted-root/nested']),
+    ).toBe(false);
+  });
+
+  it('ignores a path under no currently-watched folder', () => {
+    expect(isIgnoredPath('/somewhere/else/file.txt', ['/tmp/watched'])).toBe(true);
+  });
 });
 
 describe('startFileWatcher — add/change', () => {

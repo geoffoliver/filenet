@@ -1,5 +1,5 @@
 import { lstat } from 'node:fs/promises';
-import { sep } from 'node:path';
+import { normalize } from 'node:path';
 
 import { type FSWatcher, watch } from 'chokidar';
 
@@ -21,14 +21,26 @@ export interface FileWatcherHandle {
   syncFolders: (folders: string[]) => void;
 }
 
+// chokidar always hands `ignored` a forward-slash-normalized path (its own
+// internal normalizePath()), on every platform — including Windows, where
+// a configured folder path is still backslash-based. Normalize the folder
+// the same way before comparing, or the prefix match below never fires on
+// Windows, silently ignoring everything (verified against chokidar's
+// source: matchPatterns() -> normalizePath() converts `\` to `/` before
+// any `ignored` predicate runs, for both file paths and the watched root).
+function toComparablePath(path: string): string {
+  return normalize(path).replace(/\\/g, '/');
+}
+
 // Mirrors scanDirectory's dotfile skip (server/indexer.ts) — only tests
 // each entry as it recurses, never the configured root folder or anything
 // above it. Strip the matching watched root off first so a shared folder
 // living under a dotted ancestor (e.g. ~/.Movies) isn't wrongly excluded.
-function isIgnoredPath(path: string, folders: Iterable<string>): boolean {
+export function isIgnoredPath(path: string, folders: Iterable<string>): boolean {
   for (const folder of folders) {
-    if (path === folder) return false;
-    const prefix = folder.endsWith(sep) ? folder : folder + sep;
+    const normalizedFolder = toComparablePath(folder);
+    if (path === normalizedFolder) return false;
+    const prefix = normalizedFolder.endsWith('/') ? normalizedFolder : `${normalizedFolder}/`;
     if (path.startsWith(prefix)) {
       return DOTFILE_SEGMENT.test(path.slice(prefix.length));
     }
