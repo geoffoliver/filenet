@@ -520,6 +520,36 @@ describe('startFileWatcher — delete', () => {
     await Bun.sleep(400);
     expect(findFile(path)).not.toBeNull();
   });
+
+  it('logs and does not crash if removing the DB record fails during grace-period confirmation', async () => {
+    const dir = join(tmpDir, 'watch-delete-db-error');
+    await mkdir(dir);
+    const path = join(dir, 'gone.txt');
+    await writeFile(path, 'content');
+    await Bun.sleep(PRE_EXISTING_SETTLE_MS);
+
+    // A separate watcher instance backed by an already-closed DB connection
+    // guarantees removeIndexedFile throws when the grace-period timer
+    // fires. Reaching the final assertion below — rather than the process
+    // dying from an unhandled rejection — is the proof confirmAndRemove
+    // guards that call.
+    const brokenDb = createDb('file::memory:');
+    applyMigrations(brokenDb);
+    brokenDb.$client.close();
+
+    const brokenHandle = startFileWatcher(brokenDb, [dir], {
+      deleteGraceMs: 50,
+      stabilityThresholdMs: 20,
+    });
+    await Bun.sleep(WARMUP_MS);
+
+    await rm(path);
+    await Bun.sleep(300);
+
+    brokenHandle.stop();
+
+    expect(true).toBe(true);
+  });
 });
 ```
 
@@ -612,7 +642,14 @@ async function confirmAndRemove(db: Db, path: string): Promise<void> {
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code;
     if (code === 'ENOENT') {
-      await removeIndexedFile(db, path);
+      try {
+        await removeIndexedFile(db, path);
+      } catch (removeErr) {
+        // This runs fire-and-forget from a setTimeout callback (see
+        // `void confirmAndRemove(...)` below) — an uncaught rejection here
+        // would be an unhandled promise rejection that crashes the process.
+        console.error(`File watcher: failed to remove deleted file ${path} from index:`, removeErr);
+      }
     } else {
       console.error(`File watcher: failed to confirm deletion of ${path}:`, err);
     }
@@ -683,7 +720,7 @@ export function startFileWatcher(
 - [ ] **Step 8: Run to verify the tests pass**
 
 Run: `bun test server/__tests__/watcher.test.ts`
-Expected: PASS (13 tests)
+Expected: PASS (14 tests)
 
 - [ ] **Step 9: Run the full backend suite**
 
@@ -818,7 +855,7 @@ In `server/watcher.ts`, replace the `syncFolders: () => { ... }` stub inside the
 - [ ] **Step 4: Run to verify all watcher tests pass**
 
 Run: `bun test server/__tests__/watcher.test.ts`
-Expected: PASS (17 tests)
+Expected: PASS (18 tests)
 
 - [ ] **Step 5: Run the full backend suite**
 
