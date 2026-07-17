@@ -145,8 +145,20 @@ export function startFileWatcher(
       pendingDeletes.clear();
       void watcher.close();
     },
-    syncFolders: () => {
-      // Implemented in Task 3.
+    syncFolders: (folders: string[]) => {
+      const next = new Set(folders);
+      for (const folder of next) {
+        if (!watched.has(folder)) {
+          watched.add(folder);
+          watcher.add(folder);
+        }
+      }
+      for (const folder of [...watched]) {
+        if (!next.has(folder)) {
+          watched.delete(folder);
+          void watcher.unwatch(folder);
+        }
+      }
     },
   };
 }

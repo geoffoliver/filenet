@@ -279,3 +279,72 @@ describe('startFileWatcher — delete', () => {
     expect(true).toBe(true);
   });
 });
+
+describe('startFileWatcher — syncFolders', () => {
+  it('starts watching a newly added folder', async () => {
+    const dir1 = join(tmpDir, 'sync-add-1');
+    const dir2 = join(tmpDir, 'sync-add-2');
+    await mkdir(dir1);
+    await mkdir(dir2);
+    handle = await startWatcher([dir1]);
+
+    handle.syncFolders([dir1, dir2]);
+    // chokidar's readdir for the newly-added folder needs the same
+    // warm-up as a fresh startFileWatcher() call before writes to it are
+    // guaranteed to be seen as new.
+    await Bun.sleep(WARMUP_MS);
+
+    const path = join(dir2, 'new-folder-file.txt');
+    await writeFile(path, 'content');
+    await waitFor(() => findFile(path) !== null);
+  });
+
+  it('stops watching a removed folder', async () => {
+    const dir1 = join(tmpDir, 'sync-remove-1');
+    const dir2 = join(tmpDir, 'sync-remove-2');
+    await mkdir(dir1);
+    await mkdir(dir2);
+    handle = await startWatcher([dir1, dir2]);
+
+    handle.syncFolders([dir1]);
+    // Give unwatch() a moment to take effect before proving dir2 is ignored.
+    await Bun.sleep(WARMUP_MS);
+
+    const path = join(dir2, 'removed-folder-file.txt');
+    await writeFile(path, 'content');
+    await Bun.sleep(150);
+    expect(findFile(path)).toBeNull();
+  });
+});
+
+describe('startFileWatcher — stop', () => {
+  it('stops indexing after stop() is called', async () => {
+    const dir = join(tmpDir, 'stop-basic');
+    await mkdir(dir);
+    const localHandle = await startWatcher([dir]);
+    localHandle.stop();
+
+    const path = join(dir, 'after-stop.txt');
+    await writeFile(path, 'content');
+    await Bun.sleep(150);
+    expect(findFile(path)).toBeNull();
+  });
+
+  it('cancels pending deletes on stop() without throwing', async () => {
+    const dir = join(tmpDir, 'stop-pending-delete');
+    await mkdir(dir);
+    const localHandle = await startWatcher([dir], { deleteGraceMs: 500, stabilityThresholdMs: 20 });
+    const path = join(dir, 'pending.txt');
+    await writeFile(path, 'content');
+    await waitFor(() => findFile(path) !== null, 2000);
+
+    await rm(path);
+    await Bun.sleep(20); // let the unlink event register a pending timer
+    expect(() => localHandle.stop()).not.toThrow();
+
+    // Wait past what would have been the grace period — record must survive
+    // since stop() cancelled the pending delete.
+    await Bun.sleep(600);
+    expect(findFile(path)).not.toBeNull();
+  });
+});
