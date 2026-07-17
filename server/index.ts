@@ -19,6 +19,7 @@ import { isCompiledBinary, resolveAssetPath } from './runtime-paths';
 import { createUiServer } from './ui-server';
 import { getOrCreateIdentity } from './identity';
 import { pauseAllActiveDownloads } from './download-manager';
+import { startFileWatcher } from './watcher';
 import { startPeriodicRescan } from './indexer';
 import { startReconnectLoop } from './reconnect';
 
@@ -107,6 +108,8 @@ const stopRescan = startPeriodicRescan(
   },
 );
 
+const fileWatcher = startFileWatcher(db, parseSharedFolders(startupSettings.sharedFolders));
+
 const connectPeerFn = (
   address: string,
   port: number,
@@ -126,6 +129,7 @@ const shutdown = () => {
   stopRescan();
   stopReconnect();
   stopUpdateChecks();
+  fileWatcher.stop();
   pauseAllActiveDownloads(db)
     .catch(() => {})
     .finally(() => process.exit(0));
@@ -140,6 +144,7 @@ Bun.serve({
     db,
     connectPeer: connectPeerFn,
     updater: updateManager,
+    watcher: fileWatcher,
     outDir: resolveAssetPath('out', import.meta.dir),
   }),
 });

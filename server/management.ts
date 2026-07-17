@@ -58,6 +58,7 @@ import {
   updateSettings,
 } from './config';
 import type { Db } from './db';
+import type { FileWatcherHandle } from './watcher';
 import type { Identity } from './identity';
 import type { SharedFile } from './schema';
 import type { UpdateManager } from './updater';
@@ -106,10 +107,18 @@ export type ManagementDeps = {
   connectPeer: ConnectPeerFn;
   updater: UpdateManager;
   networkSearch?: typeof initiateNetworkSearch;
+  watcher?: FileWatcherHandle;
 };
 
 export function createManagementFetch(deps: ManagementDeps): (req: Request) => Promise<Response> {
-  const { identity, db, connectPeer, updater, networkSearch = initiateNetworkSearch } = deps;
+  const {
+    identity,
+    db,
+    connectPeer,
+    updater,
+    networkSearch = initiateNetworkSearch,
+    watcher,
+  } = deps;
 
   return async function fetch(req: Request): Promise<Response> {
     const url = new URL(req.url);
@@ -324,7 +333,9 @@ export function createManagementFetch(deps: ManagementDeps): (req: Request) => P
             // blocking-with-spinner UX of that button; both the setup
             // wizard and Settings already show a saving/spinner state while
             // this request is in flight, so no client changes are needed.
-            await scanAndIndex(db, parseSharedFolders(updated.sharedFolders));
+            const folders = parseSharedFolders(updated.sharedFolders);
+            await scanAndIndex(db, folders);
+            watcher?.syncFolders(folders);
           }
           return Response.json(sanitizeSettings(updated));
         }
