@@ -164,6 +164,17 @@ describe('PatchSettingsBodySchema', () => {
     expect(PatchSettingsBodySchema.safeParse({ autoAcceptFromAnyone: 'yes' }).success).toBe(false);
   });
 
+  it('accepts autoOpenBrowser', () => {
+    const r = PatchSettingsBodySchema.safeParse({ autoOpenBrowser: false });
+    expect(r.success).toBe(true);
+    if (!r.success) return;
+    expect(r.data.autoOpenBrowser).toBe(false);
+  });
+
+  it('rejects wrong type for autoOpenBrowser', () => {
+    expect(PatchSettingsBodySchema.safeParse({ autoOpenBrowser: 'yes' }).success).toBe(false);
+  });
+
   it('rejects wrong type for invitePassword', () => {
     expect(PatchSettingsBodySchema.safeParse({ invitePassword: 123 }).success).toBe(false);
   });

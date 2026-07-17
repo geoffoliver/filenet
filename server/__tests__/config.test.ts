@@ -98,6 +98,12 @@ describe('updateSettings', () => {
     const cleared = await updateSettings(db, { invitePassword: null });
     expect(cleared.invitePassword).toBeNull();
   });
+
+  it('updates autoOpenBrowser', async () => {
+    await getOrCreateSettings(db);
+    const updated = await updateSettings(db, { autoOpenBrowser: false });
+    expect(updated.autoOpenBrowser).toBe(false);
+  });
 });
 
 describe('sanitizeSettings', () => {
