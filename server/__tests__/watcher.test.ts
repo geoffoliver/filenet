@@ -203,3 +203,49 @@ describe('startFileWatcher — add/change', () => {
     expect(findFile(path)?.sha256).toHaveLength(64);
   });
 });
+
+describe('startFileWatcher — delete', () => {
+  it('does not remove the record immediately on delete', async () => {
+    const dir = join(tmpDir, 'watch-delete-immediate');
+    await mkdir(dir);
+    handle = await startWatcher([dir]);
+    const path = join(dir, 'gone.txt');
+    await writeFile(path, 'content');
+    await waitFor(() => findFile(path) !== null);
+
+    await rm(path);
+    // Grace period is 50ms (FAST_OPTIONS) — check well before it elapses.
+    await Bun.sleep(10);
+    expect(findFile(path)).not.toBeNull();
+  });
+
+  it('removes the record after the grace period elapses', async () => {
+    const dir = join(tmpDir, 'watch-delete-grace');
+    await mkdir(dir);
+    handle = await startWatcher([dir]);
+    const path = join(dir, 'gone.txt');
+    await writeFile(path, 'content');
+    await waitFor(() => findFile(path) !== null);
+
+    await rm(path);
+    await waitFor(() => findFile(path) === null, 2000);
+  });
+
+  it('keeps the record if the file is recreated within the grace period', async () => {
+    const dir = join(tmpDir, 'watch-delete-recreate');
+    await mkdir(dir);
+    // Longer grace period here so the recreate below reliably lands inside the window.
+    handle = await startWatcher([dir], { deleteGraceMs: 300, stabilityThresholdMs: 20 });
+    const path = join(dir, 'flicker.txt');
+    await writeFile(path, 'content');
+    await waitFor(() => findFile(path) !== null);
+
+    await rm(path);
+    await Bun.sleep(50);
+    await writeFile(path, 'content again');
+
+    // Wait past the original grace window; the record must have survived.
+    await Bun.sleep(400);
+    expect(findFile(path)).not.toBeNull();
+  });
+});

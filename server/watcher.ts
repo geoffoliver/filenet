@@ -3,8 +3,8 @@ import { normalize } from 'node:path';
 
 import { type FSWatcher, watch } from 'chokidar';
 
+import { indexFile, removeIndexedFile } from './indexer';
 import type { Db } from './db';
-import { indexFile } from './indexer';
 
 export const DEFAULT_DELETE_GRACE_MS = 30_000;
 export const DEFAULT_STABILITY_THRESHOLD_MS = 2000;
@@ -69,28 +69,64 @@ async function handleAddOrChange(db: Db, path: string): Promise<void> {
   }
 }
 
+async function confirmAndRemove(db: Db, path: string): Promise<void> {
+  try {
+    await lstat(path);
+    // File exists again — an add/change event already re-indexed it (or
+    // will shortly); nothing to do here.
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === 'ENOENT') {
+      await removeIndexedFile(db, path);
+    } else {
+      console.error(`File watcher: failed to confirm deletion of ${path}:`, err);
+    }
+  }
+}
+
 export function startFileWatcher(
   db: Db,
   folders: string[],
   options: FileWatcherOptions = {},
 ): FileWatcherHandle {
-  const { stabilityThresholdMs = DEFAULT_STABILITY_THRESHOLD_MS } = options;
+  const {
+    deleteGraceMs = DEFAULT_DELETE_GRACE_MS,
+    stabilityThresholdMs = DEFAULT_STABILITY_THRESHOLD_MS,
+  } = options;
 
-  const watcher: FSWatcher = watch([...folders], {
+  const watched = new Set(folders);
+  const pendingDeletes = new Map<string, ReturnType<typeof setTimeout>>();
+
+  function cancelPendingDelete(path: string) {
+    const timer = pendingDeletes.get(path);
+    if (timer !== undefined) {
+      clearTimeout(timer);
+      pendingDeletes.delete(path);
+    }
+  }
+
+  const watcher: FSWatcher = watch([...watched], {
     ignoreInitial: true,
     followSymlinks: false,
-    ignored: (path: string) => isIgnoredPath(path, folders),
+    ignored: (path: string) => isIgnoredPath(path, watched),
     awaitWriteFinish: { stabilityThreshold: stabilityThresholdMs, pollInterval: 20 },
   });
 
   watcher.on('add', (path) => {
+    cancelPendingDelete(path);
     void handleAddOrChange(db, path);
   });
   watcher.on('change', (path) => {
+    cancelPendingDelete(path);
     void handleAddOrChange(db, path);
   });
-  watcher.on('unlink', () => {
-    // Implemented in Task 2.
+  watcher.on('unlink', (path) => {
+    cancelPendingDelete(path);
+    const timer = setTimeout(() => {
+      pendingDeletes.delete(path);
+      void confirmAndRemove(db, path);
+    }, deleteGraceMs);
+    pendingDeletes.set(path, timer);
   });
   watcher.on('error', (err) => {
     console.error('File watcher error:', err);
@@ -98,6 +134,8 @@ export function startFileWatcher(
 
   return {
     stop: () => {
+      for (const timer of pendingDeletes.values()) clearTimeout(timer);
+      pendingDeletes.clear();
       void watcher.close();
     },
     syncFolders: () => {
