@@ -1,4 +1,4 @@
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'bun:test';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, spyOn } from 'bun:test';
 import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
 import { eq } from 'drizzle-orm';
 import { join } from 'node:path';
@@ -271,12 +271,19 @@ describe('startFileWatcher — delete', () => {
     });
     await Bun.sleep(WARMUP_MS);
 
+    const errorSpy = spyOn(console, 'error').mockImplementation(() => {});
     await rm(path);
     await Bun.sleep(300);
 
     brokenHandle.stop();
 
-    expect(true).toBe(true);
+    expect(errorSpy).toHaveBeenCalled();
+    const loggedFailedRemoval = errorSpy.mock.calls.some(
+      (call) => typeof call[0] === 'string' && call[0].includes('failed to remove deleted file'),
+    );
+    expect(loggedFailedRemoval).toBe(true);
+
+    errorSpy.mockRestore();
   });
 });
 

@@ -143,7 +143,7 @@ export function startFileWatcher(
     stop: () => {
       for (const timer of pendingDeletes.values()) clearTimeout(timer);
       pendingDeletes.clear();
-      void watcher.close();
+      watcher.close().catch(() => {});
     },
     syncFolders: (folders: string[]) => {
       const next = new Set(folders);
