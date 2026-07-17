@@ -70,6 +70,11 @@ describe('getOrCreateSettings', () => {
     expect(s.updateRepo).toBe('geoffoliver/filenet');
     expect(s.updateCheckIntervalMinutes).toBe(1440);
   });
+
+  it('defaults autoOpenBrowser to true', async () => {
+    const s = await getOrCreateSettings(db);
+    expect(s.autoOpenBrowser).toBe(true);
+  });
 });
 
 describe('updateSettings', () => {
