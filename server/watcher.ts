@@ -50,13 +50,35 @@ export function isIgnoredPath(path: string, folders: Iterable<string>): boolean 
   return true;
 }
 
+// Cleans up any indexed row for a path handleAddOrChange decided NOT to
+// index (symlink, non-regular file, or vanished before it could be
+// stat'd/read). An add/change event always cancels a pending delete timer
+// for the same path first (see cancelPendingDelete below) — if we then
+// bail out here without indexing, nothing else is left to remove a
+// previously-indexed row at that path, so it would otherwise survive
+// until the next periodic/manual scan. removeIndexedFile is a no-op when
+// no row exists, so calling this unconditionally is safe.
+async function removeStaleRow(db: Db, path: string): Promise<void> {
+  try {
+    await removeIndexedFile(db, path);
+  } catch (err) {
+    console.error(`File watcher: failed to remove stale index row for ${path}:`, err);
+  }
+}
+
 async function handleAddOrChange(db: Db, path: string): Promise<void> {
   try {
     const s = await lstat(path);
-    if (s.isSymbolicLink()) return;
+    if (s.isSymbolicLink()) {
+      await removeStaleRow(db, path);
+      return;
+    }
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code;
-    if (code === 'ENOENT') return;
+    if (code === 'ENOENT') {
+      await removeStaleRow(db, path);
+      return;
+    }
     console.error(`File watcher: failed to stat ${path}:`, err);
     return;
   }
@@ -64,7 +86,10 @@ async function handleAddOrChange(db: Db, path: string): Promise<void> {
     await indexFile(db, path);
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code;
-    if (code === 'ENOENT') return;
+    if (code === 'ENOENT') {
+      await removeStaleRow(db, path);
+      return;
+    }
     console.error(`File watcher: failed to index ${path}:`, err);
   }
 }

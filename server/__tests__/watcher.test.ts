@@ -175,6 +175,29 @@ describe('startFileWatcher — add/change', () => {
     expect(findFile(link)).toBeNull();
   });
 
+  it('removes the stale row when a deleted file is replaced by a symlink before the grace period elapses', async () => {
+    const dir = join(tmpDir, 'watch-delete-then-symlink');
+    await mkdir(dir);
+    handle = await startWatcher([dir], { deleteGraceMs: 1000, stabilityThresholdMs: 20 });
+
+    const target = join(dir, 'target.txt');
+    await writeFile(target, 'target content');
+    await waitFor(() => findFile(target) !== null);
+
+    const path = join(dir, 'flip.txt');
+    await writeFile(path, 'content');
+    await waitFor(() => findFile(path) !== null);
+
+    await rm(path);
+    await symlink(target, path);
+
+    // The symlink's `add` event cancels the pending delete before its
+    // 1000ms grace period would fire. Asserting well before that proves
+    // handleAddOrChange's own stale-row cleanup ran, not just eventual
+    // grace-period cleanup.
+    await waitFor(() => findFile(path) === null, 500);
+  });
+
   it('does not index a dotfile', async () => {
     const dir = join(tmpDir, 'watch-dotfile');
     await mkdir(dir);
