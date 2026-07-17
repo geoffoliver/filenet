@@ -9,6 +9,7 @@ import { type Db, applyMigrations, createDb } from '../db';
 import {
   hashFile,
   indexFile,
+  removeIndexedFile,
   removeStaleEntries,
   scanAndIndex,
   scanDirectory,
@@ -336,6 +337,24 @@ describe('removeStaleEntries', () => {
     expect(removed).toBe(1);
     expect(findFile(protectedPath)).not.toBeNull();
     expect(findFile(otherPath)).toBeNull();
+  });
+});
+
+describe('removeIndexedFile', () => {
+  it('removes the record for the given path', async () => {
+    const path = join(tmpDir, 'remove-indexed.txt');
+    await writeFile(path, 'content');
+    await indexFile(db, path);
+    expect(findFile(path)).not.toBeNull();
+
+    await removeIndexedFile(db, path);
+    expect(findFile(path)).toBeNull();
+  });
+
+  it('is a no-op when no record exists for the path', async () => {
+    const path = join(tmpDir, 'remove-indexed-missing.txt');
+    await removeIndexedFile(db, path);
+    expect(findFile(path)).toBeNull();
   });
 });
 

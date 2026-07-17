@@ -42,7 +42,7 @@
 - [x] Manual rescan trigger (API endpoint)
 - [x] Scan shared folders immediately when they're (re)configured via Settings/setup, instead of relying on the manual trigger or the periodic interval
 - [x] Remove stale index entries for deleted files
-- [ ] Filesystem watcher (inotify/FSEvents/ReadDirectoryChangesW via `fs.watch`) to detect changes reactively instead of relying on the periodic poll — recursive watching isn't reliable on Linux (inotify has no native recursive mode, so subdirectories would need to be watched individually and re-added as new ones appear), needs debouncing, and still needs an initial full scan on first configure; periodic/manual scanning should stay as a fallback safety net rather than being fully replaced
+- [x] Filesystem watcher (inotify/FSEvents/ReadDirectoryChangesW via `fs.watch`) to detect changes reactively instead of relying on the periodic poll — recursive watching isn't reliable on Linux (inotify has no native recursive mode, so subdirectories would need to be watched individually and re-added as new ones appear), needs debouncing, and still needs an initial full scan on first configure; periodic/manual scanning should stay as a fallback safety net rather than being fully replaced
 
 ### Search
 

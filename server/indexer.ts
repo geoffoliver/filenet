@@ -162,6 +162,10 @@ export async function removeStaleEntries(
   return result.changes;
 }
 
+export async function removeIndexedFile(db: Db, path: string): Promise<void> {
+  db.delete(sharedFiles).where(eq(sharedFiles.path, path)).run();
+}
+
 // 35791 * 60_000 ms = 2_147_460_000 ms, just under setTimeout's 32-bit signed limit
 const MAX_RESCAN_INTERVAL_MINUTES = 35791;
 

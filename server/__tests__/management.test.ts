@@ -20,6 +20,7 @@ import {
   sharedFiles,
 } from '../schema';
 import { registerPeer, unregisterPeer } from '../connections';
+import type { FileWatcherHandle } from '../watcher';
 import { createManagementFetch } from '../management';
 import { eq } from 'drizzle-orm';
 import { generateIdentity } from '../identity';
@@ -67,6 +68,17 @@ function makeFakeUpdater(overrides: Partial<UpdateState> = {}): UpdateManager & 
 
 function makeHandler(updater: UpdateManager = makeFakeUpdater()) {
   return createManagementFetch({ identity, db, connectPeer: neverConnect, updater });
+}
+
+function makeFakeWatcher(): FileWatcherHandle & { syncFoldersCalls: string[][] } {
+  const syncFoldersCalls: string[][] = [];
+  return {
+    syncFoldersCalls,
+    stop: () => {},
+    syncFolders: (folders: string[]) => {
+      syncFoldersCalls.push(folders);
+    },
+  };
 }
 
 function req(path: string, options?: RequestInit) {
@@ -867,6 +879,37 @@ describe('PATCH /api/settings', () => {
     const statsRes = await makeHandler()(req('/api/stats'));
     const stats = await statsRes.json();
     expect(stats.sharedFiles.count).toBe(1);
+  });
+
+  it('syncs the file watcher when sharedFolders is patched', async () => {
+    const dir = join(tmpDir, 'settings-watcher-sync');
+    await mkdir(dir);
+    const watcher = makeFakeWatcher();
+    const handler = createManagementFetch({
+      identity,
+      db,
+      connectPeer: neverConnect,
+      updater: makeFakeUpdater(),
+      watcher,
+    });
+
+    const res = await handler(jsonReq('/api/settings', 'PATCH', { sharedFolders: [dir] }));
+    expect(res.status).toBe(200);
+    expect(watcher.syncFoldersCalls).toEqual([[dir]]);
+  });
+
+  it('does not sync the file watcher when sharedFolders is not part of the patch', async () => {
+    const watcher = makeFakeWatcher();
+    const handler = createManagementFetch({
+      identity,
+      db,
+      connectPeer: neverConnect,
+      updater: makeFakeUpdater(),
+      watcher,
+    });
+
+    await handler(jsonReq('/api/settings', 'PATCH', { name: 'Unrelated watcher test' }));
+    expect(watcher.syncFoldersCalls).toEqual([]);
   });
 
   it('does not scan when sharedFolders is not part of the patch', async () => {
