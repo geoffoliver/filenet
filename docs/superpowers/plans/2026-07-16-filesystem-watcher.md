@@ -35,6 +35,7 @@
 - Produces: `export interface FileWatcherHandle { stop: () => void; syncFolders: (folders: string[]) => void }`
 - Produces: `export function startFileWatcher(db: Db, folders: string[], options?: FileWatcherOptions): FileWatcherHandle`
 - Produces: `export const DEFAULT_DELETE_GRACE_MS = 30_000`
+- Produces: `export function isIgnoredPath(path: string, folders: Iterable<string>): boolean` (exported for direct unit testing of the dotfile/root-path exclusion logic, including Windows-style paths, without needing a real Windows machine)
 - Consumes: `indexFile(db, path)` from `server/indexer.ts` (existing, unchanged)
 
 This task implements `add`/`change` handling only. `unlink` handling is a no-op stub (`watcher.on('unlink', () => {})`) until Task 2. `syncFolders`/`stop` get minimal implementations here (`stop` closes the watcher; `syncFolders` is a stub that does nothing) — both are filled in for real in Task 3. This keeps Task 1 focused on proving chokidar works under Bun and that indexing reacts to real filesystem events, which is the risk-reduction step called out in the design doc.
@@ -59,7 +60,12 @@ import { unlinkSync } from 'fs';
 
 import { type Db, applyMigrations, createDb } from '../db';
 import { sharedFiles } from '../schema';
-import { type FileWatcherHandle, type FileWatcherOptions, startFileWatcher } from '../watcher';
+import {
+  type FileWatcherHandle,
+  type FileWatcherOptions,
+  isIgnoredPath,
+  startFileWatcher,
+} from '../watcher';
 
 const TEST_DB_URL = 'file:./data/test-watcher.db';
 let db: Db;
@@ -133,6 +139,40 @@ beforeEach(() => {
 afterEach(() => {
   handle?.stop();
   handle = null;
+});
+
+describe('isIgnoredPath', () => {
+  // Pure-logic tests, deterministic on any OS: chokidar always hands
+  // `ignored` a forward-slash-normalized path (even on Windows), while a
+  // configured folder can still be backslash-based if the app is running
+  // on Windows. These exercise that exact mismatch without needing an
+  // actual Windows machine.
+  it('does not ignore the watched root itself, given a Windows-style backslash folder', () => {
+    expect(isIgnoredPath('C:/Users/geoff/Movies', ['C:\\Users\\geoff\\Movies'])).toBe(false);
+  });
+
+  it('does not ignore a normal file below a Windows-style watched root', () => {
+    expect(isIgnoredPath('C:/Users/geoff/Movies/song.mp3', ['C:\\Users\\geoff\\Movies'])).toBe(
+      false,
+    );
+  });
+
+  it('ignores a dotfile below a Windows-style watched root', () => {
+    expect(isIgnoredPath('C:/Users/geoff/Movies/.hidden.txt', ['C:\\Users\\geoff\\Movies'])).toBe(
+      true,
+    );
+  });
+
+  it('does not ignore a watched root living under a dotted ancestor', () => {
+    expect(isIgnoredPath('/tmp/.dotted-root/nested', ['/tmp/.dotted-root/nested'])).toBe(false);
+    expect(
+      isIgnoredPath('/tmp/.dotted-root/nested/visible.txt', ['/tmp/.dotted-root/nested']),
+    ).toBe(false);
+  });
+
+  it('ignores a path under no currently-watched folder', () => {
+    expect(isIgnoredPath('/somewhere/else/file.txt', ['/tmp/watched'])).toBe(true);
+  });
 });
 
 describe('startFileWatcher — add/change', () => {
@@ -234,7 +274,7 @@ Expected: FAIL — `server/watcher.ts` does not exist yet (module not found).
 
 ```ts
 import { lstat } from 'node:fs/promises';
-import { sep } from 'node:path';
+import { normalize } from 'node:path';
 
 import { type FSWatcher, watch } from 'chokidar';
 
@@ -256,17 +296,32 @@ export interface FileWatcherHandle {
   syncFolders: (folders: string[]) => void;
 }
 
+// chokidar always hands `ignored` a forward-slash-normalized path (its own
+// internal normalizePath()), on every platform — including Windows, where
+// a configured folder path is still backslash-based. Normalize the folder
+// the same way before comparing, or the prefix match below never fires on
+// Windows, silently ignoring everything (verified against chokidar's
+// source: matchPatterns() -> normalizePath() converts `\` to `/` before
+// any `ignored` predicate runs, for both file paths and the watched root).
+function toComparablePath(path: string): string {
+  return normalize(path).replace(/\\/g, '/');
+}
+
 // Mirrors scanDirectory's dotfile skip (server/indexer.ts), which only
 // tests each directory *entry* as it recurses — never the configured root
 // folder or anything above it. Testing chokidar's full absolute path
 // against DOTFILE_SEGMENT directly would diverge from that: a shared
 // folder living under any dotted ancestor (e.g. ~/.Movies) would have
 // every file under it wrongly excluded. Strip the matching watched root
-// off first and only test what's left.
-function isIgnoredPath(path: string, folders: Iterable<string>): boolean {
+// off first and only test what's left. Exported so it can be unit-tested
+// directly with synthetic Windows-style paths without needing an actual
+// Windows machine (chokidar's own path normalization, which this mirrors,
+// is exercised regardless of the OS this test suite runs on).
+export function isIgnoredPath(path: string, folders: Iterable<string>): boolean {
   for (const folder of folders) {
-    if (path === folder) return false;
-    const prefix = folder.endsWith(sep) ? folder : folder + sep;
+    const normalizedFolder = toComparablePath(folder);
+    if (path === normalizedFolder) return false;
+    const prefix = normalizedFolder.endsWith('/') ? normalizedFolder : `${normalizedFolder}/`;
     if (path.startsWith(prefix)) {
       return DOTFILE_SEGMENT.test(path.slice(prefix.length));
     }
@@ -340,7 +395,7 @@ Note: `options.deleteGraceMs` isn't read yet in this task (no-op `unlink` handle
 - [ ] **Step 5: Run the tests to verify they pass**
 
 Run: `bun test server/__tests__/watcher.test.ts`
-Expected: PASS (5 tests)
+Expected: PASS (10 tests)
 
 - [ ] **Step 6: Run the full backend suite to check for regressions**
 
@@ -479,7 +534,7 @@ Replace the full contents of `server/watcher.ts` with:
 
 ```ts
 import { lstat } from 'node:fs/promises';
-import { sep } from 'node:path';
+import { normalize } from 'node:path';
 
 import { type FSWatcher, watch } from 'chokidar';
 
@@ -501,14 +556,26 @@ export interface FileWatcherHandle {
   syncFolders: (folders: string[]) => void;
 }
 
+// chokidar always hands `ignored` a forward-slash-normalized path (its own
+// internal normalizePath()), on every platform — including Windows, where
+// a configured folder path is still backslash-based. Normalize the folder
+// the same way before comparing, or the prefix match below never fires on
+// Windows, silently ignoring everything (verified against chokidar's
+// source: matchPatterns() -> normalizePath() converts `\` to `/` before
+// any `ignored` predicate runs, for both file paths and the watched root).
+function toComparablePath(path: string): string {
+  return normalize(path).replace(/\\/g, '/');
+}
+
 // Mirrors scanDirectory's dotfile skip (server/indexer.ts) — only tests
 // each entry as it recurses, never the configured root folder or anything
 // above it. Strip the matching watched root off first so a shared folder
 // living under a dotted ancestor (e.g. ~/.Movies) isn't wrongly excluded.
-function isIgnoredPath(path: string, folders: Iterable<string>): boolean {
+export function isIgnoredPath(path: string, folders: Iterable<string>): boolean {
   for (const folder of folders) {
-    if (path === folder) return false;
-    const prefix = folder.endsWith(sep) ? folder : folder + sep;
+    const normalizedFolder = toComparablePath(folder);
+    if (path === normalizedFolder) return false;
+    const prefix = normalizedFolder.endsWith('/') ? normalizedFolder : `${normalizedFolder}/`;
     if (path.startsWith(prefix)) {
       return DOTFILE_SEGMENT.test(path.slice(prefix.length));
     }
@@ -616,7 +683,7 @@ export function startFileWatcher(
 - [ ] **Step 8: Run to verify the tests pass**
 
 Run: `bun test server/__tests__/watcher.test.ts`
-Expected: PASS (8 tests)
+Expected: PASS (13 tests)
 
 - [ ] **Step 9: Run the full backend suite**
 
@@ -751,7 +818,7 @@ In `server/watcher.ts`, replace the `syncFolders: () => { ... }` stub inside the
 - [ ] **Step 4: Run to verify all watcher tests pass**
 
 Run: `bun test server/__tests__/watcher.test.ts`
-Expected: PASS (12 tests)
+Expected: PASS (17 tests)
 
 - [ ] **Step 5: Run the full backend suite**
 
