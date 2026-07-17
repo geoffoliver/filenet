@@ -190,7 +190,7 @@ git commit -m "feat: accept autoOpenBrowser in PATCH /api/settings"
 Create `server/__tests__/browser-opener.test.ts`:
 
 ```ts
-import { afterEach, describe, expect, it, spyOn } from 'bun:test';
+import { describe, expect, it, spyOn } from 'bun:test';
 
 import { openBrowser } from '../browser-opener';
 
@@ -208,10 +208,6 @@ function fakeSpawn(
 }
 
 describe('openBrowser', () => {
-  afterEach(() => {
-    // Nothing persists between tests (no module-level state in browser-opener.ts).
-  });
-
   it('spawns "open <url>" on darwin', () => {
     const calls: unknown[] = [];
     openBrowser('http://localhost:3000', { platform: 'darwin', spawnImpl: fakeSpawn(calls) });
