@@ -178,7 +178,7 @@ describe('startFileWatcher — add/change', () => {
   it('removes the stale row when a deleted file is replaced by a symlink before the grace period elapses', async () => {
     const dir = join(tmpDir, 'watch-delete-then-symlink');
     await mkdir(dir);
-    handle = await startWatcher([dir], { deleteGraceMs: 2500, stabilityThresholdMs: 20 });
+    handle = await startWatcher([dir], { deleteGraceMs: 8000, stabilityThresholdMs: 20 });
 
     const target = join(dir, 'target.txt');
     await writeFile(target, 'target content');
@@ -191,16 +191,24 @@ describe('startFileWatcher — add/change', () => {
     await rm(path);
     await symlink(target, path);
 
-    // The symlink's `add` event cancels the pending delete before its
-    // 2500ms grace period would fire. Asserting well before that proves
+    // Replacing a file with a symlink at the same path fires chokidar's
+    // 'change' event here (not 'add' — verified empirically: 20/20 local
+    // trials), which cancels the pending delete before its grace period
+    // fires. Asserting well before the grace period proves
     // handleAddOrChange's own stale-row cleanup ran, not just eventual
-    // grace-period cleanup. The 1500ms margin (vs. the previous 500ms) is
-    // needed because chokidar's awaitWriteFinish polling can be delayed well
-    // past its nominal ~40ms (20ms pollInterval + 20ms stabilityThreshold)
-    // under GitHub Actions' scheduling jitter — this test flaked in CI
-    // (never locally) with the tighter margin, on runs that never touched
-    // this file.
-    await waitFor(() => findFile(path) === null, 1500);
+    // grace-period cleanup.
+    //
+    // The margin here (5000ms, vs. 500ms originally) is deliberately
+    // generous rather than tightly calibrated: this test flaked twice in CI
+    // (never locally, including full-suite runs under load) with smaller
+    // margins (500ms, then 1500ms). The watcher logic itself is correct —
+    // confirmed via isolated repro — so the flake is purely GitHub Actions
+    // shared-runner scheduling variance delaying chokidar's internal
+    // awaitWriteFinish polling, which can't be reproduced or calibrated
+    // locally. If this still flakes with this margin, that's new evidence
+    // the cause isn't scheduling variance and needs fresh investigation
+    // rather than another timeout bump.
+    await waitFor(() => findFile(path) === null, 5000);
   });
 
   it('does not index a dotfile', async () => {
