@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-07-18
+
 ### Fixed
 
 - **Setup wizard and "Rescan now" hung indefinitely on large libraries** — `PATCH /api/settings` (when `sharedFolders` changes) and `POST /api/rescan` used to `await` the full folder scan before responding, so the request stayed open for as long as the scan took. For a library of hundreds of thousands of files, hashing every byte of every file sequentially can take far longer than any HTTP request should stay open for, leaving the setup wizard stuck on "Saving…" with no feedback. Both endpoints now kick off the scan in the background and respond immediately; indexed files show up in Search/Home as the scan makes progress. `POST /api/rescan` returns `202 Accepted` (previously `200` with `{ indexed, removed }` counts) and still returns `409` if a scan is already running.
