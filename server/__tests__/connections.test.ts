@@ -1033,6 +1033,7 @@ describe('connectToPeer — full successful handshake and post-handshake message
       },
     });
 
+    const now = new Date();
     const friendRow = db
       .insert(friends)
       .values({
@@ -1043,8 +1044,8 @@ describe('connectToPeer — full successful handshake and post-handshake message
         address: '127.0.0.1',
         port: server.port!,
         status: 'OUTGOING_PENDING',
-        addedAt: new Date(),
-        updatedAt: new Date(),
+        addedAt: now,
+        updatedAt: now,
       })
       .returning()
       .get()!;
@@ -1125,6 +1126,7 @@ describe('connectToPeer — full successful handshake and post-handshake message
       },
     });
 
+    const now = new Date();
     const friendRow = db
       .insert(friends)
       .values({
@@ -1135,8 +1137,8 @@ describe('connectToPeer — full successful handshake and post-handshake message
         address: '127.0.0.1',
         port: server.port!,
         status: 'OUTGOING_PENDING',
-        addedAt: new Date(),
-        updatedAt: new Date(),
+        addedAt: now,
+        updatedAt: now,
       })
       .returning()
       .get()!;
@@ -1203,6 +1205,7 @@ describe('connectToPeer — full successful handshake and post-handshake message
       },
     });
 
+    const now = new Date();
     const friendRow = db
       .insert(friends)
       .values({
@@ -1213,8 +1216,8 @@ describe('connectToPeer — full successful handshake and post-handshake message
         address: '127.0.0.1',
         port: server.port!,
         status: 'OUTGOING_PENDING',
-        addedAt: new Date(),
-        updatedAt: new Date(),
+        addedAt: now,
+        updatedAt: now,
       })
       .returning()
       .get()!;
