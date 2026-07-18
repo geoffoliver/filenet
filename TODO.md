@@ -7,6 +7,7 @@
 - [x] Ed25519 keypair generation and persistence (Drizzle/SQLite)
 - [x] Node ID derivation (SHA-256 of public key)
 - [x] Public key HTTP endpoint (`GET /pubkey`) — unauthenticated
+- [ ] Remove `GET /pubkey` and `GET /health` — both unauthenticated on the P2P port with zero in-app consumers (confirmed by code search); the WebSocket `hello`/`hello-ack` handshake already delivers and cryptographically proves each peer's public key, so `/pubkey` was never load-bearing. Both endpoints currently let anyone mass-scan the default port and get a stable `nodeId` for free with a bare `curl`. Removing them collapses the pre-handshake surface to nothing — a scanner still sees the port is open, but can no longer fingerprint a node without actually implementing the WS handshake protocol.
 - [x] Sign / verify (Ed25519)
 - [x] Ephemeral X25519 ECDH key exchange
 - [x] Session key derivation (HKDF)
@@ -184,4 +185,6 @@
   - [x] When updates are available/ready to install — desktop notification with toast fallback, fires once per version reaching "ready" (`app/hooks/useUpdateNotifications.ts`)
   - [ ] Other things?
 - [x] Auto-open browser on app start (setting, defaults to true)
+- [ ] Icon/favicon (use 📁 emoji - for both, pretty sure you can do this with an SVG?)
+- [ ] Webmanifest (so people can add it to their desktop/dock/whatever)
 - [ ] GitHub "Pages" page (light and dark mode, include screenshots, "docs" section for installation, configuration, etc. with screenshot examples)

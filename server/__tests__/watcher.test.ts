@@ -178,7 +178,7 @@ describe('startFileWatcher — add/change', () => {
   it('removes the stale row when a deleted file is replaced by a symlink before the grace period elapses', async () => {
     const dir = join(tmpDir, 'watch-delete-then-symlink');
     await mkdir(dir);
-    handle = await startWatcher([dir], { deleteGraceMs: 1000, stabilityThresholdMs: 20 });
+    handle = await startWatcher([dir], { deleteGraceMs: 2500, stabilityThresholdMs: 20 });
 
     const target = join(dir, 'target.txt');
     await writeFile(target, 'target content');
@@ -192,10 +192,15 @@ describe('startFileWatcher — add/change', () => {
     await symlink(target, path);
 
     // The symlink's `add` event cancels the pending delete before its
-    // 1000ms grace period would fire. Asserting well before that proves
+    // 2500ms grace period would fire. Asserting well before that proves
     // handleAddOrChange's own stale-row cleanup ran, not just eventual
-    // grace-period cleanup.
-    await waitFor(() => findFile(path) === null, 500);
+    // grace-period cleanup. The 1500ms margin (vs. the previous 500ms) is
+    // needed because chokidar's awaitWriteFinish polling can be delayed well
+    // past its nominal ~40ms (20ms pollInterval + 20ms stabilityThreshold)
+    // under GitHub Actions' scheduling jitter — this test flaked in CI
+    // (never locally) with the tighter margin, on runs that never touched
+    // this file.
+    await waitFor(() => findFile(path) === null, 1500);
   });
 
   it('does not index a dotfile', async () => {
