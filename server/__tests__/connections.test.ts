@@ -26,6 +26,8 @@ import {
   decodeMessage,
   decryptMessage,
   encodeMessage,
+  encryptMessage,
+  finalizeHandshake,
   generateEphemeralKeypair,
   processHelloAck,
 } from '../handshake';
@@ -38,6 +40,14 @@ import { generateIdentity } from '../identity';
 
 const TEST_DB_URL = 'file:./data/test-connections.db';
 let db: Db;
+
+async function waitFor(check: () => boolean, timeoutMs = 2000): Promise<void> {
+  const start = Date.now();
+  while (!check()) {
+    if (Date.now() - start > timeoutMs) throw new Error('waitFor timed out');
+    await Bun.sleep(20);
+  }
+}
 
 beforeAll(() => {
   db = createDb(TEST_DB_URL);
@@ -982,6 +992,260 @@ describe('connectToPeer — handshake timeout', () => {
       expect(Date.now() - start).toBeLessThan(2_000);
     } finally {
       server.stop(true);
+    }
+  });
+});
+
+describe('connectToPeer — full successful handshake and post-handshake messages', () => {
+  it('registers the peer, resolves with it, updates the matching OUTGOING_PENDING friend row, and sends the friend-request', async () => {
+    const initiator = generateIdentity();
+    const responder = generateIdentity();
+    const receivedByResponder: InnerMessage[] = [];
+    let storedHello: ReturnType<typeof createHello> | undefined;
+    let storedAck: ReturnType<typeof createHelloAck_forTest>['ack'] | undefined;
+    let storedEphemeral: ReturnType<typeof createHelloAck_forTest>['ephemeral'] | undefined;
+    let responderSessionKey: Buffer | null = null;
+
+    const server = Bun.serve({
+      port: 0,
+      fetch(req, srv) {
+        if (srv.upgrade(req)) return undefined;
+        return new Response('Not Found', { status: 404 });
+      },
+      websocket: {
+        message(ws, raw) {
+          const wire = decodeMessage(typeof raw === 'string' ? raw : Buffer.from(raw));
+          if (wire.type === 'hello') {
+            const { ack, ephemeral } = createHelloAck_forTest(responder, wire);
+            storedHello = wire;
+            storedAck = ack;
+            storedEphemeral = ephemeral;
+            ws.send(encodeMessage(ack));
+            return;
+          }
+          if (wire.type === 'encrypted' && storedHello && storedAck && storedEphemeral) {
+            if (!responderSessionKey) {
+              responderSessionKey = finalizeHandshake(
+                responder,
+                storedEphemeral,
+                storedHello,
+                storedAck,
+                Buffer.from(storedHello.publicKey, 'base64'),
+                Buffer.from(wire.payload, 'base64'),
+              );
+              return;
+            }
+            receivedByResponder.push(decryptMessage(wire, responderSessionKey));
+          }
+        },
+      },
+    });
+
+    const now = new Date();
+    const friendRow = db
+      .insert(friends)
+      .values({
+        id: randomUUID(),
+        name: 'Pending Peer',
+        nodeId: null,
+        publicKey: null,
+        address: '127.0.0.1',
+        port: server.port!,
+        status: 'OUTGOING_PENDING',
+        addedAt: now,
+        updatedAt: now,
+      })
+      .returning()
+      .get()!;
+
+    try {
+      const peer = await connectToPeer(initiator, db, '127.0.0.1', server.port!, 7734, {
+        name: 'Initiator Name',
+      });
+      expect(peer.peerNodeId).toBe(responder.nodeId);
+      expect(getConnectedPeer(responder.nodeId)).toBeDefined();
+
+      const updated = db.select().from(friends).where(eq(friends.id, friendRow.id)).get()!;
+      expect(updated.nodeId).toBe(responder.nodeId);
+      expect(updated.publicKey).toBe(responder.publicKey.toString('base64'));
+
+      await waitFor(() => receivedByResponder.length > 0);
+      expect(receivedByResponder).toHaveLength(1);
+      expect(receivedByResponder[0]).toMatchObject({
+        type: 'friend-request',
+        name: 'Initiator Name',
+      });
+    } finally {
+      server.stop(true);
+      unregisterPeer(responder.nodeId);
+    }
+  });
+
+  it('accepts an inbound friend-response after handshake and marks the OUTGOING_PENDING friend ACCEPTED', async () => {
+    const initiator = generateIdentity();
+    const responder = generateIdentity();
+    let storedHello: ReturnType<typeof createHello> | undefined;
+    let storedAck: ReturnType<typeof createHelloAck_forTest>['ack'] | undefined;
+    let storedEphemeral: ReturnType<typeof createHelloAck_forTest>['ephemeral'] | undefined;
+    let responderSessionKey: Buffer | null = null;
+
+    const server = Bun.serve({
+      port: 0,
+      fetch(req, srv) {
+        if (srv.upgrade(req)) return undefined;
+        return new Response('Not Found', { status: 404 });
+      },
+      websocket: {
+        message(ws, raw) {
+          const wire = decodeMessage(typeof raw === 'string' ? raw : Buffer.from(raw));
+          if (wire.type === 'hello') {
+            const { ack, ephemeral } = createHelloAck_forTest(responder, wire);
+            storedHello = wire;
+            storedAck = ack;
+            storedEphemeral = ephemeral;
+            ws.send(encodeMessage(ack));
+            return;
+          }
+          if (
+            wire.type === 'encrypted' &&
+            !responderSessionKey &&
+            storedHello &&
+            storedAck &&
+            storedEphemeral
+          ) {
+            responderSessionKey = finalizeHandshake(
+              responder,
+              storedEphemeral,
+              storedHello,
+              storedAck,
+              Buffer.from(storedHello.publicKey, 'base64'),
+              Buffer.from(wire.payload, 'base64'),
+            );
+            ws.send(
+              encodeMessage(
+                encryptMessage(
+                  { type: 'friend-response', accepted: true, name: 'Responder Name' },
+                  responderSessionKey,
+                ),
+              ),
+            );
+          }
+        },
+      },
+    });
+
+    const now = new Date();
+    const friendRow = db
+      .insert(friends)
+      .values({
+        id: randomUUID(),
+        name: 'Old Name',
+        nodeId: null,
+        publicKey: null,
+        address: '127.0.0.1',
+        port: server.port!,
+        status: 'OUTGOING_PENDING',
+        addedAt: now,
+        updatedAt: now,
+      })
+      .returning()
+      .get()!;
+
+    try {
+      await connectToPeer(initiator, db, '127.0.0.1', server.port!, 7734);
+      let updated: typeof friendRow;
+      await waitFor(() => {
+        updated = db.select().from(friends).where(eq(friends.id, friendRow.id)).get()!;
+        return updated?.status === 'ACCEPTED';
+      });
+      expect(updated!.status).toBe('ACCEPTED');
+      expect(updated!.name).toBe('Responder Name');
+    } finally {
+      server.stop(true);
+      unregisterPeer(responder.nodeId);
+    }
+  });
+
+  it('deletes the friend row and closes the connection on an inbound friend-response with accepted=false', async () => {
+    const initiator = generateIdentity();
+    const responder = generateIdentity();
+    let storedHello: ReturnType<typeof createHello> | undefined;
+    let storedAck: ReturnType<typeof createHelloAck_forTest>['ack'] | undefined;
+    let storedEphemeral: ReturnType<typeof createHelloAck_forTest>['ephemeral'] | undefined;
+    let responderSessionKey: Buffer | null = null;
+
+    const server = Bun.serve({
+      port: 0,
+      fetch(req, srv) {
+        if (srv.upgrade(req)) return undefined;
+        return new Response('Not Found', { status: 404 });
+      },
+      websocket: {
+        message(ws, raw) {
+          const wire = decodeMessage(typeof raw === 'string' ? raw : Buffer.from(raw));
+          if (wire.type === 'hello') {
+            const { ack, ephemeral } = createHelloAck_forTest(responder, wire);
+            storedHello = wire;
+            storedAck = ack;
+            storedEphemeral = ephemeral;
+            ws.send(encodeMessage(ack));
+            return;
+          }
+          if (
+            wire.type === 'encrypted' &&
+            !responderSessionKey &&
+            storedHello &&
+            storedAck &&
+            storedEphemeral
+          ) {
+            responderSessionKey = finalizeHandshake(
+              responder,
+              storedEphemeral,
+              storedHello,
+              storedAck,
+              Buffer.from(storedHello.publicKey, 'base64'),
+              Buffer.from(wire.payload, 'base64'),
+            );
+            ws.send(
+              encodeMessage(
+                encryptMessage({ type: 'friend-response', accepted: false }, responderSessionKey),
+              ),
+            );
+          }
+        },
+      },
+    });
+
+    const now = new Date();
+    const friendRow = db
+      .insert(friends)
+      .values({
+        id: randomUUID(),
+        name: 'Rejected',
+        nodeId: null,
+        publicKey: null,
+        address: '127.0.0.1',
+        port: server.port!,
+        status: 'OUTGOING_PENDING',
+        addedAt: now,
+        updatedAt: now,
+      })
+      .returning()
+      .get()!;
+
+    try {
+      await connectToPeer(initiator, db, '127.0.0.1', server.port!, 7734);
+      await waitFor(
+        () =>
+          db.select().from(friends).where(eq(friends.id, friendRow.id)).get() === undefined &&
+          getConnectedPeer(responder.nodeId) === undefined,
+      );
+      const remaining = db.select().from(friends).where(eq(friends.id, friendRow.id)).get();
+      expect(remaining).toBeUndefined();
+      expect(getConnectedPeer(responder.nodeId)).toBeUndefined();
+    } finally {
+      server.stop(true);
+      unregisterPeer(responder.nodeId);
     }
   });
 });

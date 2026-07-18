@@ -1,6 +1,8 @@
-import { randomUUID } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'bun:test';
+import * as fsPromises from 'node:fs/promises';
+
+import { afterAll, beforeAll, beforeEach, describe, expect, it, mock } from 'bun:test';
 import { existsSync, unlinkSync } from 'fs';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
@@ -13,6 +15,7 @@ import {
   cancelDownload,
   getTransfers,
   pauseDownload,
+  resetActiveDownloadsForTesting,
   resumeDownload,
   startDownload,
 } from '../download-manager';
@@ -57,6 +60,14 @@ async function waitForState(dlId: string, maxMs = 2000) {
     dl = db.select().from(downloads).where(eq(downloads.id, dlId)).get()!;
   }
   return dl;
+}
+
+async function waitFor(check: () => boolean, timeoutMs = 2000): Promise<void> {
+  const start = Date.now();
+  while (!check()) {
+    if (Date.now() - start > timeoutMs) throw new Error('waitFor timed out');
+    await Bun.sleep(20);
+  }
 }
 
 beforeAll(async () => {
@@ -387,6 +398,153 @@ describe('friend download counters', () => {
 
     const notUpdated = db.select().from(friends).where(eq(friends.id, friend.id)).get()!;
     expect(notUpdated.downloadCount).toBe(0);
+  });
+});
+
+describe('pause/cancel races with in-flight chunks', () => {
+  it('discards an in-flight chunk response that lands after pause instead of writing/counting it', async () => {
+    const content = randomBytes(3 * 1024 * 1024); // 3 chunks at CHUNK_SIZE=1MB
+    const hash = sha256(content);
+    const folder = join(tmpDir, 'dl-pause-race');
+    await mkdir(folder, { recursive: true });
+
+    // Chunk 0 resolves almost immediately; chunks 1 and 2 resolve slowly, so
+    // their responses land well after pauseDownload() has already flipped
+    // dl.paused — this is the race the post-await check in downloadChunk
+    // must handle.
+    const requestChunkFn: RequestChunkFn = async (_nodeId, _sha, offset, length) => {
+      await Bun.sleep(offset === 0 ? 10 : 300);
+      return content.subarray(offset, offset + length);
+    };
+
+    const id = await startDownload(
+      db,
+      {
+        sha256: hash,
+        filename: 'race.bin',
+        size: BigInt(content.length),
+        mimeType: null,
+        sources: ['fake-node'],
+        downloadFolder: folder,
+      },
+      requestChunkFn,
+    );
+
+    // Wait for chunk 0 specifically to land (chunks 1 & 2 are still in
+    // flight, per requestChunkFn's delays above) instead of a fixed sleep,
+    // so this isn't timing-dependent under CI scheduling variance.
+    await waitFor(() => {
+      const row = db.select().from(downloads).where(eq(downloads.id, id)).get();
+      return row ? (JSON.parse(row.completedChunks) as number[]).includes(0) : false;
+    });
+    const pausedOk = await pauseDownload(db, id);
+    expect(pausedOk).toBe(true);
+
+    await Bun.sleep(350); // let the slow, already-in-flight responses arrive while paused
+
+    const afterPause = db.select().from(downloads).where(eq(downloads.id, id)).get()!;
+    expect(afterPause.state).toBe('PAUSED');
+    const completedAfterPause: number[] = JSON.parse(afterPause.completedChunks);
+    expect(completedAfterPause).toEqual([0]);
+
+    const resumed = await resumeDownload(db, id, makeChunkServer(content));
+    expect(resumed).toBe(true);
+
+    const dl = await waitForState(id);
+    expect(dl.state).toBe('COMPLETED');
+    const written = await readFile(dl.finalPath!);
+    expect(sha256(written)).toBe(hash);
+  });
+});
+
+describe('resumeDownload after a simulated restart', () => {
+  it('discards stale chunk state and re-downloads everything when the temp file is missing', async () => {
+    const content = randomBytes(3 * 1024 * 1024);
+    const hash = sha256(content);
+    const folder = join(tmpDir, 'dl-restart');
+    await mkdir(folder, { recursive: true });
+
+    const id = await startDownload(
+      db,
+      {
+        sha256: hash,
+        filename: 'restart.bin',
+        size: BigInt(content.length),
+        mimeType: null,
+        sources: ['fake-node'],
+        downloadFolder: folder,
+      },
+      makeSlowChunkServer(content, 300),
+    );
+
+    await Bun.sleep(20);
+    const pausedOk = await pauseDownload(db, id);
+    expect(pausedOk).toBe(true);
+
+    const record = db.select().from(downloads).where(eq(downloads.id, id)).get()!;
+
+    // Simulate a crash/restart: the DB claims two chunks already completed,
+    // but the temp file that would back that claim is gone (e.g. OS temp
+    // dir cleared on reboot), and in-memory state is empty.
+    db.update(downloads)
+      .set({ completedChunks: JSON.stringify([0, 1]), bytesReceived: BigInt(2 * 1024 * 1024) })
+      .where(eq(downloads.id, id))
+      .run();
+    await rm(record.tmpPath!, { force: true });
+    await resetActiveDownloadsForTesting();
+
+    const resumed = await resumeDownload(db, id, makeChunkServer(content));
+    expect(resumed).toBe(true);
+
+    const dl = await waitForState(id);
+    expect(dl.state).toBe('COMPLETED');
+    const written = await readFile(dl.finalPath!);
+    expect(sha256(written)).toBe(hash);
+  });
+});
+
+describe('finalizeDownload cross-device move fallback', () => {
+  it('falls back to copy+delete when rename fails with EXDEV', async () => {
+    const content = Buffer.from('cross device move content');
+    const hash = sha256(content);
+    const folder = join(tmpDir, 'dl-exdev');
+    await mkdir(folder, { recursive: true });
+
+    let renameCalls = 0;
+    await mock.module('node:fs/promises', () => ({
+      ...fsPromises,
+      rename: async () => {
+        renameCalls++;
+        const err = new Error('EXDEV: cross-device link not permitted') as NodeJS.ErrnoException;
+        err.code = 'EXDEV';
+        throw err;
+      },
+    }));
+
+    try {
+      const id = await startDownload(
+        db,
+        {
+          sha256: hash,
+          filename: 'exdev.txt',
+          size: BigInt(content.length),
+          mimeType: null,
+          sources: ['fake-node'],
+          downloadFolder: folder,
+        },
+        makeChunkServer(content),
+      );
+
+      const dl = await waitForState(id);
+      expect(dl.state).toBe('COMPLETED');
+      expect(renameCalls).toBeGreaterThan(0);
+      expect(dl.finalPath).toBeTruthy();
+      expect(existsSync(dl.finalPath!)).toBe(true);
+      const written = await readFile(dl.finalPath!);
+      expect(written.toString()).toBe(content.toString());
+    } finally {
+      mock.restore();
+    }
   });
 });
 
