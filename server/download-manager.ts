@@ -625,6 +625,16 @@ export async function getTransfers(db: Db): Promise<TransferDto[]> {
   });
 }
 
+// ---------------------------------------------------------------------------
+// Test helpers
+// ---------------------------------------------------------------------------
+
+/** @internal – only for use in tests, to simulate a server restart clearing in-memory state */
+export function resetActiveDownloadsForTesting(): void {
+  activeDownloads.clear();
+  activeDownloadFolders.clear();
+}
+
 export async function pauseAllActiveDownloads(db: Db): Promise<void> {
   const ids = [...activeDownloads.keys()];
   await Promise.all(
