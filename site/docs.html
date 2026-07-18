@@ -36,15 +36,26 @@
         <h1>docs</h1>
 
         <h2 id="installation">Installation</h2>
-        <p>Filenet requires <a href="https://bun.sh">Bun</a> ≥ 1.0.</p>
-        <pre><code>git clone https://github.com/geoffoliver/filenet.git
-cd filenet
-bun install</code></pre>
+        <p>Filenet ships as a standalone executable — no separate Node/Bun install required.</p>
+        <ol>
+          <li>
+            Download <code>filenet-bun-&lt;platform&gt;.zip</code> from the
+            <a href="https://github.com/geoffoliver/filenet/releases">Releases</a> page for your
+            platform (<code>linux-x64</code>, <code>linux-arm64</code>, <code>darwin-x64</code>,
+            <code>darwin-arm64</code>, <code>windows-x64</code>).
+          </li>
+          <li>
+            Extract it — you'll get <code>filenet</code> (the executable), an <code>out/</code> folder
+            (the UI), and a <code>drizzle/migrations/</code> folder. Keep these three together.
+          </li>
+          <li>Run the executable from that folder: <code>./filenet</code></li>
+        </ol>
+        <p>
+          Filenet checks for new releases automatically and shows a <strong>Restart to update</strong>
+          button in Settings once one's ready.
+        </p>
 
         <h2 id="running">Running</h2>
-        <p>Build once, then run the server:</p>
-        <pre><code>bun run build
-bun run server</code></pre>
         <p>
           Open <a href="http://localhost:3000">http://localhost:3000</a>. On first launch, the setup
           wizard walks you through configuration.
@@ -72,16 +83,15 @@ bun run server</code></pre>
           </tbody>
         </table>
 
-        <h3>Standalone executable</h3>
+        <h3>Building from source</h3>
         <p>
-          Filenet also ships as a standalone executable with no separate Node/Bun install required.
-          Download
-          <code>filenet-bun-&lt;platform&gt;.zip</code> from the
-          <a href="https://github.com/geoffoliver/filenet/releases">Releases</a>
-          page, extract it, and run <code>./filenet</code> from that folder. Filenet checks for new
-          releases automatically and shows a <strong>Restart to update</strong> button in Settings once
-          one's ready.
+          If you'd rather build it yourself, Filenet requires <a href="https://bun.sh">Bun</a> ≥ 1.0:
         </p>
+        <pre><code>git clone https://github.com/geoffoliver/filenet.git
+cd filenet
+bun install
+bun run build
+bun run server</code></pre>
 
         <h2 id="configuration">Configuration</h2>
         <p>All settings live in the app's <strong>Settings</strong> page:</p>
