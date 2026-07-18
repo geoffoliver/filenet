@@ -2,6 +2,8 @@
 
 A self-hosted, peer-to-peer file sharing and chat application. Users maintain a list of friends and connect to them directly — no central server. All communication (chat, searches, file transfers) happens over encrypted WebSockets.
 
+**[Website & docs →](https://geoffoliver.github.io/filenet/)**
+
 ## Features
 
 - **Friends** — add friends by address/port with optional invite passwords; auto-accept rules
