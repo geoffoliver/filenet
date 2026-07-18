@@ -311,3 +311,34 @@ a {
     text-align: left;
   }
 }
+
+/* ── Screenshots ────────────────────────────────────────────────────────────── */
+.screens {
+  padding: 48px 0;
+}
+
+.screens-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 24px;
+}
+
+.inspection-window {
+  margin: 0;
+  border: 1px solid var(--wire);
+  border-radius: var(--radius);
+  overflow: hidden;
+  background: var(--surface);
+}
+
+.inspection-window img {
+  width: 100%;
+  border-bottom: 1px solid var(--wire);
+}
+
+.inspection-window figcaption {
+  padding: 10px 14px;
+  font-family: var(--font-display);
+  font-size: 0.78rem;
+  color: var(--wire);
+}
