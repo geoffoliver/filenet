@@ -342,3 +342,73 @@ a {
   font-size: 0.78rem;
   color: var(--wire);
 }
+
+/* ── Docs page ──────────────────────────────────────────────────────────── */
+.docs {
+  padding: 48px 0 96px;
+  max-width: 760px;
+}
+
+.docs h1 {
+  font-family: var(--font-display);
+  font-size: 2rem;
+  margin: 0 0 32px;
+}
+
+.docs h2 {
+  font-family: var(--font-display);
+  font-size: 1.3rem;
+  margin: 48px 0 16px;
+  padding-top: 24px;
+  border-top: 1px solid var(--surface);
+}
+
+.docs h3 {
+  font-size: 1.05rem;
+  margin: 24px 0 12px;
+}
+
+.docs p,
+.docs li {
+  opacity: 0.92;
+}
+
+.docs code {
+  font-family: var(--font-display);
+  font-size: 0.85em;
+  background: var(--surface);
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.docs pre {
+  background: var(--surface);
+  border: 1px solid var(--wire);
+  border-radius: var(--radius);
+  padding: 16px;
+  overflow-x: auto;
+}
+
+.docs pre code {
+  background: none;
+  padding: 0;
+}
+
+.docs table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 16px 0;
+}
+
+.docs th,
+.docs td {
+  text-align: left;
+  padding: 8px 12px;
+  border: 1px solid var(--surface);
+  font-size: 0.9rem;
+}
+
+.docs th {
+  font-family: var(--font-display);
+  color: var(--wire);
+}
