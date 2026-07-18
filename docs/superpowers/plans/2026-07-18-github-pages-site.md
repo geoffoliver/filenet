@@ -710,14 +710,17 @@ git commit -m "site: add features wiring-list section"
 
 This task runs against an isolated demo database, not the real dev DB (`./data/filenet.db`), so it doesn't pollute any real local data.
 
-- [ ] **Step 1: Boot the app once against a fresh demo database to generate an Identity row**
+- [ ] **Step 1: Build the app, then boot it once against a fresh demo database to generate an Identity row**
+
+`bun run server` serves the pre-built static Next.js export (`out/`) — without a build it 404s. Build first:
 
 ```bash
 cd /Users/geoff/Work/Websites/filez
+bun run build
 DATABASE_URL=./data/filenet-demo.db bun run server
 ```
 
-Wait for the "listening" log line, then `Ctrl+C` to stop it. This creates `data/filenet-demo.db` with an `Identity` row (the server generates one on first boot).
+Wait for the "listening" log line, then `Ctrl+C` to stop it. This creates `data/filenet-demo.db` with an `Identity` row (the server generates one on first boot). Confirm `http://localhost:3000` actually renders the app (not a 404) before moving on.
 
 - [ ] **Step 2: Write `scripts/tmp-seed-demo-data.ts`**
 
@@ -1001,6 +1004,8 @@ DATABASE_URL=./data/filenet-demo.db bun run scripts/tmp-seed-demo-data.ts
 Expected: `Demo data seeded into data/filenet-demo.db` with no errors.
 
 - [ ] **Step 4: Start the server against the demo database**
+
+Reuses the `out/` build from Step 1 — no need to rebuild unless source files changed since then.
 
 ```bash
 DATABASE_URL=./data/filenet-demo.db bun run server
