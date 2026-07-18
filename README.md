@@ -114,6 +114,7 @@ All settings are available in the **Settings** page of the UI:
 - **Invite password** — peers who supply this password are auto-accepted
 - **Rescan interval** — how often to re-index shared folders (0 = manual only)
 - **Port** — the port peers connect to (default 7734); you must forward this port on your router
+- **Auto-open browser** — automatically opens the app in your default browser when the server starts (default: on)
 
 ### Port forwarding
 

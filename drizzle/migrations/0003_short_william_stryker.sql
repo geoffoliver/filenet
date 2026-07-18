@@ -1,0 +1,1 @@
+ALTER TABLE `Settings` ADD `autoOpenBrowser` integer DEFAULT true NOT NULL;

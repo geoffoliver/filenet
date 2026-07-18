@@ -85,6 +85,38 @@ test('rescan interval field is rendered', async ({ page }) => {
   ).toHaveValue('60');
 });
 
+test('startup toggle is rendered with the correct default', async ({ page }) => {
+  await page.goto('/settings');
+  await expect(page.getByText('Automatically open the app in your browser on start')).toBeVisible();
+  await expect(
+    page.getByRole('checkbox', { name: 'Automatically open the app in your browser on start' }),
+  ).toBeChecked();
+});
+
+test('unchecking the startup toggle calls the API with autoOpenBrowser: false', async ({
+  page,
+}) => {
+  let patched: unknown;
+  await page.route('/api/settings', (route) => {
+    if (route.request().method() === 'PATCH' || route.request().method() === 'PUT') {
+      patched = route.request().postDataJSON();
+      return route.fulfill({ json: { ...SETTINGS, autoOpenBrowser: false } });
+    }
+    return route.fulfill({ json: SETTINGS });
+  });
+
+  await page.goto('/settings');
+  await page
+    .getByRole('checkbox', { name: 'Automatically open the app in your browser on start' })
+    .uncheck();
+  const startupSection = page.locator('section', {
+    has: page.getByText('Automatically open the app in your browser on start'),
+  });
+  await startupSection.getByRole('button', { name: /^save$/i }).click();
+
+  expect(patched).toEqual({ autoOpenBrowser: false });
+});
+
 test('shows enable button when notification permission is default', async ({ page }) => {
   await page.addInitScript(() => {
     (window as any).Notification = class {

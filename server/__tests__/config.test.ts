@@ -70,6 +70,11 @@ describe('getOrCreateSettings', () => {
     expect(s.updateRepo).toBe('geoffoliver/filenet');
     expect(s.updateCheckIntervalMinutes).toBe(1440);
   });
+
+  it('defaults autoOpenBrowser to true', async () => {
+    const s = await getOrCreateSettings(db);
+    expect(s.autoOpenBrowser).toBe(true);
+  });
 });
 
 describe('updateSettings', () => {
@@ -92,6 +97,12 @@ describe('updateSettings', () => {
     await updateSettings(db, { invitePassword: 'secret123' });
     const cleared = await updateSettings(db, { invitePassword: null });
     expect(cleared.invitePassword).toBeNull();
+  });
+
+  it('updates autoOpenBrowser', async () => {
+    await getOrCreateSettings(db);
+    const updated = await updateSettings(db, { autoOpenBrowser: false });
+    expect(updated.autoOpenBrowser).toBe(false);
   });
 });
 

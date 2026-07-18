@@ -18,6 +18,7 @@ import { getOrCreateSettings, parseSharedFolders } from './config';
 import { isCompiledBinary, resolveAssetPath } from './runtime-paths';
 import { createUiServer } from './ui-server';
 import { getOrCreateIdentity } from './identity';
+import { openBrowser } from './browser-opener';
 import { pauseAllActiveDownloads } from './download-manager';
 import { startFileWatcher } from './watcher';
 import { startPeriodicRescan } from './indexer';
@@ -148,6 +149,10 @@ Bun.serve({
     outDir: resolveAssetPath('out', import.meta.dir),
   }),
 });
+
+if (startupSettings.autoOpenBrowser) {
+  openBrowser(`http://localhost:${UI_PORT}`);
+}
 
 Bun.serve<PeerData>({
   port: P2P_PORT,

@@ -52,6 +52,7 @@ export type Settings = {
   listenPort: number;
   updateRepo: string;
   updateCheckIntervalMinutes: number;
+  autoOpenBrowser: boolean;
 };
 
 export type EnvConfig = {
@@ -70,6 +71,7 @@ export type SettingsPatch = {
   listenPort?: number;
   updateRepo?: string;
   updateCheckIntervalMinutes?: number;
+  autoOpenBrowser?: boolean;
 };
 
 export async function getMyInfo(): Promise<{ nodeId: string }> {

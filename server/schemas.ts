@@ -43,6 +43,7 @@ export const PatchSettingsBodySchema = z
       .regex(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/, 'updateRepo must be in the form owner/repo')
       .optional(),
     updateCheckIntervalMinutes: z.int().min(0).max(35791).optional(),
+    autoOpenBrowser: z.boolean().optional(),
   })
   .strict();
 
