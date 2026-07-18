@@ -70,13 +70,16 @@ describe('openBrowser', () => {
   it('logs a warning when the spawned process exits non-zero', async () => {
     const warnSpy = spyOn(console, 'warn').mockImplementation(() => {});
     const calls: unknown[] = [];
+    const exited = Promise.resolve(1);
     openBrowser('http://localhost:3000', {
       platform: 'darwin',
-      spawnImpl: fakeSpawn(calls, { exited: Promise.resolve(1) }),
+      spawnImpl: fakeSpawn(calls, { exited }),
     });
 
-    // openBrowser is fire-and-forget: give the .exited promise a tick to resolve.
-    await Bun.sleep(10);
+    // openBrowser's .then() was attached to `exited` synchronously above, so
+    // awaiting the same promise resumes only after that reaction has run —
+    // no need for a time-based sleep.
+    await exited;
 
     expect(warnSpy).toHaveBeenCalled();
     warnSpy.mockRestore();
