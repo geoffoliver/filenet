@@ -345,7 +345,8 @@ a {
 
 /* ── Docs page ──────────────────────────────────────────────────────────── */
 .docs {
-  padding: 48px 0 96px;
+  padding-top: 48px;
+  padding-bottom: 96px;
   max-width: 760px;
 }
 
