@@ -32,169 +32,169 @@
     </nav>
 
     <main>
-  <section class="hero">
-    <div class="wrap hero-grid">
-      <div class="hero-copy">
-        <p class="eyebrow">peer-to-peer · self-hosted</p>
-        <h1>No central server.<br />Just you and your friends,<br />talking directly.</h1>
-        <p class="hero-sub">
-          Filenet is a self-hosted file sharing and chat app. You keep a list of friends, connect
-          straight to their machines over encrypted WebSockets, and search their shared files — and
-          their friends', and theirs — without anyone's data passing through a company's servers.
-        </p>
-        <div class="hero-actions">
-          <a class="btn btn-signal" href="docs.html#installation">Get Filenet →</a>
-          <a class="btn btn-outline" href="https://github.com/geoffoliver/filenet">View source</a>
+      <section class="hero">
+        <div class="wrap hero-grid">
+          <div class="hero-copy">
+            <p class="eyebrow">peer-to-peer · self-hosted</p>
+            <h1>No central server.<br />Just you and your friends,<br />talking directly.</h1>
+            <p class="hero-sub">
+              Filenet is a self-hosted file sharing and chat app. You keep a list of friends, connect
+              straight to their machines over encrypted WebSockets, and search their shared files — and
+              their friends', and theirs — without anyone's data passing through a company's servers.
+            </p>
+            <div class="hero-actions">
+              <a class="btn btn-signal" href="docs.html#installation">Get Filenet →</a>
+              <a class="btn btn-outline" href="https://github.com/geoffoliver/filenet">View source</a>
+            </div>
+          </div>
+          <svg
+            class="node-graph"
+            viewBox="0 0 480 360"
+            role="img"
+            aria-label="Diagram showing you connected directly to four friends, with no central server in between"
+          >
+            <g class="ng-edges">
+              <line class="ng-edge" x1="240" y1="300" x2="100" y2="200" />
+              <line class="ng-edge" x1="240" y1="300" x2="380" y2="200" />
+              <line class="ng-edge" x1="100" y1="200" x2="160" y2="60" />
+              <line class="ng-edge" x1="380" y1="200" x2="320" y2="60" />
+              <line class="ng-edge" x1="160" y1="60" x2="320" y2="60" />
+            </g>
+            <g class="ng-nodes">
+              <circle class="ng-node ng-node-you" cx="240" cy="300" r="10" />
+              <text class="ng-label" x="240" y="330">you</text>
+              <circle class="ng-node" cx="100" cy="200" r="8" />
+              <text class="ng-label" x="100" y="224">alex</text>
+              <circle class="ng-node" cx="380" cy="200" r="8" />
+              <text class="ng-label" x="380" y="224">sam</text>
+              <circle class="ng-node" cx="160" cy="60" r="8" />
+              <text class="ng-label" x="160" y="40">jordan</text>
+              <circle class="ng-node" cx="320" cy="60" r="8" />
+              <text class="ng-label" x="320" y="40">rae</text>
+            </g>
+          </svg>
         </div>
-      </div>
-      <svg
-        class="node-graph"
-        viewBox="0 0 480 360"
-        role="img"
-        aria-label="Diagram showing you connected directly to four friends, with no central server in between"
-      >
-        <g class="ng-edges">
-          <line class="ng-edge" x1="240" y1="300" x2="100" y2="200" />
-          <line class="ng-edge" x1="240" y1="300" x2="380" y2="200" />
-          <line class="ng-edge" x1="100" y1="200" x2="160" y2="60" />
-          <line class="ng-edge" x1="380" y1="200" x2="320" y2="60" />
-          <line class="ng-edge" x1="160" y1="60" x2="320" y2="60" />
-        </g>
-        <g class="ng-nodes">
-          <circle class="ng-node ng-node-you" cx="240" cy="300" r="10" />
-          <text class="ng-label" x="240" y="330">you</text>
-          <circle class="ng-node" cx="100" cy="200" r="8" />
-          <text class="ng-label" x="100" y="224">alex</text>
-          <circle class="ng-node" cx="380" cy="200" r="8" />
-          <text class="ng-label" x="380" y="224">sam</text>
-          <circle class="ng-node" cx="160" cy="60" r="8" />
-          <text class="ng-label" x="160" y="40">jordan</text>
-          <circle class="ng-node" cx="320" cy="60" r="8" />
-          <text class="ng-label" x="320" y="40">rae</text>
-        </g>
-      </svg>
-    </div>
-  </section>
-  <section class="screens">
-    <div class="wrap">
-      <h2 class="section-title">see it running</h2>
-      <div class="screens-grid">
-        <figure class="inspection-window">
-          <picture>
-            <source srcset="screenshots/home-dark.png" media="(prefers-color-scheme: dark)" />
-            <img src="screenshots/home-light.png" alt="Filenet's Home dashboard" loading="lazy" />
-          </picture>
-          <figcaption>// home — network size, transfer stats, at a glance</figcaption>
-        </figure>
-        <figure class="inspection-window">
-          <picture>
-            <source srcset="screenshots/search-dark.png" media="(prefers-color-scheme: dark)" />
-            <img src="screenshots/search-light.png" alt="Filenet's Search view" loading="lazy" />
-          </picture>
-          <figcaption>// search — query fans out to your network</figcaption>
-        </figure>
-        <figure class="inspection-window">
-          <picture>
-            <source srcset="screenshots/chat-dark.png" media="(prefers-color-scheme: dark)" />
-            <img src="screenshots/chat-light.png" alt="Filenet's Chat view" loading="lazy" />
-          </picture>
-          <figcaption>// chat — DMs and group rooms, end to end</figcaption>
-        </figure>
-        <figure class="inspection-window">
-          <picture>
-            <source srcset="screenshots/friends-dark.png" media="(prefers-color-scheme: dark)" />
-            <img src="screenshots/friends-light.png" alt="Filenet's Friends view" loading="lazy" />
-          </picture>
-          <figcaption>// friends — who you're connected to, directly</figcaption>
-        </figure>
-        <figure class="inspection-window">
-          <picture>
-            <source srcset="screenshots/transfers-dark.png" media="(prefers-color-scheme: dark)" />
-            <img
-              src="screenshots/transfers-light.png"
-              alt="Filenet's Transfers view"
-              loading="lazy"
-            />
-          </picture>
-          <figcaption>// transfers — multi-source, resumable, verified</figcaption>
-        </figure>
-      </div>
-    </div>
-  </section>
-  <section class="wiring">
-    <div class="wrap">
-      <h2 class="section-title">how it's wired</h2>
-      <ul class="wiring-list">
-        <li class="wiring-item">
-          <span class="wiring-tag">friends</span>
-          <div>
-            <h3>Add people, not accounts</h3>
-            <p>
-              Add a friend by address and port. They stay pending until they accept — or skip the wait
-              with a password they gave you.
-            </p>
+      </section>
+      <section class="screens">
+        <div class="wrap">
+          <h2 class="section-title">see it running</h2>
+          <div class="screens-grid">
+            <figure class="inspection-window">
+              <picture>
+                <source srcset="screenshots/home-dark.png" media="(prefers-color-scheme: dark)" />
+                <img src="screenshots/home-light.png" alt="Filenet's Home dashboard" loading="lazy" />
+              </picture>
+              <figcaption>// home — network size, transfer stats, at a glance</figcaption>
+            </figure>
+            <figure class="inspection-window">
+              <picture>
+                <source srcset="screenshots/search-dark.png" media="(prefers-color-scheme: dark)" />
+                <img src="screenshots/search-light.png" alt="Filenet's Search view" loading="lazy" />
+              </picture>
+              <figcaption>// search — query fans out to your network</figcaption>
+            </figure>
+            <figure class="inspection-window">
+              <picture>
+                <source srcset="screenshots/chat-dark.png" media="(prefers-color-scheme: dark)" />
+                <img src="screenshots/chat-light.png" alt="Filenet's Chat view" loading="lazy" />
+              </picture>
+              <figcaption>// chat — DMs and group rooms, end to end</figcaption>
+            </figure>
+            <figure class="inspection-window">
+              <picture>
+                <source srcset="screenshots/friends-dark.png" media="(prefers-color-scheme: dark)" />
+                <img src="screenshots/friends-light.png" alt="Filenet's Friends view" loading="lazy" />
+              </picture>
+              <figcaption>// friends — who you're connected to, directly</figcaption>
+            </figure>
+            <figure class="inspection-window">
+              <picture>
+                <source srcset="screenshots/transfers-dark.png" media="(prefers-color-scheme: dark)" />
+                <img
+                  src="screenshots/transfers-light.png"
+                  alt="Filenet's Transfers view"
+                  loading="lazy"
+                />
+              </picture>
+              <figcaption>// transfers — multi-source, resumable, verified</figcaption>
+            </figure>
           </div>
-          <span class="wiring-note">status: accepted / pending</span>
-        </li>
-        <li class="wiring-item">
-          <span class="wiring-tag">search</span>
-          <div>
-            <h3>Search reaches your whole network</h3>
-            <p>
-              One query fans out to your friends, their friends, and so on. Every node that finds a
-              match sends the result straight back to you.
-            </p>
-          </div>
-          <span class="wiring-note">fanout · TTL-bounded</span>
-        </li>
-        <li class="wiring-item">
-          <span class="wiring-tag">transfers</span>
-          <div>
-            <h3>Pull files from everyone who has them</h3>
-            <p>
-              Downloads run BitTorrent-style — chunked, multi-source, resumable, and SHA-256 verified
-              end to end.
-            </p>
-          </div>
-          <span class="wiring-note">1 MB chunks · 4 concurrent</span>
-        </li>
-        <li class="wiring-item">
-          <span class="wiring-tag">chat</span>
-          <div>
-            <h3>Direct messages and group rooms</h3>
-            <p>
-              One-on-one chats and group rooms, encrypted over the same connection you use for search
-              and transfers.
-            </p>
-          </div>
-          <span class="wiring-note">DM + group</span>
-        </li>
-        <li class="wiring-item">
-          <span class="wiring-tag">scripts</span>
-          <div>
-            <h3>Run your own code on every download</h3>
-            <p>
-              Write a script, point Filenet at it, and it runs automatically once a file finishes —
-              move it, archive it, whatever you need.
-            </p>
-          </div>
-          <span class="wiring-note">TS/JS · default export</span>
-        </li>
-        <li class="wiring-item">
-          <span class="wiring-tag">no server</span>
-          <div>
-            <h3>Nothing to trust but each other</h3>
-            <p>
-              There's no company in the middle. You forward one port, share your address with people
-              you know, and connect directly.
-            </p>
-          </div>
-          <span class="wiring-note">Ed25519 + X25519 + AES-256-GCM</span>
-        </li>
-      </ul>
-    </div>
-  </section>
-</main>
+        </div>
+      </section>
+      <section class="wiring">
+        <div class="wrap">
+          <h2 class="section-title">how it's wired</h2>
+          <ul class="wiring-list">
+            <li class="wiring-item">
+              <span class="wiring-tag">friends</span>
+              <div>
+                <h3>Add people, not accounts</h3>
+                <p>
+                  Add a friend by address and port. They stay pending until they accept — or skip the wait
+                  with a password they gave you.
+                </p>
+              </div>
+              <span class="wiring-note">status: accepted / pending</span>
+            </li>
+            <li class="wiring-item">
+              <span class="wiring-tag">search</span>
+              <div>
+                <h3>Search reaches your whole network</h3>
+                <p>
+                  One query fans out to your friends, their friends, and so on. Every node that finds a
+                  match sends the result straight back to you.
+                </p>
+              </div>
+              <span class="wiring-note">fanout · TTL-bounded</span>
+            </li>
+            <li class="wiring-item">
+              <span class="wiring-tag">transfers</span>
+              <div>
+                <h3>Pull files from everyone who has them</h3>
+                <p>
+                  Downloads run BitTorrent-style — chunked, multi-source, resumable, and SHA-256 verified
+                  end to end.
+                </p>
+              </div>
+              <span class="wiring-note">1 MB chunks · 4 concurrent</span>
+            </li>
+            <li class="wiring-item">
+              <span class="wiring-tag">chat</span>
+              <div>
+                <h3>Direct messages and group rooms</h3>
+                <p>
+                  One-on-one chats and group rooms, encrypted over the same connection you use for search
+                  and transfers.
+                </p>
+              </div>
+              <span class="wiring-note">DM + group</span>
+            </li>
+            <li class="wiring-item">
+              <span class="wiring-tag">scripts</span>
+              <div>
+                <h3>Run your own code on every download</h3>
+                <p>
+                  Write a script, point Filenet at it, and it runs automatically once a file finishes —
+                  move it, archive it, whatever you need.
+                </p>
+              </div>
+              <span class="wiring-note">TS/JS · default export</span>
+            </li>
+            <li class="wiring-item">
+              <span class="wiring-tag">no server</span>
+              <div>
+                <h3>Nothing to trust but each other</h3>
+                <p>
+                  There's no company in the middle. You forward one port, share your address with people
+                  you know, and connect directly.
+                </p>
+              </div>
+              <span class="wiring-note">Ed25519 + X25519 + AES-256-GCM</span>
+            </li>
+          </ul>
+        </div>
+      </section>
+    </main>
 
     <footer class="site-footer">
       <div class="wrap">
