@@ -185,6 +185,7 @@
   - [x] When updates are available/ready to install — desktop notification with toast fallback, fires once per version reaching "ready" (`app/hooks/useUpdateNotifications.ts`)
   - [ ] Other things?
 - [x] Auto-open browser on app start (setting, defaults to true)
-- [ ] Icon/favicon (use 📁 emoji - for both, pretty sure you can do this with an SVG?)
-- [ ] Webmanifest (so people can add it to their desktop/dock/whatever)
+- [x] Icon/favicon (use 📁 emoji - for both, pretty sure you can do this with an SVG?) — `app/icon.svg`, an emoji-as-SVG favicon (browser support for `.ico`-only fallback dropped; all modern evergreen browsers support SVG favicons)
+- [x] Webmanifest (so people can add it to their desktop/dock/whatever) — `app/manifest.ts`, reuses `icon.svg` as the manifest icon
+- [ ] Kill of docker stuff
 - [ ] GitHub "Pages" page (light and dark mode, include screenshots, "docs" section for installation, configuration, etc. with screenshot examples)
