@@ -7,6 +7,7 @@
 - [x] Ed25519 keypair generation and persistence (Drizzle/SQLite)
 - [x] Node ID derivation (SHA-256 of public key)
 - [x] Public key HTTP endpoint (`GET /pubkey`) — unauthenticated
+- [ ] Remove `GET /pubkey` and `GET /health` — both unauthenticated on the P2P port with zero in-app consumers (confirmed by code search); the WebSocket `hello`/`hello-ack` handshake already delivers and cryptographically proves each peer's public key, so `/pubkey` was never load-bearing. Both endpoints currently let anyone mass-scan the default port and get a stable `nodeId` for free with a bare `curl`. Removing them collapses the pre-handshake surface to nothing — a scanner still sees the port is open, but can no longer fingerprint a node without actually implementing the WS handshake protocol.
 - [x] Sign / verify (Ed25519)
 - [x] Ephemeral X25519 ECDH key exchange
 - [x] Session key derivation (HKDF)
