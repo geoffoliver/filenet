@@ -148,12 +148,6 @@ export type InnerMessage =
 
 export type WireMessage = HelloMessage | HelloAckMessage | { type: 'encrypted'; payload: string };
 
-// Public key endpoint response
-export type PubKeyResponse = {
-  nodeId: string;
-  publicKey: string; // base64 SPKI Ed25519
-};
-
 // Post-download script contract
 export type TransferStats = {
   downloadId: string;

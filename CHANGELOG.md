@@ -13,6 +13,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Reactive filesystem watcher** — shared folders are now watched (chokidar-based) for changes, indexing new/modified/deleted files within seconds instead of waiting for the periodic rescan. Periodic/manual rescanning is unchanged and still runs as a fallback safety net.
 - **Auto-open browser** — the server now opens the UI in your default browser on start (configurable in Settings, default on); safely no-ops with a logged warning if no browser is available (e.g. headless Docker).
 
+### Removed
+
+- **Unauthenticated `GET /pubkey` and `GET /health` endpoints** — both lived on the P2P port with no in-app consumers; the WebSocket `hello`/`hello-ack` handshake already delivers and cryptographically proves each peer's public key, so `/pubkey` was never load-bearing. Removing them means a bare `curl` can no longer fingerprint a node's `nodeId` without implementing the WS handshake protocol.
+
 ## [0.1.1] - 2026-07-07
 
 ### Added
