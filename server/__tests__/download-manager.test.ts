@@ -62,6 +62,14 @@ async function waitForState(dlId: string, maxMs = 2000) {
   return dl;
 }
 
+async function waitFor(check: () => boolean, timeoutMs = 2000): Promise<void> {
+  const start = Date.now();
+  while (!check()) {
+    if (Date.now() - start > timeoutMs) throw new Error('waitFor timed out');
+    await Bun.sleep(20);
+  }
+}
+
 beforeAll(async () => {
   db = createDb(TEST_DB_URL);
   applyMigrations(db);
@@ -422,7 +430,13 @@ describe('pause/cancel races with in-flight chunks', () => {
       requestChunkFn,
     );
 
-    await Bun.sleep(60); // chunk 0 has landed; chunks 1 & 2 are still in flight
+    // Wait for chunk 0 specifically to land (chunks 1 & 2 are still in
+    // flight, per requestChunkFn's delays above) instead of a fixed sleep,
+    // so this isn't timing-dependent under CI scheduling variance.
+    await waitFor(() => {
+      const row = db.select().from(downloads).where(eq(downloads.id, id)).get();
+      return row ? (JSON.parse(row.completedChunks) as number[]).includes(0) : false;
+    });
     const pausedOk = await pauseDownload(db, id);
     expect(pausedOk).toBe(true);
 
@@ -464,7 +478,8 @@ describe('resumeDownload after a simulated restart', () => {
     );
 
     await Bun.sleep(20);
-    await pauseDownload(db, id);
+    const pausedOk = await pauseDownload(db, id);
+    expect(pausedOk).toBe(true);
 
     const record = db.select().from(downloads).where(eq(downloads.id, id)).get()!;
 
