@@ -1,8 +1,8 @@
-import { describe, expect, it, spyOn } from 'bun:test';
+import { describe, expect, it, mock, spyOn } from 'bun:test';
 
 import { openBrowser } from '../browser-opener';
 
-type FakeSubprocess = { exited: Promise<number> };
+type FakeSubprocess = { exited: Promise<number>; unref: () => void };
 
 function fakeSpawn(
   calls: unknown[],
@@ -11,7 +11,7 @@ function fakeSpawn(
   return ((opts: unknown) => {
     calls.push(opts);
     if (typeof result === 'function') return result();
-    return result as FakeSubprocess;
+    return { ...(result as { exited: Promise<number> }), unref: () => {} } as FakeSubprocess;
   }) as unknown as typeof Bun.spawn;
 }
 
@@ -80,5 +80,17 @@ describe('openBrowser', () => {
 
     expect(warnSpy).toHaveBeenCalled();
     warnSpy.mockRestore();
+  });
+
+  it('unrefs the spawned process so it cannot keep the event loop alive', () => {
+    const unref = mock(() => {});
+    const spawnImpl = (() => ({
+      exited: Promise.resolve(0),
+      unref,
+    })) as unknown as typeof Bun.spawn;
+
+    openBrowser('http://localhost:3000', { platform: 'darwin', spawnImpl });
+
+    expect(unref).toHaveBeenCalledTimes(1);
   });
 });

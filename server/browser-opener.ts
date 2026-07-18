@@ -24,6 +24,7 @@ export function openBrowser(url: string, opts: OpenBrowserOptions = {}): void {
 
   try {
     const proc = spawnImpl({ cmd, stdio: ['ignore', 'ignore', 'ignore'] });
+    proc.unref();
     proc.exited
       .then((code) => {
         if (code !== 0) {
