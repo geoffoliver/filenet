@@ -180,10 +180,9 @@
 - [x] Database migrations — Drizzle migrations (`drizzle/migrations/*.sql`) applied automatically at server startup via `applyMigrations()`
 - [x] Single-binary distribution (à la Sonarr/Radarr) — Next.js builds via `output: 'export'`; `bun build --compile` packages the app + `out/` + `drizzle/migrations/` for all 5 targets via `bun run build:binaries`
 - [x] Auto-update mechanism (detect new release on Github (configurable repo URL in case someone wants to fork it), download, prompt user to restart)
-- [ ] Notifications (toast or desktop (desktop preferred))
+- [x] Notifications (toast or desktop (desktop preferred))
   - [x] Incoming friend requests that need approval — desktop `Notification` API with an in-app toast fallback, persistent count badge on the Friends nav link, `localStorage`-deduped so a request only notifies once (with pruning so a friend re-entering the pending state under the same id notifies again); explicit opt-in via a new "Notifications" section in Settings (browsers require a real click to grant permission)
   - [x] When updates are available/ready to install — desktop notification with toast fallback, fires once per version reaching "ready" (`app/hooks/useUpdateNotifications.ts`)
-  - [ ] Other things?
 - [x] Auto-open browser on app start (setting, defaults to true)
 - [x] Icon/favicon (use 📁 emoji - for both, pretty sure you can do this with an SVG?) — `app/icon.svg`, an emoji-as-SVG favicon (browser support for `.ico`-only fallback dropped; all modern evergreen browsers support SVG favicons)
 - [x] Webmanifest (so people can add it to their desktop/dock/whatever) — `app/manifest.ts`, reuses `icon.svg` as the manifest icon
