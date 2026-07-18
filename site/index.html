@@ -38,13 +38,16 @@
             <p class="eyebrow">peer-to-peer · self-hosted</p>
             <h1>No central server.<br />Just you and your friends,<br />talking directly.</h1>
             <p class="hero-sub">
-              Filenet is a self-hosted file sharing and chat app. You keep a list of friends, connect
-              straight to their machines over encrypted WebSockets, and search their shared files — and
-              their friends', and theirs — without anyone's data passing through a company's servers.
+              Filenet is a self-hosted file sharing and chat app. You keep a list of friends,
+              connect straight to their machines over encrypted WebSockets, and search their shared
+              files — and their friends', and theirs — without anyone's data passing through a
+              company's servers.
             </p>
             <div class="hero-actions">
               <a class="btn btn-signal" href="docs.html#installation">Get Filenet →</a>
-              <a class="btn btn-outline" href="https://github.com/geoffoliver/filenet">View source</a>
+              <a class="btn btn-outline" href="https://github.com/geoffoliver/filenet"
+                >View source</a
+              >
             </div>
           </div>
           <svg
@@ -82,14 +85,22 @@
             <figure class="inspection-window">
               <picture>
                 <source srcset="screenshots/home-dark.png" media="(prefers-color-scheme: dark)" />
-                <img src="screenshots/home-light.png" alt="Filenet's Home dashboard" loading="lazy" />
+                <img
+                  src="screenshots/home-light.png"
+                  alt="Filenet's Home dashboard"
+                  loading="lazy"
+                />
               </picture>
               <figcaption>// home — network size, transfer stats, at a glance</figcaption>
             </figure>
             <figure class="inspection-window">
               <picture>
                 <source srcset="screenshots/search-dark.png" media="(prefers-color-scheme: dark)" />
-                <img src="screenshots/search-light.png" alt="Filenet's Search view" loading="lazy" />
+                <img
+                  src="screenshots/search-light.png"
+                  alt="Filenet's Search view"
+                  loading="lazy"
+                />
               </picture>
               <figcaption>// search — query fans out to your network</figcaption>
             </figure>
@@ -102,14 +113,24 @@
             </figure>
             <figure class="inspection-window">
               <picture>
-                <source srcset="screenshots/friends-dark.png" media="(prefers-color-scheme: dark)" />
-                <img src="screenshots/friends-light.png" alt="Filenet's Friends view" loading="lazy" />
+                <source
+                  srcset="screenshots/friends-dark.png"
+                  media="(prefers-color-scheme: dark)"
+                />
+                <img
+                  src="screenshots/friends-light.png"
+                  alt="Filenet's Friends view"
+                  loading="lazy"
+                />
               </picture>
               <figcaption>// friends — who you're connected to, directly</figcaption>
             </figure>
             <figure class="inspection-window">
               <picture>
-                <source srcset="screenshots/transfers-dark.png" media="(prefers-color-scheme: dark)" />
+                <source
+                  srcset="screenshots/transfers-dark.png"
+                  media="(prefers-color-scheme: dark)"
+                />
                 <img
                   src="screenshots/transfers-light.png"
                   alt="Filenet's Transfers view"
@@ -130,8 +151,8 @@
               <div>
                 <h3>Add people, not accounts</h3>
                 <p>
-                  Add a friend by address and port. They stay pending until they accept — or skip the wait
-                  with a password they gave you.
+                  Add a friend by address and port. They stay pending until they accept — or skip
+                  the wait with a password they gave you.
                 </p>
               </div>
               <span class="wiring-note">status: accepted / pending</span>
@@ -141,8 +162,8 @@
               <div>
                 <h3>Search reaches your whole network</h3>
                 <p>
-                  One query fans out to your friends, their friends, and so on. Every node that finds a
-                  match sends the result straight back to you.
+                  One query fans out to your friends, their friends, and so on. Every node that
+                  finds a match sends the result straight back to you.
                 </p>
               </div>
               <span class="wiring-note">fanout · TTL-bounded</span>
@@ -152,8 +173,8 @@
               <div>
                 <h3>Pull files from everyone who has them</h3>
                 <p>
-                  Downloads run BitTorrent-style — chunked, multi-source, resumable, and SHA-256 verified
-                  end to end.
+                  Downloads run BitTorrent-style — chunked, multi-source, resumable, and SHA-256
+                  verified end to end.
                 </p>
               </div>
               <span class="wiring-note">1 MB chunks · 4 concurrent</span>
@@ -163,8 +184,8 @@
               <div>
                 <h3>Direct messages and group rooms</h3>
                 <p>
-                  One-on-one chats and group rooms, encrypted over the same connection you use for search
-                  and transfers.
+                  One-on-one chats and group rooms, encrypted over the same connection you use for
+                  search and transfers.
                 </p>
               </div>
               <span class="wiring-note">DM + group</span>
@@ -174,8 +195,8 @@
               <div>
                 <h3>Run your own code on every download</h3>
                 <p>
-                  Write a script, point Filenet at it, and it runs automatically once a file finishes —
-                  move it, archive it, whatever you need.
+                  Write a script, point Filenet at it, and it runs automatically once a file
+                  finishes — move it, archive it, whatever you need.
                 </p>
               </div>
               <span class="wiring-note">TS/JS · default export</span>
@@ -185,8 +206,8 @@
               <div>
                 <h3>Nothing to trust but each other</h3>
                 <p>
-                  There's no company in the middle. You forward one port, share your address with people
-                  you know, and connect directly.
+                  There's no company in the middle. You forward one port, share your address with
+                  people you know, and connect directly.
                 </p>
               </div>
               <span class="wiring-note">Ed25519 + X25519 + AES-256-GCM</span>
