@@ -191,24 +191,19 @@ describe('startFileWatcher — add/change', () => {
     await rm(path);
     await symlink(target, path);
 
-    // Replacing a file with a symlink at the same path fires chokidar's
-    // 'change' event here (not 'add' — verified empirically: 20/20 local
-    // trials), which cancels the pending delete before its grace period
-    // fires. Asserting well before the grace period proves
-    // handleAddOrChange's own stale-row cleanup ran, not just eventual
-    // grace-period cleanup.
-    //
-    // The margin here (5000ms, vs. 500ms originally) is deliberately
-    // generous rather than tightly calibrated: this test flaked twice in CI
-    // (never locally, including full-suite runs under load) with smaller
-    // margins (500ms, then 1500ms). The watcher logic itself is correct —
-    // confirmed via isolated repro — so the flake is purely GitHub Actions
-    // shared-runner scheduling variance delaying chokidar's internal
-    // awaitWriteFinish polling, which can't be reproduced or calibrated
-    // locally. If this still flakes with this margin, that's new evidence
-    // the cause isn't scheduling variance and needs fresh investigation
-    // rather than another timeout bump.
-    await waitFor(() => findFile(path) === null, 5000);
+    // What event (if any) chokidar fires for "file deleted, symlink
+    // recreated at the same path" is platform-dependent: on macOS it
+    // fires 'change', which handleAddOrChange cleans up on its own. On
+    // Linux (verified via a native-filesystem repro, not a flaky-CI
+    // guess), chokidar never emits add/change here at all — only the
+    // original 'unlink'. checkForSymlinkReplacement (server/watcher.ts)
+    // is what actually guarantees cleanup on every platform: it runs
+    // unconditionally on every unlink after a short `stabilityThresholdMs`
+    // settle window (20ms here) and removes the row itself if a symlink
+    // is what it finds. `deleteGraceMs` (8000ms) is set far beyond that
+    // settle window so this assertion can only pass via the fast settle
+    // check, not the slow grace-period fallback in confirmAndRemove.
+    await waitFor(() => findFile(path) === null, 3000);
   });
 
   it('does not index a dotfile', async () => {

@@ -96,9 +96,20 @@ async function handleAddOrChange(db: Db, path: string): Promise<void> {
 
 async function confirmAndRemove(db: Db, path: string): Promise<void> {
   try {
-    await lstat(path);
-    // File exists again — an add/change event already re-indexed it (or
-    // will shortly); nothing to do here.
+    const s = await lstat(path);
+    if (s.isSymbolicLink()) {
+      // A symlink now lives at this path. Symlinks are never indexed, and
+      // on some platforms (verified on Linux/inotify via chokidar's own
+      // event model) chokidar never emits an add/change event when a
+      // deleted file is immediately replaced by a symlink at the same
+      // path — unlike macOS, where that same sequence fires a change
+      // event that handleAddOrChange cleans up reactively. Without this,
+      // the stale row would survive indefinitely on those platforms
+      // instead of just until the next periodic rescan.
+      await removeStaleRow(db, path);
+    }
+    // Otherwise a real file exists again — an add/change event already
+    // re-indexed it (or will shortly); nothing to do here.
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code;
     if (code === 'ENOENT') {
@@ -114,6 +125,31 @@ async function confirmAndRemove(db: Db, path: string): Promise<void> {
       console.error(`File watcher: failed to confirm deletion of ${path}:`, err);
     }
   }
+}
+
+// Fast path for the same symlink-replacement case confirmAndRemove guards
+// against as a fallback (see its comment): on platforms where chokidar
+// never emits an add/change event for it, waiting out the full
+// deleteGraceMs to notice is needlessly slow when a short settle window
+// is enough to tell a symlink apart from a file that's still mid-write.
+// `cancelPendingDelete` is passed in (rather than closed over) because
+// this function is defined outside startFileWatcher, same as
+// confirmAndRemove.
+async function checkForSymlinkReplacement(
+  db: Db,
+  path: string,
+  settleMs: number,
+  cancelPendingDelete: (path: string) => void,
+): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, settleMs));
+  try {
+    const s = await lstat(path);
+    if (!s.isSymbolicLink()) return; // real file — let add/change handle it normally
+  } catch {
+    return; // still gone — let the deleteGraceMs timer run its course
+  }
+  cancelPendingDelete(path);
+  await removeStaleRow(db, path);
 }
 
 export function startFileWatcher(
@@ -159,6 +195,7 @@ export function startFileWatcher(
       void confirmAndRemove(db, path);
     }, deleteGraceMs);
     pendingDeletes.set(path, timer);
+    void checkForSymlinkReplacement(db, path, stabilityThresholdMs, cancelPendingDelete);
   });
   watcher.on('error', (err) => {
     console.error('File watcher error:', err);
