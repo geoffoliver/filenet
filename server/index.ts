@@ -157,19 +157,6 @@ if (startupSettings.autoOpenBrowser) {
 Bun.serve<PeerData>({
   port: P2P_PORT,
   fetch(req, server) {
-    const url = new URL(req.url);
-
-    if (url.pathname === '/pubkey') {
-      return Response.json({
-        nodeId: identity.nodeId,
-        publicKey: identity.publicKey.toString('base64'),
-      });
-    }
-
-    if (url.pathname === '/health') {
-      return Response.json({ status: 'ok', nodeId: identity.nodeId });
-    }
-
     if (
       server.upgrade(req, {
         data: {
