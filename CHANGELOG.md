@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Auto-update mechanism** — the standalone binary checks GitHub for new releases (configurable repo, default `geoffoliver/filenet`), downloads and SHA-256-verifies them in the background, and self-relaunches onto the new version from a "Restart to update" button in Settings. Desktop notification (with toast fallback) fires once a new version is ready to install.
 - **Reactive filesystem watcher** — shared folders are now watched (chokidar-based) for changes, indexing new/modified/deleted files within seconds instead of waiting for the periodic rescan. Periodic/manual rescanning is unchanged and still runs as a fallback safety net.
 - **Auto-open browser** — the server now opens the UI in your default browser on start (configurable in Settings, default on); safely no-ops with a logged warning if no browser is available (e.g. headless Docker).
+- **App icon and web manifest** — favicon is now a 📁 emoji rendered as SVG (`app/icon.svg`); a generated web manifest (`app/manifest.ts`) lets the app be installed to a desktop/dock/home screen from supporting browsers.
 
 ### Removed
 
