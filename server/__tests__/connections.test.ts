@@ -1230,6 +1230,7 @@ describe('connectToPeer — full successful handshake and post-handshake message
       expect(getConnectedPeer(responder.nodeId)).toBeUndefined();
     } finally {
       server.stop(true);
+      unregisterPeer(responder.nodeId);
     }
   });
 });

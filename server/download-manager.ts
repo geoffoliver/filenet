@@ -630,9 +630,21 @@ export async function getTransfers(db: Db): Promise<TransferDto[]> {
 // ---------------------------------------------------------------------------
 
 /** @internal – only for use in tests, to simulate a server restart clearing in-memory state */
-export function resetActiveDownloadsForTesting(): void {
+export async function resetActiveDownloadsForTesting(): Promise<void> {
+  const entries = [...activeDownloads.values()];
   activeDownloads.clear();
   activeDownloadFolders.clear();
+  await Promise.all(
+    entries.map(async (dl) => {
+      dl.stopped = true;
+      if (dl.fileHandle) {
+        try {
+          await dl.fileHandle.close();
+        } catch {}
+        dl.fileHandle = null;
+      }
+    }),
+  );
 }
 
 export async function pauseAllActiveDownloads(db: Db): Promise<void> {

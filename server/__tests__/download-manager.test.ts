@@ -476,7 +476,7 @@ describe('resumeDownload after a simulated restart', () => {
       .where(eq(downloads.id, id))
       .run();
     await rm(record.tmpPath!, { force: true });
-    resetActiveDownloadsForTesting();
+    await resetActiveDownloadsForTesting();
 
     const resumed = await resumeDownload(db, id, makeChunkServer(content));
     expect(resumed).toBe(true);
