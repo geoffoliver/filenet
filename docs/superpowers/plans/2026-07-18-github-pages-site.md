@@ -760,7 +760,13 @@ if (!me) {
   );
 }
 
-await db.update(settings).set({ name: 'Riley' }).where(eq(settings.id, 'singleton'));
+// A plain UPDATE silently no-ops if the singleton row doesn't exist yet
+// (server/config.ts only creates it lazily via getOrCreateSettings/updateSettings) —
+// upsert so this reliably takes the app out of first-launch/setup mode.
+await db
+  .insert(settings)
+  .values({ id: 'singleton', name: 'Riley' })
+  .onConflictDoUpdate({ target: settings.id, set: { name: 'Riley' } });
 
 const demoFriends: Array<{
   name: string;
