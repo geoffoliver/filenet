@@ -248,3 +248,66 @@ a {
     grid-template-columns: 1fr;
   }
 }
+
+/* ── Wiring list ────────────────────────────────────────────────────────── */
+.wiring {
+  padding: 48px 0;
+}
+
+.section-title {
+  font-family: var(--font-display);
+  font-size: 0.95rem;
+  text-transform: lowercase;
+  letter-spacing: 0.04em;
+  color: var(--wire);
+  margin: 0 0 24px;
+}
+
+.wiring-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border-top: 1px solid var(--surface);
+}
+
+.wiring-item {
+  display: grid;
+  grid-template-columns: 110px 1fr 200px;
+  gap: 20px;
+  align-items: start;
+  padding: 20px 0;
+  border-bottom: 1px solid var(--surface);
+}
+
+.wiring-tag {
+  font-family: var(--font-display);
+  font-size: 0.8rem;
+  color: var(--signal);
+}
+
+.wiring-item h3 {
+  margin: 0 0 6px;
+  font-size: 1.05rem;
+}
+
+.wiring-item p {
+  margin: 0;
+  opacity: 0.9;
+}
+
+.wiring-note {
+  font-family: var(--font-display);
+  font-size: 0.78rem;
+  opacity: 0.65;
+  text-align: right;
+}
+
+@media (max-width: 720px) {
+  .wiring-item {
+    grid-template-columns: 1fr;
+    gap: 6px;
+  }
+  .wiring-note {
+    text-align: left;
+  }
+}
