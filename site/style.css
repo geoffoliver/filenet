@@ -396,6 +396,8 @@ a {
 }
 
 .docs table {
+  display: block;
+  overflow-x: auto;
   border-collapse: collapse;
   width: 100%;
   margin: 16px 0;
