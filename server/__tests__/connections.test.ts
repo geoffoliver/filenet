@@ -41,6 +41,14 @@ import { generateIdentity } from '../identity';
 const TEST_DB_URL = 'file:./data/test-connections.db';
 let db: Db;
 
+async function waitFor(check: () => boolean, timeoutMs = 2000): Promise<void> {
+  const start = Date.now();
+  while (!check()) {
+    if (Date.now() - start > timeoutMs) throw new Error('waitFor timed out');
+    await Bun.sleep(20);
+  }
+}
+
 beforeAll(() => {
   db = createDb(TEST_DB_URL);
   applyMigrations(db);
@@ -1061,7 +1069,7 @@ describe('connectToPeer — full successful handshake and post-handshake message
       expect(updated.nodeId).toBe(responder.nodeId);
       expect(updated.publicKey).toBe(responder.publicKey.toString('base64'));
 
-      await Bun.sleep(150);
+      await waitFor(() => receivedByResponder.length > 0);
       expect(receivedByResponder).toHaveLength(1);
       expect(receivedByResponder[0]).toMatchObject({
         type: 'friend-request',
@@ -1145,10 +1153,13 @@ describe('connectToPeer — full successful handshake and post-handshake message
 
     try {
       await connectToPeer(initiator, db, '127.0.0.1', server.port!, 7734);
-      await Bun.sleep(150);
-      const updated = db.select().from(friends).where(eq(friends.id, friendRow.id)).get()!;
-      expect(updated.status).toBe('ACCEPTED');
-      expect(updated.name).toBe('Responder Name');
+      let updated: typeof friendRow;
+      await waitFor(() => {
+        updated = db.select().from(friends).where(eq(friends.id, friendRow.id)).get()!;
+        return updated?.status === 'ACCEPTED';
+      });
+      expect(updated!.status).toBe('ACCEPTED');
+      expect(updated!.name).toBe('Responder Name');
     } finally {
       server.stop(true);
       unregisterPeer(responder.nodeId);
@@ -1224,7 +1235,11 @@ describe('connectToPeer — full successful handshake and post-handshake message
 
     try {
       await connectToPeer(initiator, db, '127.0.0.1', server.port!, 7734);
-      await Bun.sleep(150);
+      await waitFor(
+        () =>
+          db.select().from(friends).where(eq(friends.id, friendRow.id)).get() === undefined &&
+          getConnectedPeer(responder.nodeId) === undefined,
+      );
       const remaining = db.select().from(friends).where(eq(friends.id, friendRow.id)).get();
       expect(remaining).toBeUndefined();
       expect(getConnectedPeer(responder.nodeId)).toBeUndefined();
