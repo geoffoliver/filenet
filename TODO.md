@@ -187,4 +187,4 @@
 - [x] Icon/favicon (use 📁 emoji - for both, pretty sure you can do this with an SVG?) — `app/icon.svg`, an emoji-as-SVG favicon (browser support for `.ico`-only fallback dropped; all modern evergreen browsers support SVG favicons)
 - [x] Webmanifest (so people can add it to their desktop/dock/whatever) — `app/manifest.ts`, reuses `icon.svg` as the manifest icon
 - [x] Kill off docker stuff — removed `Dockerfile`, `.dockerignore`, `docker-entrypoint.sh`, `docker-compose.yml`, and the Docker install path from the README; single-binary distribution is now the only supported self-hosting path. Also removed the `SHARED_FOLDERS`/`DOWNLOAD_FOLDER` env-var override system (server config, `/api/settings/env`, setup wizard step-skipping, locked-field UI in Settings) since it existed solely to support Docker's volume-mount model
-- [ ] GitHub "Pages" page (light and dark mode, include screenshots, "docs" section for installation, configuration, etc. with screenshot examples)
+- [ ] GitHub "Pages" (light and dark mode, include screenshots, "docs" section for installation, configuration, etc. with screenshot examples)
