@@ -25,17 +25,6 @@ bun install
 
 ## Running
 
-### Docker (recommended for self-hosting)
-
-```bash
-# Edit docker-compose.yml to set your shared folder path, then:
-docker compose up -d
-```
-
-Open [http://localhost:3000](http://localhost:3000). The database is persisted in the `filenet-data` Docker volume. Forward port `7734` on your router to allow peers to connect.
-
-### Manual
-
 ```bash
 bun run build
 bun run server
@@ -63,9 +52,8 @@ The application runs two listeners in a single process:
 
 ## Running as a standalone executable
 
-If you don't want to run Docker, Filenet also ships as a standalone
-executable with no external runtime dependency — no separate Node/Bun/npm
-install required.
+Filenet also ships as a standalone executable with no external runtime
+dependency — no separate Node/Bun/npm install required.
 
 1. Download `filenet-bun-<platform>.zip` from the Releases page for your
    platform (`linux-x64`, `linux-arm64`, `darwin-x64`, `darwin-arm64`,
@@ -80,10 +68,10 @@ install required.
 
 4. Open `http://localhost:3000` in a browser to finish setup.
 
-Configuration is via environment variables, same as Docker:
-`PORT` (UI + management API, default `3000`), `P2P_PORT` (default: the
-listening port configured in Settings), `DATABASE_URL` (default:
-`./data/filenet.db`, relative to wherever you run the executable from).
+Configuration is via environment variables: `PORT` (UI + management API,
+default `3000`), `P2P_PORT` (default: the listening port configured in
+Settings), `DATABASE_URL` (default: `./data/filenet.db`, relative to
+wherever you run the executable from).
 
 To build these yourself: `bun run build:binaries` (requires Bun, plus
 `bash`, `zip`, and a SHA-256 tool (`sha256sum` or `shasum`) on your PATH —

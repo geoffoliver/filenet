@@ -256,12 +256,6 @@ export async function mockMessages(page: Page, convId: string, msgs = MESSAGES) 
   );
 }
 
-export async function mockEnvConfig(page: Page) {
-  await page.route('/api/settings/env', (route) =>
-    route.fulfill({ json: { sharedFolders: [], downloadFolder: null } }),
-  );
-}
-
 export async function mockMe(page: Page) {
   await page.route('/api/me', (route) => route.fulfill({ json: { nodeId: 'self' } }));
 }
@@ -279,7 +273,6 @@ export async function mockBaseApp(page: Page) {
   await mockTransfers(page);
   await mockUploads(page);
   await mockConversations(page);
-  await mockEnvConfig(page);
   await mockMe(page);
   await mockUpdateStatus(page);
 }
