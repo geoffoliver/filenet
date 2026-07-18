@@ -1,10 +1,9 @@
 import { expect, test } from '@playwright/test';
 
-import { SETTINGS, mockEnvConfig, mockSettingsUnconfigured } from './helpers';
+import { SETTINGS, mockSettingsUnconfigured } from './helpers';
 
 test.beforeEach(async ({ page }) => {
   await mockSettingsUnconfigured(page);
-  await mockEnvConfig(page);
 });
 
 test('renders welcome page with "Get started"', async ({ page }) => {

@@ -176,7 +176,7 @@
 - [ ] Improve backend test coverage as features are added
 - [x] CHANGELOG (start and maintain)
 - [x] README: installation, configuration, running, scripting API docs
-- [x] Create necessary files to spin the app up in a Docker container — now serves the static export (`out/`) via the unified Bun server, not `next start`
+- [x] Create necessary files to spin the app up in a Docker container — now serves the static export (`out/`) via the unified Bun server, not `next start` (Docker support later removed, see below)
 - [x] Database migrations — Drizzle migrations (`drizzle/migrations/*.sql`) applied automatically at server startup via `applyMigrations()`
 - [x] Single-binary distribution (à la Sonarr/Radarr) — Next.js builds via `output: 'export'`; `bun build --compile` packages the app + `out/` + `drizzle/migrations/` for all 5 targets via `bun run build:binaries`
 - [x] Auto-update mechanism (detect new release on Github (configurable repo URL in case someone wants to fork it), download, prompt user to restart)
@@ -187,5 +187,5 @@
 - [x] Auto-open browser on app start (setting, defaults to true)
 - [x] Icon/favicon (use 📁 emoji - for both, pretty sure you can do this with an SVG?) — `app/icon.svg`, an emoji-as-SVG favicon (browser support for `.ico`-only fallback dropped; all modern evergreen browsers support SVG favicons)
 - [x] Webmanifest (so people can add it to their desktop/dock/whatever) — `app/manifest.ts`, reuses `icon.svg` as the manifest icon
-- [ ] Kill off docker stuff
+- [x] Kill off docker stuff — removed `Dockerfile`, `.dockerignore`, `docker-entrypoint.sh`, `docker-compose.yml`, and the Docker install path from the README; single-binary distribution is now the only supported self-hosting path. Also removed the `SHARED_FOLDERS`/`DOWNLOAD_FOLDER` env-var override system (server config, `/api/settings/env`, setup wizard step-skipping, locked-field UI in Settings) since it existed solely to support Docker's volume-mount model
 - [ ] GitHub "Pages" page (light and dark mode, include screenshots, "docs" section for installation, configuration, etc. with screenshot examples)

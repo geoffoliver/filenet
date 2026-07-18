@@ -11,12 +11,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Auto-update mechanism** — the standalone binary checks GitHub for new releases (configurable repo, default `geoffoliver/filenet`), downloads and SHA-256-verifies them in the background, and self-relaunches onto the new version from a "Restart to update" button in Settings. Desktop notification (with toast fallback) fires once a new version is ready to install.
 - **Reactive filesystem watcher** — shared folders are now watched (chokidar-based) for changes, indexing new/modified/deleted files within seconds instead of waiting for the periodic rescan. Periodic/manual rescanning is unchanged and still runs as a fallback safety net.
-- **Auto-open browser** — the server now opens the UI in your default browser on start (configurable in Settings, default on); safely no-ops with a logged warning if no browser is available (e.g. headless Docker).
+- **Auto-open browser** — the server now opens the UI in your default browser on start (configurable in Settings, default on); safely no-ops with a logged warning if no browser is available (e.g. a headless server).
 - **App icon and web manifest** — favicon is now a 📁 emoji rendered as SVG (`app/icon.svg`); a generated web manifest (`app/manifest.ts`) lets the app be installed to a desktop/dock/home screen from supporting browsers.
 
 ### Removed
 
 - **Unauthenticated `GET /pubkey` and `GET /health` endpoints** — both lived on the P2P port with no in-app consumers; the WebSocket `hello`/`hello-ack` handshake already delivers and cryptographically proves each peer's public key, so `/pubkey` was never load-bearing. Removing them means a bare `curl` can no longer fingerprint a node's `nodeId` without implementing the WS handshake protocol.
+- **Docker support** — removed `Dockerfile`, `.dockerignore`, `docker-entrypoint.sh`, and `docker-compose.yml`. Single-binary distribution (`bun run build:binaries`) is now the only supported self-hosting path. Also removed the `SHARED_FOLDERS`/`DOWNLOAD_FOLDER` environment-variable override system (server config, `/api/settings/env`, the setup wizard's step-skipping, and the locked-field UI in Settings), which existed solely to support Docker's volume-mount deployment model.
 
 ## [0.1.1] - 2026-07-07
 

@@ -5,32 +5,6 @@ import type { Db } from './db';
 
 const SETTINGS_ID = 'singleton';
 
-// Colon-separated list of paths, e.g. SHARED_FOLDERS=/shared:/media
-function envSharedFolders(): string[] {
-  const raw = process.env.SHARED_FOLDERS;
-  if (!raw) return [];
-  return raw
-    .split(':')
-    .map((s) => s.trim())
-    .filter(Boolean);
-}
-
-function envDownloadFolder(): string | null {
-  return process.env.DOWNLOAD_FOLDER?.trim() || null;
-}
-
-export type EnvConfig = {
-  sharedFolders: string[]; // empty = no env override
-  downloadFolder: string | null; // null = no env override
-};
-
-export function getEnvConfig(): EnvConfig {
-  return {
-    sharedFolders: envSharedFolders(),
-    downloadFolder: envDownloadFolder(),
-  };
-}
-
 export type SettingsPatch = {
   name?: string;
   invitePassword?: string | null;
@@ -83,15 +57,9 @@ export async function getSettings(db: Db): Promise<Settings | null> {
 }
 
 export async function getOrCreateSettings(db: Db): Promise<Settings> {
-  const envFolders = envSharedFolders();
-  const envDownload = envDownloadFolder();
   const row = db
     .insert(settings)
-    .values({
-      id: SETTINGS_ID,
-      ...(envFolders.length > 0 ? { sharedFolders: JSON.stringify(envFolders) } : {}),
-      ...(envDownload ? { downloadFolder: envDownload } : {}),
-    })
+    .values({ id: SETTINGS_ID })
     .onConflictDoNothing()
     .returning()
     .get();

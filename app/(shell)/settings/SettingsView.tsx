@@ -4,22 +4,15 @@ import { useEffect, useRef, useState } from 'react';
 
 import FolderPicker from '../../components/FolderPicker/FolderPicker';
 
-import type {
-  EnvConfig,
-  PostDownloadScript,
-  Settings,
-  UpdatePhase,
-  UpdateStatus,
-} from '../../lib/api';
 import {
   type NotificationPermissionState,
   getNotificationPermission,
   requestNotificationPermission,
 } from '../../lib/notifications';
+import type { PostDownloadScript, Settings, UpdatePhase, UpdateStatus } from '../../lib/api';
 import {
   addScript,
   checkForUpdate,
-  getEnvConfig,
   getScripts,
   getSettings,
   getUpdateStatus,
@@ -197,10 +190,7 @@ function PrivacySection({ initial }: { initial: Settings }) {
 
 // ── Files section ─────────────────────────────────────────────────────────────
 
-function FilesSection({ initial, envConfig }: { initial: Settings; envConfig: EnvConfig }) {
-  const foldersLocked = envConfig.sharedFolders.length > 0;
-  const downloadLocked = envConfig.downloadFolder !== null;
-
+function FilesSection({ initial }: { initial: Settings }) {
   const [folders, setFolders] = useState<string[]>(initial.sharedFolders);
   const [newFolder, setNewFolder] = useState('');
   const [downloadFolder, setDownloadFolder] = useState(initial.downloadFolder ?? '');
@@ -234,8 +224,8 @@ function FilesSection({ initial, envConfig }: { initial: Settings; envConfig: En
     setSaved(false);
 
     patchSettings({
-      ...(!foldersLocked && { sharedFolders: folders }),
-      ...(!downloadLocked && { downloadFolder: downloadFolder.trim() || null }),
+      sharedFolders: folders,
+      downloadFolder: downloadFolder.trim() || null,
       rescanIntervalMinutes: interval,
     })
       .then(() => {
@@ -251,79 +241,51 @@ function FilesSection({ initial, envConfig }: { initial: Settings; envConfig: En
       <form className={styles.form} onSubmit={handleSubmit}>
         <div className={styles.field}>
           <span className={styles.label}>Shared folders</span>
-          {foldersLocked ? (
-            <>
-              <ul className={styles.folderList}>
-                {initial.sharedFolders.map((f) => (
-                  <li key={f} className={styles.folderItem}>
-                    <span className={styles.folderPath}>{f}</span>
-                  </li>
-                ))}
-              </ul>
-              <p className={styles.hint}>
-                Set via <code>SHARED_FOLDERS</code> environment variable. To change, update your
-                deployment configuration and restart.
-              </p>
-            </>
-          ) : (
-            <>
-              <ul className={styles.folderList}>
-                {folders.length === 0 && (
-                  <li className={styles.folderEmpty}>No shared folders configured.</li>
-                )}
-                {folders.map((f) => (
-                  <li key={f} className={styles.folderItem}>
-                    <span className={styles.folderPath}>{f}</span>
-                    <button
-                      type="button"
-                      className={`btn btn-ghost ${styles.removeBtn}`}
-                      onClick={() => removeFolder(f)}
-                      aria-label={`Remove ${f}`}
-                    >
-                      Remove
-                    </button>
-                  </li>
-                ))}
-              </ul>
-              <div className={styles.addFolderRow}>
-                <FolderPicker
-                  value={newFolder}
-                  onChange={setNewFolder}
-                  onSelect={(p) => addFolder(p)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      e.preventDefault();
-                      addFolder();
-                    }
-                  }}
-                  inputRef={folderInputRef}
-                  placeholder="/path/to/folder"
-                />
-                <button type="button" className="btn btn-ghost" onClick={() => addFolder()}>
-                  Add
+          <ul className={styles.folderList}>
+            {folders.length === 0 && (
+              <li className={styles.folderEmpty}>No shared folders configured.</li>
+            )}
+            {folders.map((f) => (
+              <li key={f} className={styles.folderItem}>
+                <span className={styles.folderPath}>{f}</span>
+                <button
+                  type="button"
+                  className={`btn btn-ghost ${styles.removeBtn}`}
+                  onClick={() => removeFolder(f)}
+                  aria-label={`Remove ${f}`}
+                >
+                  Remove
                 </button>
-              </div>
-            </>
-          )}
+              </li>
+            ))}
+          </ul>
+          <div className={styles.addFolderRow}>
+            <FolderPicker
+              value={newFolder}
+              onChange={setNewFolder}
+              onSelect={(p) => addFolder(p)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  addFolder();
+                }
+              }}
+              inputRef={folderInputRef}
+              placeholder="/path/to/folder"
+            />
+            <button type="button" className="btn btn-ghost" onClick={() => addFolder()}>
+              Add
+            </button>
+          </div>
         </div>
 
         <div className={styles.field}>
           <span className={styles.label}>Download folder</span>
-          {downloadLocked ? (
-            <>
-              <p className={styles.folderPath}>{initial.downloadFolder}</p>
-              <p className={styles.hint}>
-                Set via <code>DOWNLOAD_FOLDER</code> environment variable. To change, update your
-                deployment configuration and restart.
-              </p>
-            </>
-          ) : (
-            <FolderPicker
-              value={downloadFolder}
-              onChange={setDownloadFolder}
-              placeholder="/path/to/downloads"
-            />
-          )}
+          <FolderPicker
+            value={downloadFolder}
+            onChange={setDownloadFolder}
+            placeholder="/path/to/downloads"
+          />
         </div>
 
         <label className={styles.field}>
@@ -881,20 +843,13 @@ function NotificationsSection() {
 
 export default function SettingsView() {
   const [settings, setSettings] = useState<Settings | null>(null);
-  const [envConfig, setEnvConfig] = useState<EnvConfig>({
-    sharedFolders: [],
-    downloadFolder: null,
-  });
   const [loadError, setLoadError] = useState('');
 
   useEffect(() => {
     let active = true;
-    Promise.all([getSettings(), getEnvConfig()])
-      .then(([s, env]) => {
-        if (active) {
-          setSettings(s);
-          setEnvConfig(env);
-        }
+    getSettings()
+      .then((s) => {
+        if (active) setSettings(s);
       })
       .catch(() => {
         if (active) setLoadError('Could not load settings. Is the server running?');
@@ -912,7 +867,7 @@ export default function SettingsView() {
       <h1 className={styles.pageTitle}>Settings</h1>
       <ProfileSection initial={settings} />
       <PrivacySection initial={settings} />
-      <FilesSection initial={settings} envConfig={envConfig} />
+      <FilesSection initial={settings} />
       <NetworkingSection initial={settings} />
       <StartupSection initial={settings} />
       <ScriptsSection />

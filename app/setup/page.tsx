@@ -1,6 +1,6 @@
 'use client';
 
-import { type EnvConfig, getEnvConfig, getSettings, patchSettings } from '../lib/api';
+import { getSettings, patchSettings } from '../lib/api';
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 
@@ -24,10 +24,6 @@ export default function SetupPage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [folderInput, setFolderInput] = useState('');
-  const [envConfig, setEnvConfig] = useState<EnvConfig>({
-    sharedFolders: [],
-    downloadFolder: null,
-  });
 
   const [state, setState] = useState<WizardState>({
     name: '',
@@ -40,30 +36,21 @@ export default function SetupPage() {
   });
 
   useEffect(() => {
-    Promise.all([getSettings().catch(() => null), getEnvConfig()]).then(([settings, env]) => {
-      setEnvConfig(env);
-      if (settings) {
-        setState((s) => ({
-          ...s,
-          sharedFolders: settings.sharedFolders,
-          downloadFolder: settings.downloadFolder ?? '',
-          listenPort: String(settings.listenPort),
-        }));
-      }
-    });
+    getSettings()
+      .catch(() => null)
+      .then((settings) => {
+        if (settings) {
+          setState((s) => ({
+            ...s,
+            sharedFolders: settings.sharedFolders,
+            downloadFolder: settings.downloadFolder ?? '',
+            listenPort: String(settings.listenPort),
+          }));
+        }
+      });
   }, []);
 
-  // Steps 3 and 4 are skipped when their values are provided via env vars —
-  // those paths are container-internal and can only be changed by editing
-  // docker-compose.yml and rebuilding, not through the UI.
-  const activeSteps = [
-    1,
-    2,
-    ...(envConfig.sharedFolders.length === 0 ? [3] : []),
-    ...(envConfig.downloadFolder === null ? [4] : []),
-    5,
-    6,
-  ];
+  const activeSteps = [1, 2, 3, 4, 5, 6];
 
   const stepIndex = activeSteps.indexOf(step);
   const isLastStep = stepIndex === activeSteps.length - 1;
@@ -120,13 +107,8 @@ export default function SetupPage() {
     try {
       await patchSettings({
         name: state.name.trim(),
-        // Env-controlled fields must be omitted — the server rejects them with
-        // a 409 when SHARED_FOLDERS/DOWNLOAD_FOLDER are set (their wizard steps
-        // are skipped in that mode anyway)
-        ...(envConfig.sharedFolders.length === 0 && { sharedFolders: state.sharedFolders }),
-        ...(envConfig.downloadFolder === null && {
-          downloadFolder: state.downloadFolder.trim() || null,
-        }),
+        sharedFolders: state.sharedFolders,
+        downloadFolder: state.downloadFolder.trim() || null,
         listenPort: (() => {
           const p = Number(state.listenPort);
           return Number.isInteger(p) && p >= 1 && p <= 65535 ? p : 7734;

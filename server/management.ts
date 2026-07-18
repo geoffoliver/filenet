@@ -51,7 +51,6 @@ import {
   sharedFiles,
 } from './schema';
 import {
-  getEnvConfig,
   getOrCreateSettings,
   parseSharedFolders,
   sanitizeSettings,
@@ -297,10 +296,6 @@ export function createManagementFetch(deps: ManagementDeps): (req: Request) => P
         }
       }
 
-      if (url.pathname === '/api/settings/env' && req.method === 'GET') {
-        return Response.json(getEnvConfig());
-      }
-
       if (url.pathname === '/api/settings') {
         if (req.method === 'GET') {
           const settingsRow = await getOrCreateSettings(db);
@@ -311,19 +306,6 @@ export function createManagementFetch(deps: ManagementDeps): (req: Request) => P
           const result = PatchSettingsBodySchema.safeParse(await req.json());
           if (!result.success) {
             return new Response(result.error.issues[0].message, { status: 400 });
-          }
-          const env = getEnvConfig();
-          if (result.data.sharedFolders !== undefined && env.sharedFolders.length > 0) {
-            return new Response(
-              'sharedFolders is controlled by the SHARED_FOLDERS environment variable',
-              { status: 409 },
-            );
-          }
-          if (result.data.downloadFolder !== undefined && env.downloadFolder !== null) {
-            return new Response(
-              'downloadFolder is controlled by the DOWNLOAD_FOLDER environment variable',
-              { status: 409 },
-            );
           }
           const updated = await updateSettings(db, result.data);
           if (result.data.sharedFolders !== undefined) {
