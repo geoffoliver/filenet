@@ -373,10 +373,10 @@ export async function listDirectory(path?: string, signal?: AbortSignal): Promis
   return res.json();
 }
 
-export async function triggerRescan(): Promise<{ indexed: number; removed: number }> {
+export async function triggerRescan(): Promise<void> {
   const res = await fetch(apiUrl('/api/rescan'), { method: 'POST' });
+  if (res.status === 409) throw new Error('A scan is already in progress.');
   if (!res.ok) throw new Error('Rescan failed');
-  return res.json();
 }
 
 export type FileType = 'all' | 'audio' | 'video' | 'image' | 'document' | 'ebook';

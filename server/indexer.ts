@@ -179,6 +179,13 @@ function nextScanStart(): Date {
   return new Date(t);
 }
 
+// Lets callers that fire scanAndIndex without awaiting it (see management.ts)
+// still answer "is a scan running right now?" synchronously, e.g. to reject a
+// second manual rescan request instead of silently discarding it.
+export function isScanning(): boolean {
+  return scanning;
+}
+
 export async function scanAndIndex(
   db: Db,
   folders: string[],

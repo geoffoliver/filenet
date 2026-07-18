@@ -56,6 +56,7 @@ import {
   sanitizeSettings,
   updateSettings,
 } from './config';
+import { isScanning, scanAndIndex } from './indexer';
 import type { Db } from './db';
 import type { FileWatcherHandle } from './watcher';
 import type { Identity } from './identity';
@@ -63,7 +64,6 @@ import type { SharedFile } from './schema';
 import type { UpdateManager } from './updater';
 import { dmConversationId } from './chat';
 import { initiateNetworkSearch } from './search-protocol';
-import { scanAndIndex } from './indexer';
 import { searchFiles } from './search';
 
 type SharedFileDto = {
@@ -311,10 +311,11 @@ export function createManagementFetch(deps: ManagementDeps): (req: Request) => P
           if (result.data.sharedFolders !== undefined) {
             // Shared folders were just (re)configured — scan them now rather
             // than waiting for the user to notice nothing is indexed and
-            // find the manual "Force rescan" button. Matches the existing
-            // blocking-with-spinner UX of that button; both the setup
-            // wizard and Settings already show a saving/spinner state while
-            // this request is in flight, so no client changes are needed.
+            // find the manual "Force rescan" button. Fire-and-forget: a
+            // library with hundreds of thousands of files can take far
+            // longer to hash than any HTTP request should stay open for, so
+            // this response doesn't wait on it — indexed files simply show
+            // up in Search/Home as the background scan makes progress.
             // Sync the watcher's folder set first: if a folder was removed,
             // this stops the watcher from touching files under it before
             // scanAndIndex runs, so removeStaleEntries (which uses a
@@ -323,7 +324,9 @@ export function createManagementFetch(deps: ManagementDeps): (req: Request) => P
             // and delay the removal to the next scan cycle.
             const folders = parseSharedFolders(updated.sharedFolders);
             watcher?.syncFolders(folders);
-            await scanAndIndex(db, folders);
+            scanAndIndex(db, folders).catch((err) =>
+              console.error('Background scan after settings update failed:', err),
+            );
           }
           return Response.json(sanitizeSettings(updated));
         }
@@ -604,13 +607,18 @@ export function createManagementFetch(deps: ManagementDeps): (req: Request) => P
       }
 
       if (url.pathname === '/api/rescan' && req.method === 'POST') {
-        const settingsRow = await getOrCreateSettings(db);
-        const folders = parseSharedFolders(settingsRow.sharedFolders);
-        const result = await scanAndIndex(db, folders);
-        if (result.skipped) {
+        // Fire-and-forget, same reasoning as the settings PATCH above: a
+        // scan over a large library can run far longer than an HTTP
+        // request should stay open for. isScanning() gives an immediate
+        // answer for the one case a caller needs synchronously — whether a
+        // scan is already running — without waiting for it to finish.
+        if (isScanning()) {
           return new Response('Scan already in progress', { status: 409 });
         }
-        return Response.json({ indexed: result.indexed, removed: result.removed });
+        const settingsRow = await getOrCreateSettings(db);
+        const folders = parseSharedFolders(settingsRow.sharedFolders);
+        scanAndIndex(db, folders).catch((err) => console.error('Background rescan failed:', err));
+        return new Response(null, { status: 202 });
       }
 
       if (url.pathname === '/api/update-status' && req.method === 'GET') {

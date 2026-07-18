@@ -19,10 +19,11 @@ import {
   settings,
   sharedFiles,
 } from '../schema';
+import { count, eq } from 'drizzle-orm';
+import { isScanning, scanAndIndex } from '../indexer';
 import { registerPeer, unregisterPeer } from '../connections';
 import type { FileWatcherHandle } from '../watcher';
 import { createManagementFetch } from '../management';
-import { eq } from 'drizzle-orm';
 import { generateIdentity } from '../identity';
 import { resetPendingForTesting } from '../transfer-protocol';
 
@@ -91,6 +92,18 @@ function jsonReq(path: string, method: string, body: unknown) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   });
+}
+
+async function waitFor(check: () => boolean, timeoutMs = 2000): Promise<void> {
+  const start = Date.now();
+  while (!check()) {
+    if (Date.now() - start > timeoutMs) throw new Error('waitFor timed out');
+    await Bun.sleep(20);
+  }
+}
+
+function sharedFileCount(): number {
+  return db.select({ count: count() }).from(sharedFiles).get()!.count;
 }
 
 beforeAll(async () => {
@@ -819,14 +832,19 @@ describe('PATCH /api/settings', () => {
     expect(body.downloadFolder).toBeNull();
   });
 
-  it('indexes shared folders immediately when they are patched, with no separate rescan call', async () => {
+  it('indexes shared folders in the background when they are patched, with no separate rescan call', async () => {
     const dir = join(tmpDir, 'settings-auto-scan');
     await mkdir(dir);
     await writeFile(join(dir, 'song.txt'), 'content');
 
+    const start = Date.now();
     const res = await makeHandler()(jsonReq('/api/settings', 'PATCH', { sharedFolders: [dir] }));
     expect(res.status).toBe(200);
+    // The response must not block on the scan — verifies the fix for the
+    // wizard hanging on "Saving..." for large libraries.
+    expect(Date.now() - start).toBeLessThan(500);
 
+    await waitFor(() => !isScanning());
     const statsRes = await makeHandler()(req('/api/stats'));
     const stats = await statsRes.json();
     expect(stats.sharedFiles.count).toBe(1);
@@ -847,6 +865,7 @@ describe('PATCH /api/settings', () => {
     const res = await handler(jsonReq('/api/settings', 'PATCH', { sharedFolders: [dir] }));
     expect(res.status).toBe(200);
     expect(watcher.syncFoldersCalls).toEqual([[dir]]);
+    await waitFor(() => !isScanning());
   });
 
   it('does not sync the file watcher when sharedFolders is not part of the patch', async () => {
@@ -868,6 +887,7 @@ describe('PATCH /api/settings', () => {
     await mkdir(dir);
     await writeFile(join(dir, 'song.txt'), 'content');
     await makeHandler()(jsonReq('/api/settings', 'PATCH', { sharedFolders: [dir] }));
+    await waitFor(() => !isScanning());
 
     // A patch that omits sharedFolders shouldn't re-trigger a scan — add a
     // second file that a scan would pick up, then patch an unrelated field.
@@ -907,39 +927,49 @@ describe('PATCH /api/settings', () => {
 // ---------------------------------------------------------------------------
 
 describe('POST /api/rescan', () => {
-  it('returns indexed and removed counts', async () => {
+  it('returns 202 immediately without waiting for the scan to finish', async () => {
     const dir = join(tmpDir, 'rescan-basic');
     await mkdir(dir);
     await writeFile(join(dir, 'song.txt'), 'content');
     await makeHandler()(jsonReq('/api/settings', 'PATCH', { sharedFolders: [dir] }));
+    await waitFor(() => !isScanning());
+    db.delete(sharedFiles).run(); // undo the auto-scan from the PATCH above
 
+    const start = Date.now();
     const res = await makeHandler()(req('/api/rescan', { method: 'POST' }));
-    expect(res.status).toBe(200);
-    const body = await res.json();
-    expect(body.indexed).toBe(1);
-    expect(body.removed).toBe(0);
+    expect(res.status).toBe(202);
+    expect(Date.now() - start).toBeLessThan(500);
+
+    await waitFor(() => !isScanning());
+    expect(sharedFileCount()).toBe(1);
   });
 
-  it('indexes zero files when no shared folders are configured', async () => {
-    const res = await makeHandler()(req('/api/rescan', { method: 'POST' }));
-    expect(res.status).toBe(200);
-    const body = await res.json();
-    expect(body.indexed).toBe(0);
-    expect(body.removed).toBe(0);
-  });
-
-  it('reports removed count for stale entries', async () => {
+  it('removes stale entries in the background', async () => {
     const dir = join(tmpDir, 'rescan-stale');
     await mkdir(dir);
     const stalePath = join(dir, 'stale.txt');
     await writeFile(stalePath, 'stale');
     await makeHandler()(jsonReq('/api/settings', 'PATCH', { sharedFolders: [dir] }));
-    await makeHandler()(req('/api/rescan', { method: 'POST' }));
+    await waitFor(() => !isScanning());
+
     await rm(stalePath);
+    await makeHandler()(req('/api/rescan', { method: 'POST' }));
+    await waitFor(() => !isScanning());
+    expect(sharedFileCount()).toBe(0);
+  });
+
+  it('returns 409 when a scan is already in progress', async () => {
+    const dir = join(tmpDir, 'rescan-in-progress');
+    await mkdir(dir);
+    await writeFile(join(dir, 'song.txt'), 'content');
+    await makeHandler()(jsonReq('/api/settings', 'PATCH', { sharedFolders: [dir] }));
+    await waitFor(() => !isScanning());
+
+    const inFlight = scanAndIndex(db, [dir]);
+    expect(isScanning()).toBe(true);
     const res = await makeHandler()(req('/api/rescan', { method: 'POST' }));
-    expect(res.status).toBe(200);
-    const body = await res.json();
-    expect(body.removed).toBe(1);
+    expect(res.status).toBe(409);
+    await inFlight;
   });
 });
 

@@ -62,12 +62,13 @@ test('rescan now calls the API', async ({ page }) => {
   let called = false;
   await page.route('/api/rescan', (route) => {
     called = true;
-    return route.fulfill({ json: { indexed: 5, removed: 0 } });
+    return route.fulfill({ status: 202 });
   });
 
   await page.goto('/settings');
   await page.getByRole('button', { name: /rescan now/i }).click();
   expect(called).toBe(true);
+  await expect(page.getByText('Scan started')).toBeVisible();
 });
 
 test('auto-accept toggles are rendered', async ({ page }) => {

@@ -571,41 +571,38 @@ function StartupSection({ initial }: { initial: Settings }) {
 // ── Maintenance section ───────────────────────────────────────────────────────
 
 function MaintenanceSection() {
-  const [scanning, setScanning] = useState(false);
-  const [result, setResult] = useState<{ indexed: number; removed: number } | null>(null);
+  const [starting, setStarting] = useState(false);
+  const [started, setStarted] = useState(false);
   const [error, setError] = useState('');
 
   function handleRescan() {
-    setScanning(true);
-    setResult(null);
+    setStarting(true);
+    setStarted(false);
     setError('');
     triggerRescan()
-      .then((r) => setResult(r))
+      .then(() => setStarted(true))
       .catch((err: Error) => setError(err.message))
-      .finally(() => setScanning(false));
+      .finally(() => setStarting(false));
   }
 
   return (
     <Section title="Maintenance">
       <div className={styles.form}>
         <p className={styles.hint}>
-          Trigger an immediate rescan of your shared folders to pick up new or changed files.
+          Trigger an immediate rescan of your shared folders to pick up new or changed files. Scans
+          run in the background — newly indexed files show up in Search and Home as they&apos;re
+          found.
         </p>
         <div className={styles.formFooter}>
           <button
             type="button"
             className="btn btn-primary"
             onClick={handleRescan}
-            disabled={scanning}
+            disabled={starting}
           >
-            {scanning ? 'Scanning…' : 'Rescan now'}
+            {starting ? 'Starting…' : 'Rescan now'}
           </button>
-          {result && (
-            <span className={styles.rescanResult}>
-              Done — {result.indexed} file{result.indexed !== 1 ? 's' : ''} indexed,{' '}
-              {result.removed} removed
-            </span>
-          )}
+          {started && <span className={styles.rescanResult}>Scan started</span>}
           {error && <span className={styles.error}>{error}</span>}
         </div>
       </div>
