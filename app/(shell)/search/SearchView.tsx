@@ -29,6 +29,14 @@ const FILE_TYPES: { value: FileType; label: string }[] = [
   { value: 'ebook', label: 'Ebook' },
 ];
 
+const VALID_FILE_TYPES = new Set<string>(FILE_TYPES.map((t) => t.value));
+
+// Guards against a stale bookmark/shared link carrying an unrecognized
+// ?type= value (e.g. from a since-removed file type) reaching searchFiles().
+function parseFileType(raw: string | null): FileType {
+  return raw && VALID_FILE_TYPES.has(raw) ? (raw as FileType) : 'all';
+}
+
 function SortableHeader({
   column,
   label,
@@ -61,7 +69,7 @@ export default function SearchView() {
   const params = useSearchParams();
 
   const initialQ = params.get('q') ?? '';
-  const initialType = (params.get('type') as FileType) ?? 'all';
+  const initialType = parseFileType(params.get('type'));
 
   const [query, setQuery] = useState(initialQ);
   const [fileType, setFileType] = useState<FileType>(initialType);

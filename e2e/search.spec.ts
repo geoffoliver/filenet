@@ -50,6 +50,12 @@ test('navigates to search page with query when form is submitted', async ({ page
   await page.waitForURL(/\/search\?.*q=my/);
 });
 
+test('falls back to "All types" for an unrecognized ?type= value', async ({ page }) => {
+  await mockSearch(page, { files: [], total: 0, network: [] });
+  await page.goto('/search?q=song&type=bogus');
+  await expect(page.getByRole('combobox', { name: 'File type' })).toHaveValue('all');
+});
+
 test('renders results as a table with core columns', async ({ page }) => {
   await mockSearch(page, { files: [], total: 0, network: [NETWORK_FILE] });
   await page.goto('/search?q=song&type=all');
@@ -66,6 +72,50 @@ test('shows source count and details column in the row', async ({ page }) => {
   const row = page.getByRole('row', { name: /awesome-song.mp3/ });
   await expect(row.getByRole('cell').nth(4)).toHaveText('1'); // Sources column
   await expect(row.getByRole('cell').nth(5)).toHaveText('3:30'); // Details: 210s duration
+});
+
+// awesome-song.mp3 has 1 source (NETWORK_FILE); zzz-echo.mp3 has 3, so the
+// default sort (Sources, descending) puts zzz-echo.mp3 first.
+const MULTI_SOURCE_FILE = ['node-x', 'node-y', 'node-z'].map((nodeId) => ({
+  sha256: 'c'.repeat(64),
+  filename: 'zzz-echo.mp3',
+  size: '1000000',
+  mimeType: 'audio/mpeg',
+  metadata: null,
+  nodeId,
+  viaNodeId: null,
+}));
+
+test('clicking a sortable column header re-sorts the visible rows', async ({ page }) => {
+  await mockSearch(page, { files: [], total: 0, network: [NETWORK_FILE, ...MULTI_SOURCE_FILE] });
+  await page.goto('/search?q=song&type=all');
+
+  // Default sort is Sources descending: zzz-echo.mp3 (3 sources) sorts first.
+  await expect(page.getByRole('row').nth(1)).toContainText('zzz-echo.mp3');
+
+  // Click "Name" to sort ascending: awesome-song.mp3 sorts before zzz-echo.mp3.
+  await page.getByRole('columnheader', { name: 'Name' }).getByRole('button').click();
+  await expect(page.getByRole('row').nth(1)).toContainText('awesome-song.mp3');
+
+  // Click "Name" again to flip to descending: zzz-echo.mp3 sorts first again.
+  await page.getByRole('columnheader', { name: 'Name' }).getByRole('button').click();
+  await expect(page.getByRole('row').nth(1)).toContainText('zzz-echo.mp3');
+});
+
+const RELAYED_ONLY_FILE = {
+  sha256: 'd'.repeat(64),
+  filename: 'relayed-only.mp3',
+  size: '1048576',
+  mimeType: 'audio/mpeg',
+  metadata: null,
+  nodeId: 'node-producer',
+  viaNodeId: 'node-relay', // relayed, not a direct connection — zero direct sources
+};
+
+test('a row with zero direct sources has a disabled checkbox', async ({ page }) => {
+  await mockSearch(page, { files: [], total: 0, network: [RELAYED_ONLY_FILE] });
+  await page.goto('/search?q=song&type=all');
+  await expect(page.getByRole('checkbox', { name: 'Select relayed-only.mp3' })).toBeDisabled();
 });
 
 test('search via navbar navigates to search page', async ({ page }) => {
