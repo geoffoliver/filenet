@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.3] - 2026-07-19
+
 ### Fixed
 
 - **A shared folder added while an earlier scan was still running was silently never indexed** — `scanAndIndex`'s mutex discarded a request that arrived while a scan was already in flight instead of remembering it, and periodic rescan (the only other thing that would eventually have picked it up) is disabled by default, so a folder added this way could go unindexed indefinitely with no error, no log line, and no feedback of any kind. The mutex now queues the most recent request that arrives while busy and automatically runs one more scan with the latest folder list right after the current one finishes.
