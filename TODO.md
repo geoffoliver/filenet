@@ -203,3 +203,4 @@
 - [ ] Improve search results UI
   - [ ] Sortable table of results (filename, filetype, filesize, total sources (etc?))
   - [ ] Items can be downloaded individually (with a "Download" button/link) or multi-selected and bulk downloaded
+- [ ] Match Github pages branding (colors, fonts) to app
