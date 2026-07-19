@@ -27,7 +27,7 @@ export default defineConfig({
       // resolves relative to `baseURL`. Keep API calls same-origin during
       // e2e runs regardless of what .env.development sets for real
       // full-stack local dev, so those mocks keep matching.
-      NEXT_PUBLIC_API_BASE_URL: '',
+      NEXT_PUBLIC_DEV_API_PORT: '',
     },
   },
 });

@@ -1,7 +1,21 @@
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? '';
-
-function apiUrl(path: string): string {
-  return `${API_BASE_URL}${path}`;
+// In production the UI and the API are served by the same Bun process on
+// the same origin, so a plain relative path already reaches the API
+// correctly no matter what host/IP the app was opened from. In dev
+// (`bun run dev`), the Next.js dev server and the Bun API server run as two
+// separate processes on different ports (see package.json's `dev` script
+// and .env.development) — a relative path would hit the Next dev server,
+// not the API. NEXT_PUBLIC_DEV_API_PORT (dev-only) opts into targeting the
+// API server explicitly, but its *host* is resolved at runtime from
+// window.location rather than baked in as a literal "localhost" at build
+// time, so opening the dev server from another machine on the network
+// (e.g. http://192.168.1.50:3001) still reaches that same machine's API
+// port instead of trying to reach "localhost" on the visiting device.
+export function apiUrl(path: string): string {
+  const devApiPort = process.env.NEXT_PUBLIC_DEV_API_PORT;
+  if (devApiPort && typeof window !== 'undefined') {
+    return `${window.location.protocol}//${window.location.hostname}:${devApiPort}${path}`;
+  }
+  return path;
 }
 
 export function formatSpeed(bps: number): string {

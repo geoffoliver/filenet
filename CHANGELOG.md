@@ -7,9 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Startup log now includes the UI URL** — alongside the existing `Node ID:` / `P2P port:` / `UI port:` lines, e.g. `UI: http://localhost:3000`, so it's a clickable/copyable link straight from the terminal.
+
 ### Changed
 
 - **File hashing during a scan now runs in parallel across a pool of worker threads** — hashing every byte of every file is normally the slowest part of indexing, and previously ran one file at a time even after scanning itself moved off the main thread (0.2.2). A new pool of hash-worker threads (`server/hash-worker.ts`, `server/hash-pool.ts`, sized to CPU core count and capped at 8) lets multiple files hash concurrently. Verified against a real compiled binary: hashing a 7.1 GB / 24-file library used 6+ CPU cores in parallel (peak 640% CPU) and finished in ~3 seconds, with every request to the app staying under 75ms throughout. (Considered switching the hash algorithm itself to BLAKE3 first, but benchmarked it — on this hardware, Bun's native SHA-256 is hardware-accelerated and actually ~3.3x _faster_ than both WASM and native BLAKE3 bindings, so the algorithm was left alone.)
+
+### Fixed
+
+- **Dev server API requests hardcoded `localhost`, breaking access from another machine on the network** — `bun run dev` runs the Next.js dev server and the Bun API server as two separate processes on different ports, and `.env.development` pointed the frontend at a build-time-baked `http://localhost:3000`. Opening the dev server from another device (e.g. `http://192.168.1.50:3001`) still tried to reach `/api/*` on that _device's own_ localhost instead of the dev machine. `app/lib/api.ts`'s `apiUrl` now derives the host from `window.location` at runtime — only the port stays fixed via `NEXT_PUBLIC_DEV_API_PORT`. Production is unaffected (UI and API already share an origin there, so relative paths already worked from any host).
 
 ## [0.2.3] - 2026-07-19
 

@@ -96,6 +96,7 @@ if (P2P_PORT === UI_PORT)
 console.log(`Node ID:  ${identity.nodeId}`);
 console.log(`P2P port: ${P2P_PORT}`);
 console.log(`UI port:  ${UI_PORT}`);
+console.log(`UI:       http://localhost:${UI_PORT}`);
 
 const stopRescan = startPeriodicRescan(
   db,
