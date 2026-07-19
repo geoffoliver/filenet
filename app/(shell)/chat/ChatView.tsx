@@ -229,6 +229,9 @@ export default function ChatView() {
   // Deep-link support: /chat?conv=<id> (e.g. from the Friends page's "Message"
   // button). Waits for the target conversation to show up in the polled list
   // before selecting it, then strips the param so refresh/back doesn't replay it.
+  // The state updates are deferred via queueMicrotask because selectConv calls
+  // setState synchronously, which react-hooks/set-state-in-effect (error-level
+  // in this repo) flags when called directly from an effect body.
   useEffect(() => {
     if (!pendingConvId) return;
     if (!conversations.some((c) => c.id === pendingConvId)) return;
