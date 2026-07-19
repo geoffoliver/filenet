@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **`SQLiteError: database is locked` (SQLITE_BUSY) during a large scan** — `server/scan-worker.ts` and `server/watcher-worker.ts` each open their own connection to the same database file as the main thread; WAL mode allows concurrent readers but still only one writer at a time, and SQLite's default `busy_timeout` is 0, so a connection that lost that race failed immediately instead of briefly waiting. Hit in the wild: a large library scan holding the write lock caused the main thread's periodic reconnect tick to fail with this error (harmless in that specific spot — it's caught and just retries next tick 30s later — but the same failure mode could hit less forgiving code paths). `createDb()` now sets `PRAGMA busy_timeout=5000` on every connection. Verified with a real cross-thread repro: a reader on a separate connection failed in 0ms without this fix, and correctly waited out a 2s held write lock and succeeded with it.
+
 ## [0.2.4] - 2026-07-19
 
 ### Added
