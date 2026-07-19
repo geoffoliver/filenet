@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.6] - 2026-07-19
+
 ### Added
 
 - **Docs now cover removing the quarantine flag** — `site/docs.html` has a new section under Installation for macOS Gatekeeper (`xattr -d com.apple.quarantine`) and the Windows Mark-of-the-Web equivalent (`Unblock-File`), since the executable isn't signed on either platform.
