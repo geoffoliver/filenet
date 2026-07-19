@@ -190,3 +190,11 @@
 - [x] GitHub "Pages" (light and dark mode, include screenshots, "docs" section for installation, configuration, etc. with screenshot examples) — static site under `site/` (landing page + docs page, no build step), auto light/dark via `prefers-color-scheme`, 10 real app screenshots (5 views × light/dark), deployed via `.github/workflows/pages.yml` on push to master; live at `https://geoffoliver.github.io/filenet/`
 - [x] Output the UI URL at startup, alongside the existing Node ID: / P2P port: / UI port: log lines (e.g. UI: http://localhost:<UI_PORT>) — `server/index.ts`
 - [x] Derive the API host from window.location instead of hardcoding localhost, so remote access from another machine on the network doesn't break — turned out to be the dev-mode `/api/*` requests (`NEXT_PUBLIC_API_BASE_URL=http://localhost:3000` in `.env.development`), not a websocket; production was already relative/same-origin and unaffected. `app/lib/api.ts`'s `apiUrl` now derives the host from `window.location` at runtime, only the port (`NEXT_PUBLIC_DEV_API_PORT`) is baked in at build time
+
+---
+
+## Cosmetic
+
+- [ ] Format numbers (numeraljs or something) -- for example file counts/filesizes on dashboard.
+- [ ] Settings page is getting long. Split it up into tabs or a left nav/right content UI.
+- [ ] Add instructions to docs for how to remove quarantine from files on MacOS (and whatever the equivalent is on Windows if it even exists).
