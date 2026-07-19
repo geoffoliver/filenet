@@ -75,6 +75,7 @@
 - [x] `ChatMessageSchema` (Zod) validates inbound peer messages; deduplication + atomic transaction
 - [x] Online presence: track which friends are currently connected
 - [x] Give users a way to initiate DM conversations — "Message" button on each accepted friend's row (Friends page) calls the existing `openDmConversation`/`POST /api/conversations` (`peerNodeId`) and navigates to `/chat?conv=<id>`; `ChatView` selects it once it appears in the polled conversation list and strips the query param
+- [ ] `/chat?conv=<id>` deep link gives no feedback if the target conversation never shows up (stale link, or a group the user isn't a member of) — the query param just sits in the URL indefinitely with the normal empty state showing underneath. Flagged in final review of PR for "initiate DM conversations". Low priority: surface a "conversation unavailable" hint instead of silently doing nothing.
 
 ### API (management + P2P bridge)
 
