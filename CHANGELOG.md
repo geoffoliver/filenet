@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.4] - 2026-07-19
+
 ### Added
 
 - **Startup log now includes the UI URL** — alongside the existing `Node ID:` / `P2P port:` / `UI port:` lines, e.g. `UI: http://localhost:3000`, so it's a clickable/copyable link straight from the terminal.
