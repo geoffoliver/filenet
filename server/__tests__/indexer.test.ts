@@ -10,6 +10,7 @@ import {
   hashFile,
   indexFile,
   isScanning,
+  performScan,
   removeIndexedFile,
   removeStaleEntries,
   scanAndIndex,
@@ -371,6 +372,81 @@ describe('removeIndexedFile', () => {
     const path = join(tmpDir, 'remove-indexed-missing.txt');
     await removeIndexedFile(db, path);
     expect(findFile(path)).toBeNull();
+  });
+});
+
+// performScan is the walk-hash-index loop scanAndIndex runs inside the
+// scan worker (server/scan-worker.ts), with hashing dispatched to a pool
+// of hash workers there for real concurrency (server/hash-pool.ts). These
+// tests exercise the concurrency/hashFn plumbing directly with a fake
+// hashFn instead of a real worker pool, so they stay fast — scanAndIndex's
+// own tests below already cover the end-to-end path through a real worker.
+describe('performScan', () => {
+  it('defaults to sequential (concurrency: 1) and the plain hashFile', async () => {
+    const dir = join(tmpDir, 'perform-scan-default');
+    await mkdir(dir);
+    await writeFile(join(dir, 'a.txt'), 'a');
+    const result = await performScan(db, [dir], new Date());
+    expect(result.indexed).toBe(1);
+    expect(fileCount()).toBe(1);
+  });
+
+  it('runs indexFile calls concurrently up to the given concurrency', async () => {
+    const dir = join(tmpDir, 'perform-scan-concurrency');
+    await mkdir(dir);
+    for (let i = 0; i < 6; i++) {
+      await writeFile(join(dir, `f${i}.txt`), `content ${i}`);
+    }
+
+    let current = 0;
+    let maxConcurrent = 0;
+    const hashFn = async (path: string) => {
+      current++;
+      maxConcurrent = Math.max(maxConcurrent, current);
+      await Bun.sleep(20); // hold the slot long enough for others to pile up
+      current--;
+      return hashFile(path);
+    };
+
+    const result = await performScan(db, [dir], new Date(), { hashFn, concurrency: 4 });
+    expect(result.indexed).toBe(6);
+    expect(maxConcurrent).toBeGreaterThan(1);
+    expect(maxConcurrent).toBeLessThanOrEqual(4);
+  });
+
+  it('treats an EACCES/ENOTDIR/ENOENT error from hashFn as inaccessible rather than fatal', async () => {
+    const dir = join(tmpDir, 'perform-scan-hashfn-eacces');
+    await mkdir(dir);
+    await writeFile(join(dir, 'ok.txt'), 'ok');
+    await writeFile(join(dir, 'blocked.txt'), 'blocked');
+
+    const hashFn = async (path: string) => {
+      if (path.endsWith('blocked.txt')) {
+        const err = new Error('permission denied') as NodeJS.ErrnoException;
+        err.code = 'EACCES';
+        throw err;
+      }
+      return hashFile(path);
+    };
+
+    const result = await performScan(db, [dir], new Date(), { hashFn, concurrency: 2 });
+    expect(result.indexed).toBe(1);
+    expect(findFile(join(dir, 'ok.txt'))).not.toBeNull();
+    expect(findFile(join(dir, 'blocked.txt'))).toBeNull();
+  });
+
+  it('rejects and stops on an unexpected (non-ENOENT/EACCES/ENOTDIR) hashFn error', async () => {
+    const dir = join(tmpDir, 'perform-scan-hashfn-fatal');
+    await mkdir(dir);
+    await writeFile(join(dir, 'bad.txt'), 'bad');
+
+    const hashFn = async () => {
+      throw new Error('disk on fire');
+    };
+
+    await expect(performScan(db, [dir], new Date(), { hashFn, concurrency: 2 })).rejects.toThrow(
+      'disk on fire',
+    );
   });
 });
 

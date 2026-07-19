@@ -1,7 +1,5 @@
 import { basename, join, sep } from 'node:path';
 import { lstat, readdir } from 'node:fs/promises';
-import { createHash } from 'node:crypto';
-import { createReadStream } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 
 import type { Changes } from 'bun:sqlite';
@@ -11,18 +9,11 @@ import { SQL, and, eq, lt, or, sql } from 'drizzle-orm';
 import type { Db } from './db';
 import type { SharedFile } from './schema';
 import { extractMetadata } from './metadata';
+import { hashFile } from './hash';
 import { resolveWorkerPath } from './runtime-paths';
 import { sharedFiles } from './schema';
 
-export async function hashFile(path: string): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const hash = createHash('sha256');
-    const stream = createReadStream(path);
-    stream.on('data', (chunk) => hash.update(chunk));
-    stream.on('end', () => resolve(hash.digest('hex')));
-    stream.on('error', reject);
-  });
-}
+export { hashFile } from './hash';
 
 export async function* scanDirectory(
   dir: string,
@@ -68,6 +59,12 @@ export async function indexFile(
   db: Db,
   path: string,
   lastSeenAt: Date = new Date(),
+  // Lets performScan inject a hash-worker-pool-backed hasher (see
+  // server/hash-pool.ts) so hashing many files during a bulk scan can run
+  // concurrently across cores; defaults to the plain in-thread hashFile for
+  // every other caller (the file watcher's single-file reactive path,
+  // direct tests) where pooling overhead isn't worth it.
+  hashFn: (path: string) => Promise<string> = hashFile,
 ): Promise<SharedFile> {
   const s = await lstat(path, { bigint: true });
   if (!s.isFile()) {
@@ -96,7 +93,7 @@ export async function indexFile(
   }
 
   // Full re-index
-  const sha256 = await hashFile(path);
+  const sha256 = await hashFn(path);
   const mimeType = Bun.file(path).type || null;
   const metaObj = await extractMetadata(path);
   const metadata = metaObj ? JSON.stringify(metaObj) : null;
@@ -195,12 +192,37 @@ export function isScanning(): boolean {
 // seconds at a time). Kept independently exported/tested from the worker
 // dispatch itself, so the directory-walk/error-handling edge cases have
 // fast, direct test coverage that doesn't pay real thread-spawn overhead.
+export interface PerformScanOptions {
+  onProgress?: (indexed: number) => void;
+  // Injected by scan-worker.ts as a hash-worker-pool-backed hasher (see
+  // server/hash-pool.ts) so hashing many large files runs concurrently
+  // across cores instead of one at a time on this thread. Defaults to the
+  // plain in-thread hashFile, matching the pre-pool behavior every existing
+  // caller (including every test) already expects.
+  hashFn?: (path: string) => Promise<string>;
+  // How many indexFile calls (each starting with a hashFn call) may be in
+  // flight at once. Should match the hash pool's size when hashFn is
+  // pooled — concurrency beyond the pool size just queues extra requests
+  // on already-busy workers with no added parallelism. Defaults to 1
+  // (fully sequential), matching pre-concurrency behavior.
+  concurrency?: number;
+}
+
+// The actual walk-hash-index-cleanup work, factored out of scanAndIndex so
+// it can run standalone inside the scan worker (server/scan-worker.ts) --
+// scanAndIndex itself just dispatches to that worker so this CPU/IO-heavy
+// loop never runs on the same thread as the HTTP server (see CHANGELOG: a
+// scan over a large library used to make the whole app unresponsive for
+// seconds at a time). Kept independently exported/tested from the worker
+// dispatch itself, so the directory-walk/error-handling edge cases have
+// fast, direct test coverage that doesn't pay real thread-spawn overhead.
 export async function performScan(
   db: Db,
   folders: string[],
   scanStart: Date,
-  onProgress?: (indexed: number) => void,
+  options: PerformScanOptions = {},
 ): Promise<{ indexed: number; removed: number }> {
+  const { onProgress, hashFn = hashFile, concurrency = 1 } = options;
   const seen = new Set<string>();
   let indexed = 0;
   const inaccessibleRoots: string[] = [];
@@ -222,26 +244,46 @@ export async function performScan(
     }
 
     const inaccessibleSubDirs = new Set<string>();
+    // Set by dispatch() below once an indexFile call throws something
+    // unexpected. Checked between dispatches (not inside dispatch itself,
+    // since nothing has had a chance to await/settle by then) so no new
+    // work starts once known, while what's already in flight still drains
+    // via the final Promise.all rather than being abandoned mid-hash.
+    let fatalError: unknown = null;
+    const inFlight = new Set<Promise<void>>();
 
-    try {
-      for await (const path of scanDirectory(folder, true, inaccessibleSubDirs)) {
-        if (seen.has(path)) continue;
-        seen.add(path);
-        try {
-          await indexFile(db, path, scanStart);
+    function dispatch(path: string): void {
+      const task = indexFile(db, path, scanStart, hashFn)
+        .then(() => {
           indexed++;
           onProgress?.(indexed);
-        } catch (err) {
+        })
+        .catch((err: unknown) => {
           const code = (err as NodeJS.ErrnoException).code;
           if (code === 'ENOENT') {
             // File vanished between discovery and indexing — treat as stale
           } else if (code === 'EACCES' || code === 'ENOTDIR') {
             inaccessibleRoots.push(path);
-          } else {
-            throw err;
+          } else if (fatalError === null) {
+            fatalError = err;
           }
+        });
+      inFlight.add(task);
+      void task.finally(() => inFlight.delete(task));
+    }
+
+    try {
+      for await (const path of scanDirectory(folder, true, inaccessibleSubDirs)) {
+        if (seen.has(path)) continue;
+        seen.add(path);
+        dispatch(path);
+        if (inFlight.size >= concurrency) {
+          await Promise.race(inFlight);
         }
+        if (fatalError !== null) break;
       }
+      await Promise.all(inFlight);
+      if (fatalError !== null) throw fatalError;
       for (const dir of inaccessibleSubDirs) {
         inaccessibleRoots.push(dir);
       }
