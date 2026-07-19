@@ -74,6 +74,7 @@
 - [x] Group chat: fan-out to all accepted connected peers on send
 - [x] `ChatMessageSchema` (Zod) validates inbound peer messages; deduplication + atomic transaction
 - [x] Online presence: track which friends are currently connected
+- [ ] Give users a way to initiate DM conversations
 
 ### API (management + P2P bridge)
 
@@ -190,6 +191,7 @@
 - [x] GitHub "Pages" (light and dark mode, include screenshots, "docs" section for installation, configuration, etc. with screenshot examples) — static site under `site/` (landing page + docs page, no build step), auto light/dark via `prefers-color-scheme`, 10 real app screenshots (5 views × light/dark), deployed via `.github/workflows/pages.yml` on push to master; live at `https://geoffoliver.github.io/filenet/`
 - [x] Output the UI URL at startup, alongside the existing Node ID: / P2P port: / UI port: log lines (e.g. UI: http://localhost:<UI_PORT>) — `server/index.ts`
 - [x] Derive the API host from window.location instead of hardcoding localhost, so remote access from another machine on the network doesn't break — turned out to be the dev-mode `/api/*` requests (`NEXT_PUBLIC_API_BASE_URL=http://localhost:3000` in `.env.development`), not a websocket; production was already relative/same-origin and unaffected. `app/lib/api.ts`'s `apiUrl` now derives the host from `window.location` at runtime, only the port (`NEXT_PUBLIC_DEV_API_PORT`) is baked in at build time
+- [ ] "Stream" in search results - Rather than waiting for all the results to be delivered back to a client (which could take a while on a large network) before displaying the results, display results as soon as they are available and update the list as new results come in. It would be nice if there was an indicator to the user that the search was still running so users don't get confused.
 
 ---
 
@@ -198,3 +200,8 @@
 - [x] Format numbers (numeraljs or something) -- for example file counts/filesizes on dashboard. — `formatCount` in `app/lib/api.ts` uses the built-in `Intl`/`.toLocaleString('en-US')` rather than pulling in numeral (33.6KB, unmaintained since 2022) for what's just thousands-separator grouping; wired into the Home dashboard's shared-files/downloads counts
 - [x] Settings page is getting long. Split it up into tabs or a left nav/right content UI. — `app/(shell)/settings/SettingsView.tsx` now uses a WAI-ARIA tabbed layout (roving tabindex, arrow-key nav), one tab per section; sections with unsaved drafts (Profile, Friends & Privacy, Files, Networking, Startup, Updates) track a dirty baseline and show a dot on their tab plus a `beforeunload` warning until saved
 - [x] Add instructions to docs for how to remove quarantine from files on MacOS (and whatever the equivalent is on Windows if it even exists). — `site/docs.html`, new "Removing the quarantine flag" section under Installation covering macOS `xattr -d com.apple.quarantine` and Windows' Mark-of-the-Web/`Unblock-File` equivalent
+- [x] Improve search results UI
+  - [x] Sortable table of results (filename, filetype, filesize, total sources (etc?)) — `SearchView.tsx` now renders a `<table>`; Name/Type/Size/Sources columns sort ascending/descending on header click (default: Sources descending), plus a type-aware Details column (duration/dimensions/page count)
+  - [x] Items can be downloaded individually (with a "Download" button/link) or multi-selected and bulk downloaded — per-row checkboxes (disabled when a result has no direct sources) plus a "Download All" bulk-action toolbar; full metadata moved to a new slide-in `ResultInfoDrawer`
+- [ ] Search results: consolidate per-row download polling — each `ResultRow` runs its own independent `getTransfers()` poll every 2s while its download is active (pre-existing pattern, not new to the table rework), so bulk-downloading N files fires N concurrent identical `GET /api/transfers` requests every 2s. Flagged by Copilot review on PR #39. Not a real problem at this app's actual scale (self-hosted, single user), but worth hoisting into one shared poll in `SearchView` fanned out by `sha256` if it ever becomes one.
+- [ ] Match Github pages branding (colors, fonts) to app

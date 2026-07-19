@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Search results are now a sortable table** — replaced the click-to-expand card list with a table (Name, Type, Size, Sources, and a type-aware Details column showing duration/dimensions/page-count). Column headers sort ascending/descending; checkboxes support multi-select with a "Download All" bulk action; full metadata moved to a slide-in info drawer (`ResultInfoDrawer`) opened via a per-row info icon.
+
 ## [0.2.7] - 2026-07-19
 
 ### Fixed

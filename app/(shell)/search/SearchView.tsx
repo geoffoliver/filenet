@@ -1,11 +1,23 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 
-import type { FileType, LocalFile, NetworkFile, TransferState } from '../../lib/api';
-import { formatBytes, getTransfers, searchFiles, startDownload } from '../../lib/api';
+import {
+  DEFAULT_SORT,
+  type SearchHit,
+  type SortColumn,
+  type SortDirection,
+  defaultDirectionFor,
+  directSources,
+  mergeResults,
+  sortHits,
+} from '../../lib/searchResults';
+import type { FileType } from '../../lib/api';
+import { searchFiles } from '../../lib/api';
 
+import ResultInfoDrawer from './ResultInfoDrawer';
+import ResultRow from './ResultRow';
 import styles from './search.module.css';
 
 const FILE_TYPES: { value: FileType; label: string }[] = [
@@ -17,221 +29,36 @@ const FILE_TYPES: { value: FileType; label: string }[] = [
   { value: 'ebook', label: 'Ebook' },
 ];
 
-type SearchHit = {
-  sha256: string;
-  filename: string;
-  size: string;
-  mimeType: string | null;
-  metadata: string | null;
-  local: boolean;
-  networkSources: NetworkFile[];
-};
+const VALID_FILE_TYPES = new Set<string>(FILE_TYPES.map((t) => t.value));
 
-type ParsedMeta = {
-  title?: string;
-  artist?: string;
-  album?: string;
-  year?: number | string;
-  track?: string;
-  duration?: number;
-  bitrate?: number;
-  genre?: string;
-  width?: number;
-  height?: number;
-};
-
-function mergeResults(local: LocalFile[], network: NetworkFile[]): SearchHit[] {
-  const map = new Map<string, SearchHit>();
-  for (const f of local) {
-    map.set(f.sha256, {
-      sha256: f.sha256,
-      filename: f.filename,
-      size: f.size,
-      mimeType: f.mimeType,
-      metadata: f.metadata,
-      local: true,
-      networkSources: [],
-    });
-  }
-  for (const n of network) {
-    const hit = map.get(n.sha256);
-    if (hit) {
-      hit.networkSources.push(n);
-    } else {
-      map.set(n.sha256, {
-        sha256: n.sha256,
-        filename: n.filename,
-        size: n.size,
-        mimeType: n.mimeType,
-        metadata: n.metadata,
-        local: false,
-        networkSources: [n],
-      });
-    }
-  }
-  return Array.from(map.values());
+// Guards against a stale bookmark/shared link carrying an unrecognized
+// ?type= value (e.g. from a since-removed file type) reaching searchFiles().
+function parseFileType(raw: string | null): FileType {
+  return raw && VALID_FILE_TYPES.has(raw) ? (raw as FileType) : 'all';
 }
 
-function formatDuration(seconds: number): string {
-  const h = Math.floor(seconds / 3600);
-  const m = Math.floor((seconds % 3600) / 60);
-  const s = Math.floor(seconds % 60);
-  if (h > 0) return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
-  return `${m}:${String(s).padStart(2, '0')}`;
-}
-
-function parseMeta(raw: string | null): ParsedMeta | null {
-  if (!raw) return null;
-  try {
-    return JSON.parse(raw) as ParsedMeta;
-  } catch {
-    return null;
-  }
-}
-
-function mimeIcon(mimeType: string | null): string {
-  if (!mimeType) return '📄';
-  if (mimeType.startsWith('audio/')) return '🎵';
-  if (mimeType.startsWith('video/')) return '🎬';
-  if (mimeType.startsWith('image/')) return '🖼';
-  if (mimeType.includes('pdf')) return '📕';
-  if (mimeType.includes('epub') || mimeType.includes('ebook')) return '📚';
-  if (mimeType.includes('word') || mimeType.includes('document')) return '📝';
-  return '📄';
-}
-
-const TERMINAL_STATES = new Set<TransferState>(['COMPLETED', 'FAILED', 'CANCELLED']);
-
-function MetaDetail({ hit }: { hit: SearchHit }) {
-  const meta = parseMeta(hit.metadata);
-  // Only include sources we're directly connected to — relayed results carry the
-  // producer's nodeId but we have no WebSocket to them, only to viaNodeId.
-  const directSources = hit.networkSources.filter((n) => !n.viaNodeId || n.viaNodeId === n.nodeId);
-  const sources = (hit.local ? 1 : 0) + hit.networkSources.length;
-  const rows: { label: string; value: string }[] = [];
-  const [starting, setStarting] = useState(false);
-  const [downloadId, setDownloadId] = useState<string | null>(null);
-  const [downloadState, setDownloadState] = useState<TransferState | null>(null);
-  const [downloadProgress, setDownloadProgress] = useState(0);
-  const [downloadError, setDownloadError] = useState('');
-
-  useEffect(() => {
-    if (!downloadId || (downloadState && TERMINAL_STATES.has(downloadState))) return;
-    let cancelled = false;
-    let timer: ReturnType<typeof setTimeout>;
-
-    async function tick() {
-      try {
-        const transfers = await getTransfers();
-        if (cancelled) return;
-        const t = transfers.find((x) => x.id === downloadId);
-        if (t) {
-          setDownloadState(t.state);
-          setDownloadProgress(t.progress);
-          if (!TERMINAL_STATES.has(t.state)) timer = setTimeout(tick, 2000);
-        } else {
-          timer = setTimeout(tick, 2000);
-        }
-      } catch {
-        if (!cancelled) timer = setTimeout(tick, 2000);
-      }
-    }
-
-    timer = setTimeout(tick, 2000);
-    return () => {
-      cancelled = true;
-      clearTimeout(timer);
-    };
-  }, [downloadId, downloadState]);
-
-  if (meta) {
-    if (meta.title) rows.push({ label: 'Title', value: String(meta.title) });
-    if (meta.artist) rows.push({ label: 'Artist', value: String(meta.artist) });
-    if (meta.album) rows.push({ label: 'Album', value: String(meta.album) });
-    if (meta.year) rows.push({ label: 'Year', value: String(meta.year) });
-    if (meta.track) rows.push({ label: 'Track', value: String(meta.track) });
-    if (meta.genre) rows.push({ label: 'Genre', value: String(meta.genre) });
-    if (typeof meta.duration === 'number')
-      rows.push({ label: 'Duration', value: formatDuration(meta.duration) });
-    if (typeof meta.bitrate === 'number')
-      rows.push({ label: 'Bitrate', value: `${meta.bitrate} kbps` });
-    if (meta.width && meta.height)
-      rows.push({ label: 'Dimensions', value: `${meta.width}×${meta.height}` });
-  }
-
+function SortableHeader({
+  column,
+  label,
+  sort,
+  onSort,
+}: {
+  column: SortColumn;
+  label: string;
+  sort: { column: SortColumn; direction: SortDirection };
+  onSort: (column: SortColumn) => void;
+}) {
+  const active = sort.column === column;
+  const ariaSort = active ? (sort.direction === 'asc' ? 'ascending' : 'descending') : 'none';
   return (
-    <div className={styles.detail}>
-      <div className={styles.detailMeta}>
-        <span className={styles.detailItem}>
-          <span className={styles.detailLabel}>Hash</span>
-          <span className={styles.detailValue} title={hit.sha256}>
-            {hit.sha256.slice(0, 12)}…
-          </span>
-        </span>
-        <span className={styles.detailItem}>
-          <span className={styles.detailLabel}>Sources</span>
-          <span className={styles.detailValue}>{sources}</span>
-        </span>
-        {hit.local && (
-          <span className={styles.detailItem}>
-            <span className={styles.localBadge}>on this node</span>
-          </span>
+    <th aria-sort={ariaSort} scope="col">
+      <button type="button" className={styles.sortButton} onClick={() => onSort(column)}>
+        {label}
+        {active && (
+          <span className={styles.sortIndicator}>{sort.direction === 'asc' ? '▲' : '▼'}</span>
         )}
-        {rows.map(({ label, value }) => (
-          <span key={label} className={styles.detailItem}>
-            <span className={styles.detailLabel}>{label}</span>
-            <span className={styles.detailValue}>{value}</span>
-          </span>
-        ))}
-      </div>
-      <div className={styles.downloadArea}>
-        <button
-          type="button"
-          className="btn btn-primary"
-          disabled={
-            starting ||
-            (!!downloadId && downloadState !== 'FAILED' && downloadState !== 'CANCELLED') ||
-            directSources.length === 0
-          }
-          onClick={() => {
-            const allSources = directSources.map((n) => n.nodeId);
-            setDownloadId(null);
-            setDownloadState(null);
-            setDownloadProgress(0);
-            setStarting(true);
-            setDownloadError('');
-            startDownload({
-              sha256: hit.sha256,
-              filename: hit.filename,
-              size: hit.size,
-              mimeType: hit.mimeType ?? undefined,
-              sources: allSources,
-            })
-              .then(({ id }) => {
-                setDownloadId(id);
-                setDownloadState('PENDING');
-              })
-              .catch((err: Error) => setDownloadError(err.message))
-              .finally(() => setStarting(false));
-          }}
-        >
-          {starting
-            ? 'Starting…'
-            : downloadState === 'COMPLETED'
-              ? 'Done ✓'
-              : downloadState === 'FAILED'
-                ? 'Failed'
-                : downloadState === 'CANCELLED'
-                  ? 'Cancelled'
-                  : downloadState === 'DOWNLOADING' || downloadState === 'PAUSED'
-                    ? `${Math.round(downloadProgress * 100)}%`
-                    : downloadId
-                      ? 'Queued'
-                      : 'Download'}
-        </button>
-        {downloadError && <span className={styles.downloadError}>{downloadError}</span>}
-      </div>
-    </div>
+      </button>
+    </th>
   );
 }
 
@@ -242,7 +69,7 @@ export default function SearchView() {
   const params = useSearchParams();
 
   const initialQ = params.get('q') ?? '';
-  const initialType = (params.get('type') as FileType) ?? 'all';
+  const initialType = parseFileType(params.get('type'));
 
   const [query, setQuery] = useState(initialQ);
   const [fileType, setFileType] = useState<FileType>(initialType);
@@ -251,7 +78,10 @@ export default function SearchView() {
   const [loading, setLoading] = useState(!!initialQ.trim());
   const [error, setError] = useState('');
   const [hasSearched, setHasSearched] = useState(false);
-  const [expandedSha, setExpandedSha] = useState<string | null>(null);
+  const [sort, setSort] = useState<{ column: SortColumn; direction: SortDirection }>(DEFAULT_SORT);
+  const [infoHit, setInfoHit] = useState<SearchHit | null>(null);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const downloadTriggers = useRef(new Map<string, () => void>());
 
   // Auto-run search on mount when there's an initial query (e.g. from navbar).
   // This effect has empty deps because the component remounts on param changes.
@@ -261,6 +91,7 @@ export default function SearchView() {
     searchFiles({ q: initialQ, type: initialType, network: true }, controller.signal)
       .then((res) => {
         setHits(mergeResults(res.files, res.network ?? []));
+        setSelected(new Set());
         setHasSearched(true);
         setLoading(false);
       })
@@ -282,8 +113,53 @@ export default function SearchView() {
     // Navigation triggers a remount of this component via the key in SearchPage
   }
 
-  function toggleExpand(sha256: string) {
-    setExpandedSha((prev) => (prev === sha256 ? null : sha256));
+  function handleSort(column: SortColumn) {
+    setSort((prev) =>
+      prev.column === column
+        ? { column, direction: prev.direction === 'asc' ? 'desc' : 'asc' }
+        : { column, direction: defaultDirectionFor(column) },
+    );
+  }
+
+  const registerDownloadTrigger = useCallback(
+    (sha256: string, trigger: (() => void) | undefined) => {
+      if (trigger) downloadTriggers.current.set(sha256, trigger);
+      else downloadTriggers.current.delete(sha256);
+    },
+    [],
+  );
+
+  const sortedHits = sortHits(hits, sort.column, sort.direction);
+  const selectableShas = new Set(
+    sortedHits.filter((h) => directSources(h).length > 0).map((h) => h.sha256),
+  );
+  const allSelected =
+    selectableShas.size > 0 && [...selectableShas].every((sha) => selected.has(sha));
+  const someSelected = selected.size > 0 && !allSelected;
+
+  const headerCheckboxRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (headerCheckboxRef.current) headerCheckboxRef.current.indeterminate = someSelected;
+  }, [someSelected]);
+
+  function toggleSelectOne(sha256: string) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(sha256)) next.delete(sha256);
+      else next.add(sha256);
+      return next;
+    });
+  }
+
+  function toggleSelectAll() {
+    setSelected(allSelected ? new Set() : new Set(selectableShas));
+  }
+
+  function handleDownloadAll() {
+    for (const sha256 of selected) {
+      downloadTriggers.current.get(sha256)?.();
+    }
+    setSelected(new Set());
   }
 
   return (
@@ -328,44 +204,64 @@ export default function SearchView() {
         </div>
       )}
 
-      {hits.length > 0 && (
-        <ul className={styles.results}>
-          {hits.map((hit) => {
-            const sources = (hit.local ? 1 : 0) + hit.networkSources.length;
-            const expanded = expandedSha === hit.sha256;
-            return (
-              <li key={hit.sha256} className={styles.result}>
-                <button
-                  type="button"
-                  className={styles.resultMain}
-                  onClick={() => toggleExpand(hit.sha256)}
-                  aria-expanded={expanded}
-                >
-                  <div className={styles.resultIcon}>{mimeIcon(hit.mimeType)}</div>
-                  <div className={styles.resultInfo}>
-                    <span className={styles.resultName}>{hit.filename}</span>
-                    <span className={styles.resultMeta}>
-                      {formatBytes(hit.size)}
-                      {hit.mimeType && (
-                        <>
-                          {' · '}
-                          <span className={styles.mimeLabel}>
-                            {hit.mimeType.split('/')[1] ?? hit.mimeType}
-                          </span>
-                        </>
-                      )}
-                      {' · '}
-                      {sources} {sources === 1 ? 'source' : 'sources'}
-                    </span>
-                  </div>
-                  <span className={styles.expandIcon}>{expanded ? '▲' : '▼'}</span>
-                </button>
-                {expanded && <MetaDetail hit={hit} />}
-              </li>
-            );
-          })}
-        </ul>
+      {selected.size > 0 && (
+        <div className={styles.toolbar}>
+          <span className={styles.toolbarCount}>{selected.size} selected</span>
+          <button type="button" className="btn btn-primary" onClick={handleDownloadAll}>
+            Download All
+          </button>
+          <button type="button" className="btn btn-ghost" onClick={() => setSelected(new Set())}>
+            Clear
+          </button>
+        </div>
       )}
+
+      {hits.length > 0 && (
+        <div className={styles.tableWrap}>
+          <table className={styles.table}>
+            <thead>
+              <tr>
+                <th className={styles.thCheckbox} scope="col">
+                  <input
+                    ref={headerCheckboxRef}
+                    type="checkbox"
+                    aria-label="Select all results"
+                    checked={allSelected}
+                    disabled={selectableShas.size === 0}
+                    onChange={toggleSelectAll}
+                  />
+                </th>
+                <SortableHeader column="name" label="Name" sort={sort} onSort={handleSort} />
+                <SortableHeader column="type" label="Type" sort={sort} onSort={handleSort} />
+                <SortableHeader column="size" label="Size" sort={sort} onSort={handleSort} />
+                <SortableHeader column="sources" label="Sources" sort={sort} onSort={handleSort} />
+                <th className={styles.thDetails} scope="col">
+                  Details
+                </th>
+                <th className={styles.thDownload} scope="col">
+                  <span className={styles.srOnly}>Download</span>
+                </th>
+                <th className={styles.thInfo} scope="col">
+                  <span className={styles.srOnly}>Info panel</span>
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {sortedHits.map((hit) => (
+                <ResultRow
+                  key={hit.sha256}
+                  hit={hit}
+                  selected={selected.has(hit.sha256)}
+                  onToggleSelect={toggleSelectOne}
+                  onOpenInfo={setInfoHit}
+                  onRegisterDownload={registerDownloadTrigger}
+                />
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      <ResultInfoDrawer hit={infoHit} onClose={() => setInfoHit(null)} />
     </div>
   );
 }
