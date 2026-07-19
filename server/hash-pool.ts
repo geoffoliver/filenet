@@ -16,6 +16,9 @@ export class HashWorkerPool {
   private nextId = 0;
 
   constructor(size: number, callerDir: string) {
+    if (!Number.isInteger(size) || size < 1) {
+      throw new Error(`HashWorkerPool size must be a positive integer, got: ${size}`);
+    }
     for (let i = 0; i < size; i++) {
       const worker = new Worker(resolveWorkerPath('hash-worker', callerDir));
       const pending = new Map<number, PendingEntry>();
@@ -57,6 +60,9 @@ export class HashWorkerPool {
   }
 
   hash = (path: string): Promise<string> => {
+    if (this.workers.length === 0) {
+      return Promise.reject(new Error('HashWorkerPool has no workers (already terminated?)'));
+    }
     let idx = 0;
     for (let i = 1; i < this.workers.length; i++) {
       if (this.pendingByWorker[i].size < this.pendingByWorker[idx].size) idx = i;

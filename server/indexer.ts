@@ -222,7 +222,15 @@ export async function performScan(
   scanStart: Date,
   options: PerformScanOptions = {},
 ): Promise<{ indexed: number; removed: number }> {
-  const { onProgress, hashFn = hashFile, concurrency = 1 } = options;
+  const { onProgress, hashFn = hashFile } = options;
+  // Guard against 0/negative/NaN/Infinity: the loop below only throttles
+  // dispatch when inFlight.size >= concurrency, so a non-finite or
+  // non-positive value would never trigger that check and let inFlight
+  // grow unbounded for the whole folder walk.
+  const requestedConcurrency = options.concurrency ?? 1;
+  const concurrency = Number.isFinite(requestedConcurrency)
+    ? Math.max(1, Math.floor(requestedConcurrency))
+    : 1;
   const seen = new Set<string>();
   let indexed = 0;
   const inaccessibleRoots: string[] = [];
@@ -245,9 +253,13 @@ export async function performScan(
 
     const inaccessibleSubDirs = new Set<string>();
     // Set by dispatch() below once an indexFile call throws something
-    // unexpected. Checked between dispatches (not inside dispatch itself,
-    // since nothing has had a chance to await/settle by then) so no new
-    // work starts once known, while what's already in flight still drains
+    // unexpected. Checked at the top of the loop, before the next
+    // dispatch, so no new work starts once known — though since nothing
+    // awaits between one iteration's dispatch and the next iteration's
+    // check unless the concurrency cap was hit (in which case the check
+    // right after that await catches it just as fast), this is really
+    // about reading clearly, not a behavior difference from checking
+    // right after dispatch instead. What's already in flight still drains
     // via the final Promise.all rather than being abandoned mid-hash.
     let fatalError: unknown = null;
     const inFlight = new Set<Promise<void>>();
@@ -274,13 +286,13 @@ export async function performScan(
 
     try {
       for await (const path of scanDirectory(folder, true, inaccessibleSubDirs)) {
+        if (fatalError !== null) break;
         if (seen.has(path)) continue;
         seen.add(path);
         dispatch(path);
         if (inFlight.size >= concurrency) {
           await Promise.race(inFlight);
         }
-        if (fatalError !== null) break;
       }
       await Promise.all(inFlight);
       if (fatalError !== null) throw fatalError;

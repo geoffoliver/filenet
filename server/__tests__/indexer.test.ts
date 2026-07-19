@@ -414,6 +414,23 @@ describe('performScan', () => {
     expect(maxConcurrent).toBeLessThanOrEqual(4);
   });
 
+  it('clamps a non-finite or non-positive concurrency instead of letting it dispatch unbounded', async () => {
+    const dir = join(tmpDir, 'perform-scan-concurrency-clamped');
+    await mkdir(dir);
+    for (let i = 0; i < 6; i++) {
+      await writeFile(join(dir, `f${i}.txt`), `content ${i}`);
+    }
+
+    for (const badConcurrency of [Infinity, NaN, 0, -1]) {
+      const result = await performScan(db, [dir], new Date(), { concurrency: badConcurrency });
+      // Every value here must behave as if clamped to a sane positive
+      // integer (>= 1) rather than hanging, throwing, or letting inFlight
+      // grow unbounded (which Infinity/NaN would do unclamped, since
+      // `inFlight.size >= concurrency` is never true for either).
+      expect(result.indexed).toBe(6);
+    }
+  });
+
   it('treats an EACCES/ENOTDIR/ENOENT error from hashFn as inaccessible rather than fatal', async () => {
     const dir = join(tmpDir, 'perform-scan-hashfn-eacces');
     await mkdir(dir);

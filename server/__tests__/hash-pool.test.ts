@@ -73,4 +73,21 @@ describe('HashWorkerPool', () => {
 
     await expect(promise).rejects.toThrow();
   });
+
+  it('rejects hash() calls made after terminate() instead of crashing', async () => {
+    tmpDir = await mkdtemp(join(tmpdir(), 'filenet-hash-pool-'));
+    const path = join(tmpDir, 'a.txt');
+    await writeFile(path, 'hello');
+
+    pool = new HashWorkerPool(1, SERVER_DIR);
+    pool.terminate();
+
+    await expect(pool.hash(path)).rejects.toThrow(/no workers/i);
+  });
+
+  it('throws immediately for an invalid pool size instead of failing confusingly on first use', () => {
+    expect(() => new HashWorkerPool(0, SERVER_DIR)).toThrow(/positive integer/i);
+    expect(() => new HashWorkerPool(-1, SERVER_DIR)).toThrow(/positive integer/i);
+    expect(() => new HashWorkerPool(1.5, SERVER_DIR)).toThrow(/positive integer/i);
+  });
 });
