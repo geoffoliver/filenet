@@ -15,6 +15,7 @@ import {
 import type { FileType } from '../../lib/api';
 import { searchFiles } from '../../lib/api';
 
+import ResultInfoDrawer from './ResultInfoDrawer';
 import ResultRow from './ResultRow';
 import styles from './search.module.css';
 
@@ -69,6 +70,7 @@ export default function SearchView() {
   const [error, setError] = useState('');
   const [hasSearched, setHasSearched] = useState(false);
   const [sort, setSort] = useState<{ column: SortColumn; direction: SortDirection }>(DEFAULT_SORT);
+  const [infoHit, setInfoHit] = useState<SearchHit | null>(null);
   const downloadTriggers = useRef(new Map<string, () => void>());
 
   // Auto-run search on mount when there's an initial query (e.g. from navbar).
@@ -190,7 +192,7 @@ export default function SearchView() {
                   hit={hit}
                   selected={false}
                   onToggleSelect={() => {}}
-                  onOpenInfo={() => {}}
+                  onOpenInfo={setInfoHit}
                   onRegisterDownload={registerDownloadTrigger}
                 />
               ))}
@@ -198,6 +200,7 @@ export default function SearchView() {
           </table>
         </div>
       )}
+      <ResultInfoDrawer hit={infoHit} onClose={() => setInfoHit(null)} />
     </div>
   );
 }

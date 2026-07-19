@@ -123,3 +123,33 @@ test('download button shows Done after completion', async ({ page }) => {
   await page.getByRole('button', { name: 'Download' }).click();
   await expect(page.getByRole('button', { name: 'Done ✓' })).toBeVisible({ timeout: 8000 });
 });
+
+test('info icon opens a drawer with full metadata', async ({ page }) => {
+  await mockSearch(page, { files: [], total: 0, network: [NETWORK_FILE] });
+  await page.goto('/search?q=song&type=all');
+  await page.getByRole('button', { name: /details for awesome-song.mp3/i }).click();
+  const dialog = page.getByRole('dialog');
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByText('Test Artist')).toBeVisible();
+  await expect(dialog.getByText('Test Album')).toBeVisible();
+  await expect(dialog.getByText('3:30')).toBeVisible(); // 210s duration
+});
+
+test('drawer closes on Escape, X button, and backdrop click', async ({ page }) => {
+  await mockSearch(page, { files: [], total: 0, network: [NETWORK_FILE] });
+  await page.goto('/search?q=song&type=all');
+
+  await page.getByRole('button', { name: /details for awesome-song.mp3/i }).click();
+  await expect(page.getByRole('dialog')).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('dialog')).not.toBeVisible();
+
+  await page.getByRole('button', { name: /details for awesome-song.mp3/i }).click();
+  await page.getByRole('button', { name: 'Close' }).click();
+  await expect(page.getByRole('dialog')).not.toBeVisible();
+
+  await page.getByRole('button', { name: /details for awesome-song.mp3/i }).click();
+  // Click outside the drawer panel itself (top-left corner of the backdrop)
+  await page.mouse.click(5, 5);
+  await expect(page.getByRole('dialog')).not.toBeVisible();
+});
