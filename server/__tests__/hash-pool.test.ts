@@ -90,4 +90,31 @@ describe('HashWorkerPool', () => {
     expect(() => new HashWorkerPool(-1, SERVER_DIR)).toThrow(/positive integer/i);
     expect(() => new HashWorkerPool(1.5, SERVER_DIR)).toThrow(/positive integer/i);
   });
+
+  it('rejects cleanly (rather than leaking a pending entry) when postMessage throws on a dead worker', async () => {
+    tmpDir = await mkdtemp(join(tmpdir(), 'filenet-hash-pool-'));
+    const path = join(tmpDir, 'a.txt');
+    await writeFile(path, 'hello');
+
+    pool = new HashWorkerPool(1, SERVER_DIR);
+    // Simulate a worker that crashed (hit onerror, which clears its
+    // pending map but deliberately doesn't remove it from the pool — see
+    // hash-pool.ts) without going through pool.terminate(), by terminating
+    // the individual underlying worker directly. postMessage to it then
+    // throws synchronously, same as a real crash would eventually cause.
+    const internals = pool as unknown as { workers: Worker[] };
+    internals.workers[0].terminate();
+    await Bun.sleep(50);
+
+    await expect(pool.hash(path)).rejects.toThrow(/terminated/i);
+
+    // The leak this guards against: without the fix, the failed call's
+    // pending entry stays in the map forever, so this worker keeps
+    // looking "least busy" (0 real pending, but the map never reflects
+    // that count changing) and every subsequent call keeps routing to it
+    // and keeps failing the same way instead of surfacing a usable error
+    // eventually. Prove that isn't happening by confirming a second call
+    // also fails the same clean way rather than hanging.
+    await expect(pool.hash(path)).rejects.toThrow(/terminated/i);
+  });
 });

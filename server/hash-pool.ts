@@ -68,10 +68,23 @@ export class HashWorkerPool {
       if (this.pendingByWorker[i].size < this.pendingByWorker[idx].size) idx = i;
     }
     const id = this.nextId++;
+    const pending = this.pendingByWorker[idx];
     return new Promise((resolve, reject) => {
-      this.pendingByWorker[idx].set(id, { resolve, reject });
+      pending.set(id, { resolve, reject });
       const request: HashWorkerRequest = { id, path };
-      this.workers[idx].postMessage(request);
+      try {
+        this.workers[idx].postMessage(request);
+      } catch (err) {
+        // postMessage throws synchronously for an already-terminated
+        // worker (verified against Bun) — e.g. one that crashed and hit
+        // onerror above without being removed from the pool. Without this,
+        // the entry set on the line above leaks forever: nothing else will
+        // ever remove it, since no response can arrive for a message that
+        // was never sent, and it keeps skewing this worker toward looking
+        // "least busy" for every future hash() call.
+        pending.delete(id);
+        reject(err instanceof Error ? err : new Error(String(err)));
+      }
     });
   };
 
