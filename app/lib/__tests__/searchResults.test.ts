@@ -190,6 +190,38 @@ describe('sortHits', () => {
     sortHits(hits, 'name', 'asc');
     expect(hits).toEqual(copy);
   });
+
+  test('sorts by type ascending', () => {
+    const typeHits = [
+      hit({ sha256: 'd'.repeat(64), filename: 'photo.gif', mimeType: 'image/gif' }),
+      hit({ sha256: 'e'.repeat(64), filename: 'song.mp3', mimeType: 'audio/mpeg' }),
+      hit({ sha256: 'f'.repeat(64), filename: 'doc.pdf', mimeType: 'application/pdf' }),
+    ];
+    const sorted = sortHits(typeHits, 'type', 'asc');
+    expect(sorted.map((h) => h.filename)).toEqual(['photo.gif', 'song.mp3', 'doc.pdf']);
+  });
+
+  test('sorts by type descending', () => {
+    const typeHits = [
+      hit({ sha256: 'd'.repeat(64), filename: 'photo.gif', mimeType: 'image/gif' }),
+      hit({ sha256: 'e'.repeat(64), filename: 'song.mp3', mimeType: 'audio/mpeg' }),
+      hit({ sha256: 'f'.repeat(64), filename: 'doc.pdf', mimeType: 'application/pdf' }),
+    ];
+    const sorted = sortHits(typeHits, 'type', 'desc');
+    expect(sorted.map((h) => h.filename)).toEqual(['doc.pdf', 'song.mp3', 'photo.gif']);
+  });
+
+  test('sorts by size descending', () => {
+    const sorted = sortHits(hits, 'size', 'desc');
+    expect(sorted.map((h) => h.size)).toEqual(['300', '200', '100']);
+  });
+
+  test('sorts by sources ascending', () => {
+    const sorted = sortHits(hits, 'sources', 'asc');
+    expect(sourceCount(sorted[2])).toBe(3); // apple.mp3 (3 sources) sorts last ascending
+    expect(sourceCount(sorted[0])).toBe(0);
+    expect(sourceCount(sorted[1])).toBe(0);
+  });
 });
 
 describe('detailColumnValue', () => {
