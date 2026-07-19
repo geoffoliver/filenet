@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import { type SearchHit, formatDuration, parseMeta } from '../../lib/searchResults';
 
@@ -14,6 +14,7 @@ export default function ResultInfoDrawer({
   onClose: () => void;
 }) {
   const [entered, setEntered] = useState(false);
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     if (!hit) return;
@@ -22,6 +23,11 @@ export default function ResultInfoDrawer({
       cancelAnimationFrame(raf);
       setEntered(false);
     };
+  }, [hit]);
+
+  useEffect(() => {
+    if (!hit) return;
+    closeButtonRef.current?.focus();
   }, [hit]);
 
   useEffect(() => {
@@ -67,7 +73,13 @@ export default function ResultInfoDrawer({
           <span id="result-info-title" className={styles.drawerTitle} title={hit.filename}>
             {hit.filename}
           </span>
-          <button type="button" className={styles.drawerClose} aria-label="Close" onClick={onClose}>
+          <button
+            ref={closeButtonRef}
+            type="button"
+            className={styles.drawerClose}
+            aria-label="Close"
+            onClick={onClose}
+          >
             ✕
           </button>
         </div>

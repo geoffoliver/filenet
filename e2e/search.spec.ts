@@ -135,6 +135,13 @@ test('info icon opens a drawer with full metadata', async ({ page }) => {
   await expect(dialog.getByText('3:30')).toBeVisible(); // 210s duration
 });
 
+test('drawer moves focus to the Close button on open', async ({ page }) => {
+  await mockSearch(page, { files: [], total: 0, network: [NETWORK_FILE] });
+  await page.goto('/search?q=song&type=all');
+  await page.getByRole('button', { name: /details for awesome-song.mp3/i }).click();
+  await expect(page.getByRole('button', { name: 'Close' })).toBeFocused();
+});
+
 test('drawer closes on Escape, X button, and backdrop click', async ({ page }) => {
   await mockSearch(page, { files: [], total: 0, network: [NETWORK_FILE] });
   await page.goto('/search?q=song&type=all');

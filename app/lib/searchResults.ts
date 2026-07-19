@@ -164,7 +164,8 @@ export function detailColumnValue(hit: SearchHit): string {
   } else if (mime.startsWith('image/')) {
     if (meta.width && meta.height) return `${meta.width}×${meta.height}`;
   } else if (mime.includes('pdf')) {
-    if (typeof meta.pageCount === 'number') return `${meta.pageCount} pages`;
+    if (typeof meta.pageCount === 'number')
+      return `${meta.pageCount} ${meta.pageCount === 1 ? 'page' : 'pages'}`;
   }
   return '—';
 }

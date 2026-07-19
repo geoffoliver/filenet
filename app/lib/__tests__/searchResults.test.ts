@@ -243,6 +243,11 @@ describe('detailColumnValue', () => {
     expect(detailColumnValue(h)).toBe('14 pages');
   });
 
+  test('uses singular "page" for a single-page PDF', () => {
+    const h = hit({ mimeType: 'application/pdf', metadata: JSON.stringify({ pageCount: 1 }) });
+    expect(detailColumnValue(h)).toBe('1 page');
+  });
+
   test('falls back to an em dash when there is no relevant metadata', () => {
     const h = hit({ mimeType: 'application/zip', metadata: null });
     expect(detailColumnValue(h)).toBe('—');
