@@ -287,3 +287,21 @@ test('the select-all header checkbox selects every selectable row', async ({ pag
   await page.getByRole('checkbox', { name: 'Select all results' }).check();
   await expect(page.getByText('2 selected')).toBeVisible();
 });
+
+test('the select-all header checkbox shows an indeterminate state when only some rows are selected', async ({
+  page,
+}) => {
+  await mockSearch(page, { files: [], total: 0, network: [NETWORK_FILE, NETWORK_FILE_2] });
+  await page.goto('/search?q=song&type=all');
+  const headerCheckbox = page.getByRole('checkbox', { name: 'Select all results' });
+
+  await expect(headerCheckbox).not.toBeChecked();
+  expect(await headerCheckbox.evaluate((el: HTMLInputElement) => el.indeterminate)).toBe(false);
+
+  await page.getByRole('checkbox', { name: 'Select awesome-song.mp3' }).check();
+  expect(await headerCheckbox.evaluate((el: HTMLInputElement) => el.indeterminate)).toBe(true);
+
+  await page.getByRole('checkbox', { name: 'Select another-song.mp3' }).check();
+  expect(await headerCheckbox.evaluate((el: HTMLInputElement) => el.indeterminate)).toBe(false);
+  await expect(headerCheckbox).toBeChecked();
+});

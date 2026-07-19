@@ -135,6 +135,12 @@ export default function SearchView() {
   );
   const allSelected =
     selectableShas.size > 0 && [...selectableShas].every((sha) => selected.has(sha));
+  const someSelected = selected.size > 0 && !allSelected;
+
+  const headerCheckboxRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (headerCheckboxRef.current) headerCheckboxRef.current.indeterminate = someSelected;
+  }, [someSelected]);
 
   function toggleSelectOne(sha256: string) {
     setSelected((prev) => {
@@ -217,6 +223,7 @@ export default function SearchView() {
               <tr>
                 <th className={styles.thCheckbox} scope="col">
                   <input
+                    ref={headerCheckboxRef}
                     type="checkbox"
                     aria-label="Select all results"
                     checked={allSelected}
