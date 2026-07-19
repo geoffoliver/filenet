@@ -271,3 +271,25 @@
     text-[var(--text-primary)]
     break-all;
 }
+
+/* ── Bulk-action toolbar ──────────────────────────────────────────────────── */
+
+.toolbar {
+  @apply flex
+    items-center
+    gap-3
+    mb-3
+    px-3
+    py-2
+    rounded-[var(--radius-md)]
+    bg-[var(--bg-elevated)]
+    border
+    border-[var(--border)];
+}
+
+.toolbarCount {
+  @apply text-sm
+    font-medium
+    text-[var(--text-primary)]
+    mr-auto;
+}

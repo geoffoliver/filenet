@@ -9,6 +9,7 @@ import {
   type SortColumn,
   type SortDirection,
   defaultDirectionFor,
+  directSources,
   mergeResults,
   sortHits,
 } from '../../lib/searchResults';
@@ -71,6 +72,7 @@ export default function SearchView() {
   const [hasSearched, setHasSearched] = useState(false);
   const [sort, setSort] = useState<{ column: SortColumn; direction: SortDirection }>(DEFAULT_SORT);
   const [infoHit, setInfoHit] = useState<SearchHit | null>(null);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
   const downloadTriggers = useRef(new Map<string, () => void>());
 
   // Auto-run search on mount when there's an initial query (e.g. from navbar).
@@ -81,6 +83,7 @@ export default function SearchView() {
     searchFiles({ q: initialQ, type: initialType, network: true }, controller.signal)
       .then((res) => {
         setHits(mergeResults(res.files, res.network ?? []));
+        setSelected(new Set());
         setHasSearched(true);
         setLoading(false);
       })
@@ -119,6 +122,31 @@ export default function SearchView() {
   );
 
   const sortedHits = sortHits(hits, sort.column, sort.direction);
+  const selectableShas = new Set(
+    sortedHits.filter((h) => directSources(h).length > 0).map((h) => h.sha256),
+  );
+  const allSelected =
+    selectableShas.size > 0 && [...selectableShas].every((sha) => selected.has(sha));
+
+  function toggleSelectOne(sha256: string) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(sha256)) next.delete(sha256);
+      else next.add(sha256);
+      return next;
+    });
+  }
+
+  function toggleSelectAll() {
+    setSelected(allSelected ? new Set() : new Set(selectableShas));
+  }
+
+  function handleDownloadAll() {
+    for (const sha256 of selected) {
+      downloadTriggers.current.get(sha256)?.();
+    }
+    setSelected(new Set());
+  }
 
   return (
     <div className={styles.page}>
@@ -162,13 +190,31 @@ export default function SearchView() {
         </div>
       )}
 
+      {selected.size > 0 && (
+        <div className={styles.toolbar}>
+          <span className={styles.toolbarCount}>{selected.size} selected</span>
+          <button type="button" className="btn btn-primary" onClick={handleDownloadAll}>
+            Download All
+          </button>
+          <button type="button" className="btn btn-ghost" onClick={() => setSelected(new Set())}>
+            Clear
+          </button>
+        </div>
+      )}
+
       {hits.length > 0 && (
         <div className={styles.tableWrap}>
           <table className={styles.table}>
             <thead>
               <tr>
                 <th className={styles.thCheckbox} scope="col">
-                  <span className={styles.srOnly}>Select</span>
+                  <input
+                    type="checkbox"
+                    aria-label="Select all results"
+                    checked={allSelected}
+                    disabled={selectableShas.size === 0}
+                    onChange={toggleSelectAll}
+                  />
                 </th>
                 <SortableHeader column="name" label="Name" sort={sort} onSort={handleSort} />
                 <SortableHeader column="type" label="Type" sort={sort} onSort={handleSort} />
@@ -190,8 +236,8 @@ export default function SearchView() {
                 <ResultRow
                   key={hit.sha256}
                   hit={hit}
-                  selected={false}
-                  onToggleSelect={() => {}}
+                  selected={selected.has(hit.sha256)}
+                  onToggleSelect={toggleSelectOne}
                   onOpenInfo={setInfoHit}
                   onRegisterDownload={registerDownloadTrigger}
                 />

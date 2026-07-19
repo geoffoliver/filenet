@@ -153,3 +153,56 @@ test('drawer closes on Escape, X button, and backdrop click', async ({ page }) =
   await page.mouse.click(5, 5);
   await expect(page.getByRole('dialog')).not.toBeVisible();
 });
+
+const NETWORK_FILE_2 = {
+  sha256: 'b'.repeat(64),
+  filename: 'another-song.mp3',
+  size: '2097152',
+  mimeType: 'audio/mpeg',
+  metadata: JSON.stringify({ duration: 90 }),
+  nodeId: 'node-bob',
+  viaNodeId: null,
+};
+
+test('selecting rows shows a bulk-action toolbar with the right count', async ({ page }) => {
+  await mockSearch(page, { files: [], total: 0, network: [NETWORK_FILE, NETWORK_FILE_2] });
+  await page.goto('/search?q=song&type=all');
+
+  await page.getByRole('checkbox', { name: 'Select awesome-song.mp3' }).check();
+  await expect(page.getByText('1 selected')).toBeVisible();
+
+  await page.getByRole('checkbox', { name: 'Select another-song.mp3' }).check();
+  await expect(page.getByText('2 selected')).toBeVisible();
+
+  await page.getByRole('button', { name: 'Clear' }).click();
+  await expect(page.getByText(/selected/)).not.toBeVisible();
+});
+
+test('Download All fires a download for every selected row', async ({ page }) => {
+  await mockSearch(page, { files: [], total: 0, network: [NETWORK_FILE, NETWORK_FILE_2] });
+  const startedIds: string[] = [];
+  await page.route('/api/transfers', (route) => {
+    if (route.request().method() === 'POST') {
+      const id = `dl-${startedIds.length + 1}`;
+      startedIds.push(id);
+      return route.fulfill({ json: { id } });
+    }
+    if (route.request().method() === 'GET') return route.fulfill({ json: [] });
+    return route.continue();
+  });
+
+  await page.goto('/search?q=song&type=all');
+  await page.getByRole('checkbox', { name: 'Select awesome-song.mp3' }).check();
+  await page.getByRole('checkbox', { name: 'Select another-song.mp3' }).check();
+  await page.getByRole('button', { name: 'Download All' }).click();
+
+  await expect(page.getByText(/selected/)).not.toBeVisible(); // selection clears
+  await expect.poll(() => startedIds.length).toBe(2);
+});
+
+test('the select-all header checkbox selects every selectable row', async ({ page }) => {
+  await mockSearch(page, { files: [], total: 0, network: [NETWORK_FILE, NETWORK_FILE_2] });
+  await page.goto('/search?q=song&type=all');
+  await page.getByRole('checkbox', { name: 'Select all results' }).check();
+  await expect(page.getByText('2 selected')).toBeVisible();
+});
