@@ -15,6 +15,7 @@ export default function ResultInfoDrawer({
 }) {
   const [entered, setEntered] = useState(false);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
+  const drawerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!hit) return;
@@ -27,16 +28,50 @@ export default function ResultInfoDrawer({
 
   useEffect(() => {
     if (!hit) return;
+    // Capture the triggering control (the row's info-icon button) so focus
+    // can be restored when the drawer closes — otherwise keyboard users
+    // lose focus. Matches the pattern in FolderPicker.tsx.
+    const trigger = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     closeButtonRef.current?.focus();
-  }, [hit]);
 
-  useEffect(() => {
-    if (!hit) return;
     function onKey(e: KeyboardEvent) {
-      if (e.key === 'Escape') onClose();
+      if (e.key === 'Escape') {
+        onClose();
+        return;
+      }
+      // Trap Tab inside the drawer so keyboard users can't reach the page behind it
+      if (e.key === 'Tab') {
+        const dialog = drawerRef.current;
+        if (!dialog) return;
+        const focusables = Array.from(
+          dialog.querySelectorAll<HTMLElement>(
+            'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
+          ),
+        ).filter((el) => !el.hasAttribute('disabled'));
+        if (focusables.length === 0) {
+          e.preventDefault();
+          return;
+        }
+        const first = focusables[0];
+        const last = focusables[focusables.length - 1];
+        const active = document.activeElement;
+        if (e.shiftKey) {
+          if (active === first || !dialog.contains(active)) {
+            e.preventDefault();
+            last.focus();
+          }
+        } else if (active === last || !dialog.contains(active)) {
+          e.preventDefault();
+          first.focus();
+        }
+      }
     }
+
     document.addEventListener('keydown', onKey);
-    return () => document.removeEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('keydown', onKey);
+      trigger?.focus();
+    };
   }, [hit, onClose]);
 
   if (!hit) return null;
@@ -63,6 +98,7 @@ export default function ResultInfoDrawer({
   return (
     <div className={styles.drawerBackdrop} onClick={onClose}>
       <div
+        ref={drawerRef}
         className={`${styles.drawer} ${entered ? styles.drawerOpen : ''}`}
         role="dialog"
         aria-modal="true"

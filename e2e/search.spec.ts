@@ -192,6 +192,30 @@ test('drawer moves focus to the Close button on open', async ({ page }) => {
   await expect(page.getByRole('button', { name: 'Close' })).toBeFocused();
 });
 
+test('Tab is trapped inside the drawer while it is open', async ({ page }) => {
+  await mockSearch(page, { files: [], total: 0, network: [NETWORK_FILE] });
+  await page.goto('/search?q=song&type=all');
+  await page.getByRole('button', { name: /details for awesome-song.mp3/i }).click();
+  const closeButton = page.getByRole('button', { name: 'Close' });
+  await expect(closeButton).toBeFocused();
+  // Close is the drawer's only focusable element, so Tab (and Shift+Tab)
+  // should keep cycling focus back to it rather than escaping to the page
+  // behind the overlay (e.g. the navbar's search input).
+  await page.keyboard.press('Tab');
+  await expect(closeButton).toBeFocused();
+  await page.keyboard.press('Shift+Tab');
+  await expect(closeButton).toBeFocused();
+});
+
+test('closing the drawer restores focus to the info button that opened it', async ({ page }) => {
+  await mockSearch(page, { files: [], total: 0, network: [NETWORK_FILE] });
+  await page.goto('/search?q=song&type=all');
+  const infoButton = page.getByRole('button', { name: /details for awesome-song.mp3/i });
+  await infoButton.click();
+  await page.keyboard.press('Escape');
+  await expect(infoButton).toBeFocused();
+});
+
 test('drawer closes on Escape, X button, and backdrop click', async ({ page }) => {
   await mockSearch(page, { files: [], total: 0, network: [NETWORK_FILE] });
   await page.goto('/search?q=song&type=all');
