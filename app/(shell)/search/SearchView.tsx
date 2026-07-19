@@ -3,8 +3,16 @@
 import { useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 
-import type { FileType, LocalFile, NetworkFile, TransferState } from '../../lib/api';
+import type { FileType, TransferState } from '../../lib/api';
 import { formatBytes, getTransfers, searchFiles, startDownload } from '../../lib/api';
+
+import {
+  type SearchHit,
+  formatDuration,
+  mergeResults,
+  mimeIcon,
+  parseMeta,
+} from '../../lib/searchResults';
 
 import styles from './search.module.css';
 
@@ -16,89 +24,6 @@ const FILE_TYPES: { value: FileType; label: string }[] = [
   { value: 'document', label: 'Document' },
   { value: 'ebook', label: 'Ebook' },
 ];
-
-type SearchHit = {
-  sha256: string;
-  filename: string;
-  size: string;
-  mimeType: string | null;
-  metadata: string | null;
-  local: boolean;
-  networkSources: NetworkFile[];
-};
-
-type ParsedMeta = {
-  title?: string;
-  artist?: string;
-  album?: string;
-  year?: number | string;
-  track?: string;
-  duration?: number;
-  bitrate?: number;
-  genre?: string;
-  width?: number;
-  height?: number;
-};
-
-function mergeResults(local: LocalFile[], network: NetworkFile[]): SearchHit[] {
-  const map = new Map<string, SearchHit>();
-  for (const f of local) {
-    map.set(f.sha256, {
-      sha256: f.sha256,
-      filename: f.filename,
-      size: f.size,
-      mimeType: f.mimeType,
-      metadata: f.metadata,
-      local: true,
-      networkSources: [],
-    });
-  }
-  for (const n of network) {
-    const hit = map.get(n.sha256);
-    if (hit) {
-      hit.networkSources.push(n);
-    } else {
-      map.set(n.sha256, {
-        sha256: n.sha256,
-        filename: n.filename,
-        size: n.size,
-        mimeType: n.mimeType,
-        metadata: n.metadata,
-        local: false,
-        networkSources: [n],
-      });
-    }
-  }
-  return Array.from(map.values());
-}
-
-function formatDuration(seconds: number): string {
-  const h = Math.floor(seconds / 3600);
-  const m = Math.floor((seconds % 3600) / 60);
-  const s = Math.floor(seconds % 60);
-  if (h > 0) return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
-  return `${m}:${String(s).padStart(2, '0')}`;
-}
-
-function parseMeta(raw: string | null): ParsedMeta | null {
-  if (!raw) return null;
-  try {
-    return JSON.parse(raw) as ParsedMeta;
-  } catch {
-    return null;
-  }
-}
-
-function mimeIcon(mimeType: string | null): string {
-  if (!mimeType) return '📄';
-  if (mimeType.startsWith('audio/')) return '🎵';
-  if (mimeType.startsWith('video/')) return '🎬';
-  if (mimeType.startsWith('image/')) return '🖼';
-  if (mimeType.includes('pdf')) return '📕';
-  if (mimeType.includes('epub') || mimeType.includes('ebook')) return '📚';
-  if (mimeType.includes('word') || mimeType.includes('document')) return '📝';
-  return '📄';
-}
 
 const TERMINAL_STATES = new Set<TransferState>(['COMPLETED', 'FAILED', 'CANCELLED']);
 
