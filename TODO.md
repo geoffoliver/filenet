@@ -74,7 +74,7 @@
 - [x] Group chat: fan-out to all accepted connected peers on send
 - [x] `ChatMessageSchema` (Zod) validates inbound peer messages; deduplication + atomic transaction
 - [x] Online presence: track which friends are currently connected
-- [ ] Give users a way to initiate DM conversations
+- [x] Give users a way to initiate DM conversations — "Message" button on each accepted friend's row (Friends page) calls the existing `openDmConversation`/`POST /api/conversations` (`peerNodeId`) and navigates to `/chat?conv=<id>`; `ChatView` selects it once it appears in the polled conversation list and strips the query param
 
 ### API (management + P2P bridge)
 
