@@ -123,6 +123,56 @@ test('shows remove button and prompts confirmation', async ({ page }) => {
   await expect(page.getByRole('button', { name: /remove/i }).first()).toBeVisible();
 });
 
+test('starting a DM posts peerNodeId and navigates to Chat with it in the URL', async ({
+  page,
+}) => {
+  let posted: unknown;
+  await page.route('/api/conversations', (route) => {
+    if (route.request().method() === 'POST') {
+      posted = route.request().postDataJSON();
+      return route.fulfill({
+        json: {
+          id: 'dm:node-alice:self',
+          type: 'DM',
+          name: null,
+          createdAt: '2024-01-01T00:00:00.000Z',
+          updatedAt: '2024-01-01T00:00:00.000Z',
+          messages: [],
+        },
+      });
+    }
+    return route.fulfill({ json: FRIENDS });
+  });
+
+  await page.goto('/friends');
+  await page
+    .getByRole('button', { name: /^message$/i })
+    .first()
+    .click();
+
+  await expect(page).toHaveURL(/\/chat\?conv=dm%3Anode-alice%3Aself/);
+  expect((posted as { peerNodeId: string }).peerNodeId).toBe('node-alice');
+});
+
+test('shows an inline error and re-enables the button when starting a DM fails', async ({
+  page,
+}) => {
+  await page.route('/api/conversations', (route) => {
+    if (route.request().method() === 'POST') {
+      return route.fulfill({ status: 403, body: 'peerNodeId must be an accepted friend' });
+    }
+    return route.fulfill({ json: FRIENDS });
+  });
+
+  await page.goto('/friends');
+  const messageBtn = page.getByRole('button', { name: /^message$/i }).first();
+  await messageBtn.click();
+
+  await expect(page.getByText('peerNodeId must be an accepted friend')).toBeVisible();
+  await expect(messageBtn).toBeEnabled();
+  await expect(page).toHaveURL(/\/friends$/);
+});
+
 test('shows empty state when no friends', async ({ page }) => {
   await mockFriends(page, []);
   await page.goto('/friends');
