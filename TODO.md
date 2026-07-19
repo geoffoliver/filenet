@@ -200,7 +200,7 @@
 - [x] Format numbers (numeraljs or something) -- for example file counts/filesizes on dashboard. — `formatCount` in `app/lib/api.ts` uses the built-in `Intl`/`.toLocaleString('en-US')` rather than pulling in numeral (33.6KB, unmaintained since 2022) for what's just thousands-separator grouping; wired into the Home dashboard's shared-files/downloads counts
 - [x] Settings page is getting long. Split it up into tabs or a left nav/right content UI. — `app/(shell)/settings/SettingsView.tsx` now uses a WAI-ARIA tabbed layout (roving tabindex, arrow-key nav), one tab per section; sections with unsaved drafts (Profile, Friends & Privacy, Files, Networking, Startup, Updates) track a dirty baseline and show a dot on their tab plus a `beforeunload` warning until saved
 - [x] Add instructions to docs for how to remove quarantine from files on MacOS (and whatever the equivalent is on Windows if it even exists). — `site/docs.html`, new "Removing the quarantine flag" section under Installation covering macOS `xattr -d com.apple.quarantine` and Windows' Mark-of-the-Web/`Unblock-File` equivalent
-- [ ] Improve search results UI
-  - [ ] Sortable table of results (filename, filetype, filesize, total sources (etc?))
-  - [ ] Items can be downloaded individually (with a "Download" button/link) or multi-selected and bulk downloaded
+- [x] Improve search results UI
+  - [x] Sortable table of results (filename, filetype, filesize, total sources (etc?)) — `SearchView.tsx` now renders a `<table>`; Name/Type/Size/Sources columns sort ascending/descending on header click (default: Sources descending), plus a type-aware Details column (duration/dimensions/page count)
+  - [x] Items can be downloaded individually (with a "Download" button/link) or multi-selected and bulk downloaded — per-row checkboxes (disabled when a result has no direct sources) plus a "Download All" bulk-action toolbar; full metadata moved to a new slide-in `ResultInfoDrawer`
 - [ ] Match Github pages branding (colors, fonts) to app
