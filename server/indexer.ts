@@ -327,11 +327,24 @@ async function runScanInWorker(
   });
 }
 
+// Holds the most recent request that arrived while a scan was already
+// running, so it isn't just dropped (see CHANGELOG: adding a second shared
+// folder while an earlier one was still being scanned meant the second
+// folder's existing files were never indexed until the next manual rescan
+// or periodic tick — periodic rescan is off by default, so in practice
+// this could mean "never"). Only the latest request is kept: once the
+// in-flight scan finishes, a single follow-up scan with the newest folder
+// list covers everything that came in while it was busy.
+let queuedRequest: { db: Db; folders: string[] } | null = null;
+
 export async function scanAndIndex(
   db: Db,
   folders: string[],
 ): Promise<{ indexed: number; removed: number; skipped: boolean }> {
-  if (scanning) return { indexed: 0, removed: 0, skipped: true };
+  if (scanning) {
+    queuedRequest = { db, folders };
+    return { indexed: 0, removed: 0, skipped: true };
+  }
   scanning = true;
   try {
     const scanStart = nextScanStart();
@@ -339,6 +352,13 @@ export async function scanAndIndex(
     return { indexed, removed, skipped: false };
   } finally {
     scanning = false;
+    if (queuedRequest) {
+      const { db: queuedDb, folders: queuedFolders } = queuedRequest;
+      queuedRequest = null;
+      scanAndIndex(queuedDb, queuedFolders).catch((err) =>
+        console.error('Queued rescan failed:', err),
+      );
+    }
   }
 }
 

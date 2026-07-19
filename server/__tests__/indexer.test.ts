@@ -45,7 +45,13 @@ afterAll(async () => {
   } catch {}
 });
 
-beforeEach(() => {
+beforeEach(async () => {
+  // scanAndIndex now auto-queues and re-runs itself for a request that
+  // arrived while it was already busy (see the "queues a request" test
+  // below) — wait out any such lingering follow-up scan from a prior test
+  // before wiping sharedFiles, or its writes can land after the wipe and
+  // bleed into the next test.
+  await waitFor(() => !isScanning());
   db.delete(sharedFiles).run();
 });
 
@@ -53,6 +59,14 @@ async function collect(gen: AsyncIterable<string>): Promise<string[]> {
   const results: string[] = [];
   for await (const f of gen) results.push(f);
   return results;
+}
+
+async function waitFor(check: () => boolean, timeoutMs = 2000): Promise<void> {
+  const start = Date.now();
+  while (!check()) {
+    if (Date.now() - start > timeoutMs) throw new Error('waitFor timed out');
+    await Bun.sleep(20);
+  }
 }
 
 describe('hashFile', () => {
@@ -423,6 +437,42 @@ describe('scanAndIndex', () => {
     expect(ranOne).toBeDefined();
     expect(skippedOne!.indexed).toBe(0);
     expect(ranOne!.indexed).toBeGreaterThanOrEqual(1);
+    // The skipped call gets auto-queued (see next test) and re-runs itself
+    // right after — drain it before the test ends so it doesn't bleed into
+    // the next test's beforeEach wipe.
+    await waitFor(() => !isScanning());
+  });
+
+  // Regression test for a real bug: adding a second shared folder while the
+  // first one's initial scan was still running used to silently drop the
+  // second folder — scanAndIndex's mutex just discarded the request instead
+  // of remembering it, and periodic rescan (the only other thing that would
+  // have picked it up) is disabled by default. The user would see no
+  // feedback and the folder's pre-existing files would never get indexed.
+  it('queues a request that arrives while a scan is running, and runs it once the current scan finishes', async () => {
+    const dir1 = join(tmpDir, 'queue-dir1');
+    const dir2 = join(tmpDir, 'queue-dir2');
+    await mkdir(dir1);
+    await mkdir(dir2);
+    await writeFile(join(dir1, 'a.txt'), 'a');
+    await writeFile(join(dir2, 'b.txt'), 'b');
+
+    // scanAndIndex sets its `scanning` mutex synchronously before its first
+    // await, so by the time this line finishes evaluating, `first` is
+    // guaranteed to already be in flight — the very next call is
+    // deterministically guaranteed to see scanning === true, no timing
+    // races or sleeps needed.
+    const first = scanAndIndex(db, [dir1]);
+    const second = await scanAndIndex(db, [dir1, dir2]);
+    expect(second.skipped).toBe(true);
+    expect(isScanning()).toBe(true); // first scan (or its auto-queued follow-up) still running
+
+    await first;
+    // The queued [dir1, dir2] request runs automatically once `first`
+    // finishes — wait for that follow-up to complete too.
+    await waitFor(() => !isScanning());
+
+    expect(findFile(join(dir2, 'b.txt'))).not.toBeNull();
   });
 
   it('treats a regular file configured as a shared folder as inaccessible', async () => {

@@ -857,6 +857,35 @@ describe('PATCH /api/settings', () => {
     expect(stats.sharedFiles.count).toBe(1);
   });
 
+  // Regression test for a real user-reported bug: adding a second shared
+  // folder while the first one's scan was still running silently dropped
+  // the second folder — scanAndIndex's mutex just discarded the request
+  // instead of remembering it, so its pre-existing files never got
+  // indexed (periodic rescan, the only other thing that would have picked
+  // it up, is disabled by default).
+  it('indexes a folder added while an earlier scan is still running', async () => {
+    const dir1 = join(tmpDir, 'settings-queue-dir1');
+    const dir2 = join(tmpDir, 'settings-queue-dir2');
+    await mkdir(dir1);
+    await mkdir(dir2);
+    await writeFile(join(dir1, 'a.txt'), 'a');
+    await writeFile(join(dir2, 'b.txt'), 'b');
+
+    const res1 = await makeHandler()(jsonReq('/api/settings', 'PATCH', { sharedFolders: [dir1] }));
+    expect(res1.status).toBe(200);
+    expect(isScanning()).toBe(true); // scanAndIndex's mutex is set synchronously
+
+    const res2 = await makeHandler()(
+      jsonReq('/api/settings', 'PATCH', { sharedFolders: [dir1, dir2] }),
+    );
+    expect(res2.status).toBe(200);
+
+    await waitFor(() => !isScanning());
+    const statsRes = await makeHandler()(req('/api/stats'));
+    const stats = await statsRes.json();
+    expect(stats.sharedFiles.count).toBe(2);
+  });
+
   it('syncs the file watcher when sharedFolders is patched', async () => {
     const dir = join(tmpDir, 'settings-watcher-sync');
     await mkdir(dir);
