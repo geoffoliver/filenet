@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.7] - 2026-07-19
+
 ### Fixed
 
 - **Settings tabs scrolled off-screen with no visible hint that they did** — the tab bar overflowed the page's `max-w-2xl` container, and macOS hides scrollbars by default, so the extra tabs (Maintenance, Updates, Notifications) were easy to miss entirely. Widened the Settings page to `max-w-4xl`, which fits all nine tabs on one line.
