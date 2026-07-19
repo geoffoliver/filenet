@@ -9,12 +9,13 @@ rm -rf dist
 bun run build
 
 echo "Bundling background workers..."
-# The scan and file-watcher workers (server/scan-worker.ts and
-# server/watcher-worker.ts — see indexer.ts's scanAndIndex and
-# watcher.ts's startFileWatcher) can't be embedded in the compiled binary
-# itself — `new Worker()` can't load a second `bun build --compile` entry
-# point by its virtual bunfs path (verified against Bun 1.3.14: it fails to
-# resolve at runtime), and an end user's machine has no node_modules for an
+# The scan, file-watcher, and hash workers (server/scan-worker.ts,
+# server/watcher-worker.ts, server/hash-worker.ts — see indexer.ts's
+# scanAndIndex, watcher.ts's startFileWatcher, and hash-pool.ts's
+# HashWorkerPool) can't be embedded in the compiled binary itself — `new
+# Worker()` can't load a second `bun build --compile` entry point by its
+# virtual bunfs path (verified against Bun 1.3.14: it fails to resolve at
+# runtime), and an end user's machine has no node_modules for an
 # unbundled .ts worker file to import from. So each is bundled here into a
 # standalone, dependency-free JS file instead and shipped as a real file
 # next to the executable (server/runtime-paths.ts's resolveWorkerPath finds
@@ -25,6 +26,7 @@ echo "Bundling background workers..."
 mkdir -p dist/_shared/server
 bun build --target=bun server/scan-worker.ts --outfile dist/_shared/server/scan-worker.js
 bun build --target=bun server/watcher-worker.ts --outfile dist/_shared/server/watcher-worker.js
+bun build --target=bun server/hash-worker.ts --outfile dist/_shared/server/hash-worker.js
 
 for target in "${TARGETS[@]}"; do
   outdir="dist/${target}"
@@ -53,6 +55,7 @@ for target in "${TARGETS[@]}"; do
   mkdir -p "${outdir}/server"
   cp dist/_shared/server/scan-worker.js "${outdir}/server/scan-worker.js"
   cp dist/_shared/server/watcher-worker.js "${outdir}/server/watcher-worker.js"
+  cp dist/_shared/server/hash-worker.js "${outdir}/server/hash-worker.js"
 
   echo "Zipping dist/filenet-${target}.zip..."
   # Zip the *contents* of outdir (not outdir itself) so the archive's

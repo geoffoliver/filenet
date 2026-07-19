@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **File hashing during a scan now runs in parallel across a pool of worker threads** — hashing every byte of every file is normally the slowest part of indexing, and previously ran one file at a time even after scanning itself moved off the main thread (0.2.2). A new pool of hash-worker threads (`server/hash-worker.ts`, `server/hash-pool.ts`, sized to CPU core count and capped at 8) lets multiple files hash concurrently. Verified against a real compiled binary: hashing a 7.1 GB / 24-file library used 6+ CPU cores in parallel (peak 640% CPU) and finished in ~3 seconds, with every request to the app staying under 75ms throughout. (Considered switching the hash algorithm itself to BLAKE3 first, but benchmarked it — on this hardware, Bun's native SHA-256 is hardware-accelerated and actually ~3.3x _faster_ than both WASM and native BLAKE3 bindings, so the algorithm was left alone.)
+
 ## [0.2.3] - 2026-07-19
 
 ### Fixed

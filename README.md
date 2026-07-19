@@ -62,7 +62,8 @@ dependency — no separate Node/Bun/npm install required.
    `windows-x64`).
 2. Extract it — you'll get `filenet` (the executable), an `out/` folder
    (the UI), a `drizzle/migrations/` folder, and a `server/` folder (the
-   background scan and file-watcher workers). Keep these four together.
+   background scan, file-watcher, and hashing workers). Keep these four
+   together.
 3. Run the executable from that folder:
 
    ```bash
@@ -82,8 +83,11 @@ Scanning your shared folders (hashing every file, extracting metadata) and
 watching them for changes both run on separate background threads from the
 UI/API server, so a large library — whether being indexed for the first
 time or just configured as a new shared folder — won't make the rest of
-the app unresponsive. `SCAN_LOG=1` is useful for confirming a big initial
-scan is actually making progress.
+the app unresponsive. Hashing itself is further spread across a small pool
+of worker threads (sized to your CPU core count, capped at 8) so multiple
+files hash in parallel — a real win for libraries with large files, since
+hashing is normally the slowest part of indexing. `SCAN_LOG=1` is useful
+for confirming a big initial scan is actually making progress.
 
 To build these yourself: `bun run build:binaries` (requires Bun, plus
 `bash`, `zip`, and a SHA-256 tool (`sha256sum` or `shasum`) on your PATH —
@@ -100,9 +104,10 @@ If the app doesn't come back up after clicking **Restart to update**, the
 swap is crash-safe: the previous version is left behind as `.old` siblings
 in the install directory rather than being deleted outright. Look for
 `filenet.old` (`filenet.exe.old` on Windows), `out.old`,
-`drizzle/migrations.old`, `server/scan-worker.js.old`, and
-`server/watcher-worker.js.old` next to their non-`.old` counterparts, and
-rename each one back over the original to restore the last working
+`drizzle/migrations.old`, `server/scan-worker.js.old`,
+`server/watcher-worker.js.old`, and `server/hash-worker.js.old` next to
+their non-`.old` counterparts, and rename each one back over the original
+to restore the last working
 version.
 
 ## Configuration
