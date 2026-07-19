@@ -226,11 +226,18 @@ export async function downloadAndStage(
 
 // `out` and the binary are REQUIRED — per scripts/build-binaries.sh, every
 // valid release always packages both, so a release missing either is
-// mispackaged and must not be applied. `drizzle/migrations` stays OPTIONAL
-// for forward-compatibility (a release with no migration changes may
-// legitimately omit it), matching the original design intent, even though
-// in practice today's build script always includes it too.
-const OPTIONAL_ENTRIES = [join('drizzle', 'migrations')];
+// mispackaged and must not be applied. `drizzle/migrations` and the
+// background workers (server/scan-worker.js, server/watcher-worker.js —
+// see indexer.ts's scanAndIndex, watcher.ts's startFileWatcher, and
+// runtime-paths.ts's resolveWorkerPath) stay OPTIONAL for
+// forward-compatibility (a release with no migration or worker changes may
+// legitimately omit them), matching the original design intent, even
+// though in practice today's build script always includes all of them too.
+const OPTIONAL_ENTRIES = [
+  join('drizzle', 'migrations'),
+  join('server', 'scan-worker.js'),
+  join('server', 'watcher-worker.js'),
+];
 
 export function applyUpdateSwap(stagingDir: string, installDir: string): void {
   const binaryName = process.platform === 'win32' ? 'filenet.exe' : 'filenet';

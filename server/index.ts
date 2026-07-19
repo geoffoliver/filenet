@@ -16,12 +16,12 @@ import { connectToPeer, getConnectedPeer, unregisterPeer } from './connections';
 import { createUpdateManager, parseFinishUpdateArgs, runFinishUpdate } from './updater';
 import { getOrCreateSettings, parseSharedFolders } from './config';
 import { isCompiledBinary, resolveAssetPath } from './runtime-paths';
+import { startPeriodicRescan, stopScanWorker } from './indexer';
 import { createUiServer } from './ui-server';
 import { getOrCreateIdentity } from './identity';
 import { openBrowser } from './browser-opener';
 import { pauseAllActiveDownloads } from './download-manager';
 import { startFileWatcher } from './watcher';
-import { startPeriodicRescan } from './indexer';
 import { startReconnectLoop } from './reconnect';
 
 const finishUpdateArgs = parseFinishUpdateArgs(process.argv);
@@ -109,7 +109,10 @@ const stopRescan = startPeriodicRescan(
   },
 );
 
-const fileWatcher = startFileWatcher(db, parseSharedFolders(startupSettings.sharedFolders));
+const fileWatcher = startFileWatcher(
+  db.$client.filename,
+  parseSharedFolders(startupSettings.sharedFolders),
+);
 
 const connectPeerFn = (
   address: string,
@@ -131,6 +134,7 @@ const shutdown = () => {
   stopReconnect();
   stopUpdateChecks();
   fileWatcher.stop();
+  stopScanWorker();
   pauseAllActiveDownloads(db)
     .catch(() => {})
     .finally(() => process.exit(0));

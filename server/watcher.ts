@@ -5,6 +5,8 @@ import { type FSWatcher, watch } from 'chokidar';
 
 import { indexFile, removeIndexedFile } from './indexer';
 import type { Db } from './db';
+import type { WatcherWorkerMessage } from './watcher-worker';
+import { resolveWorkerPath } from './runtime-paths';
 
 export const DEFAULT_DELETE_GRACE_MS = 30_000;
 export const DEFAULT_STABILITY_THRESHOLD_MS = 2000;
@@ -133,7 +135,7 @@ async function confirmAndRemove(db: Db, path: string): Promise<void> {
 // deleteGraceMs to notice is needlessly slow when a short settle window
 // is enough to tell a symlink apart from a file that's still mid-write.
 // `cancelPendingDelete` is passed in (rather than closed over) because
-// this function is defined outside startFileWatcher, same as
+// this function is defined outside runFileWatcherInProcess, same as
 // confirmAndRemove.
 async function checkForSymlinkReplacement(
   db: Db,
@@ -152,7 +154,13 @@ async function checkForSymlinkReplacement(
   await removeStaleRow(db, path);
 }
 
-export function startFileWatcher(
+// The real chokidar-backed implementation. Runs inside watcher-worker.ts
+// (own thread, own db connection) in production — see startFileWatcher
+// below — but is kept independently exported/tested here, same as
+// indexer.ts's performScan/scanAndIndex split, so its reactive/timing
+// behavior (grace periods, debounce, symlink handling) has direct test
+// coverage that doesn't need a real worker thread.
+export function runFileWatcherInProcess(
   db: Db,
   folders: string[],
   options: FileWatcherOptions = {},
@@ -221,6 +229,36 @@ export function startFileWatcher(
           void watcher.unwatch(folder);
         }
       }
+    },
+  };
+}
+
+// The actual entry point used in production: runs runFileWatcherInProcess
+// inside watcher-worker.ts on its own thread instead of this one. Takes a
+// database file path rather than an open Db — a worker thread can't share
+// the caller's connection, so it opens its own to the same file (see
+// server/db.ts's createDb; SQLite's WAL mode supports multiple connections
+// to one file). Same public shape as the old in-process version (a
+// FileWatcherHandle), so callers (server/index.ts, server/management.ts)
+// don't need to know or care that the real work happens elsewhere.
+export function startFileWatcher(
+  dbPath: string,
+  folders: string[],
+  options?: FileWatcherOptions,
+): FileWatcherHandle {
+  const worker = new Worker(resolveWorkerPath('watcher-worker', import.meta.dir));
+  const init: WatcherWorkerMessage = { type: 'init', dbPath, folders, options };
+  worker.postMessage(init);
+
+  return {
+    stop: () => {
+      const stop: WatcherWorkerMessage = { type: 'stop' };
+      worker.postMessage(stop);
+      worker.terminate();
+    },
+    syncFolders: (folders: string[]) => {
+      const sync: WatcherWorkerMessage = { type: 'sync', folders };
+      worker.postMessage(sync);
     },
   };
 }

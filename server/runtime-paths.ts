@@ -34,3 +34,31 @@ export function resolveAssetPath(
 export function isCompiledBinary(callerDir: string): boolean {
   return !existsSync(join(callerDir, '..', 'package.json'));
 }
+
+/**
+ * Resolves the file handed to `new Worker(...)` for one of this app's
+ * background worker scripts (server/scan-worker.ts, server/watcher-worker.ts).
+ *
+ * Unlike resolveAssetPath, the two shapes need different filenames, not
+ * just different directories:
+ * - Running from source: `server/<name>.ts` next to this module runs
+ *   directly, importing indexer/db/schema/etc. as regular TS modules
+ *   backed by a real node_modules.
+ * - Running as a `bun build --compile` executable: `new Worker` can't load
+ *   a bundled entry point by its virtual bunfs path (verified empirically
+ *   against Bun 1.3.14 — a second `--compile` entry point silently fails
+ *   to resolve at runtime), and there's no node_modules on an end user's
+ *   machine for an unbundled .ts file to import from. scripts/build-binaries.sh
+ *   instead pre-bundles each worker into a dependency-free
+ *   server/<name>.js shipped next to the executable, which this resolves
+ *   to as the fallback.
+ */
+export function resolveWorkerPath(
+  name: string,
+  callerDir: string,
+  execPath: string = process.execPath,
+): string {
+  const sourceCandidate = join(callerDir, `${name}.ts`);
+  if (existsSync(sourceCandidate)) return sourceCandidate;
+  return join(dirname(execPath), 'server', `${name}.js`);
+}

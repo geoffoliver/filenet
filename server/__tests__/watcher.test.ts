@@ -10,6 +10,7 @@ import {
   type FileWatcherHandle,
   type FileWatcherOptions,
   isIgnoredPath,
+  runFileWatcherInProcess,
   startFileWatcher,
 } from '../watcher';
 import { sharedFiles } from '../schema';
@@ -60,7 +61,7 @@ async function startWatcher(
   folders: string[],
   options: FileWatcherOptions = FAST_OPTIONS,
 ): Promise<FileWatcherHandle> {
-  const h = startFileWatcher(db, folders, options);
+  const h = runFileWatcherInProcess(db, folders, options);
   await Bun.sleep(WARMUP_MS);
   return h;
 }
@@ -122,7 +123,7 @@ describe('isIgnoredPath', () => {
   });
 });
 
-describe('startFileWatcher — add/change', () => {
+describe('runFileWatcherInProcess — add/change', () => {
   it('indexes a file added after the watcher starts', async () => {
     const dir = join(tmpDir, 'watch-add');
     await mkdir(dir);
@@ -144,7 +145,7 @@ describe('startFileWatcher — add/change', () => {
     // PRE_EXISTING_SETTLE_MS above) so the OS doesn't replay it as a live
     // event once chokidar attaches.
     await Bun.sleep(PRE_EXISTING_SETTLE_MS);
-    handle = startFileWatcher(db, [dir], FAST_OPTIONS);
+    handle = runFileWatcherInProcess(db, [dir], FAST_OPTIONS);
 
     // ignoreInitial: true means the pre-existing file above is not indexed
     // by the watcher itself — confirm that. This wait also serves as the
@@ -235,7 +236,7 @@ describe('startFileWatcher — add/change', () => {
   });
 });
 
-describe('startFileWatcher — delete', () => {
+describe('runFileWatcherInProcess — delete', () => {
   it('does not remove the record immediately on delete', async () => {
     const dir = join(tmpDir, 'watch-delete-immediate');
     await mkdir(dir);
@@ -296,7 +297,7 @@ describe('startFileWatcher — delete', () => {
     applyMigrations(brokenDb);
     brokenDb.$client.close();
 
-    const brokenHandle = startFileWatcher(brokenDb, [dir], {
+    const brokenHandle = runFileWatcherInProcess(brokenDb, [dir], {
       deleteGraceMs: 50,
       stabilityThresholdMs: 20,
     });
@@ -318,7 +319,7 @@ describe('startFileWatcher — delete', () => {
   });
 });
 
-describe('startFileWatcher — syncFolders', () => {
+describe('runFileWatcherInProcess — syncFolders', () => {
   it('starts watching a newly added folder', async () => {
     const dir1 = join(tmpDir, 'sync-add-1');
     const dir2 = join(tmpDir, 'sync-add-2');
@@ -328,7 +329,7 @@ describe('startFileWatcher — syncFolders', () => {
 
     handle.syncFolders([dir1, dir2]);
     // chokidar's readdir for the newly-added folder needs the same
-    // warm-up as a fresh startFileWatcher() call before writes to it are
+    // warm-up as a fresh runFileWatcherInProcess() call before writes to it are
     // guaranteed to be seen as new.
     await Bun.sleep(WARMUP_MS);
 
@@ -355,7 +356,7 @@ describe('startFileWatcher — syncFolders', () => {
   });
 });
 
-describe('startFileWatcher — stop', () => {
+describe('runFileWatcherInProcess — stop', () => {
   it('stops indexing after stop() is called', async () => {
     const dir = join(tmpDir, 'stop-basic');
     await mkdir(dir);
@@ -384,5 +385,59 @@ describe('startFileWatcher — stop', () => {
     // since stop() cancelled the pending delete.
     await Bun.sleep(600);
     expect(findFile(path)).not.toBeNull();
+  });
+});
+
+// startFileWatcher is the production entry point: it runs
+// runFileWatcherInProcess (exercised thoroughly above) inside
+// watcher-worker.ts on its own thread rather than this one, so a folder
+// with many pre-existing files doesn't block the main thread while
+// chokidar walks it (see CHANGELOG). These are deliberately few and
+// end-to-end — the reactive/timing behavior itself is already covered
+// in-process above; this just proves the worker wiring (init/sync/stop)
+// actually works.
+describe('startFileWatcher (worker-based)', () => {
+  it('reactively indexes new files through the worker', async () => {
+    const dir = join(tmpDir, 'worker-add');
+    await mkdir(dir);
+    await Bun.sleep(PRE_EXISTING_SETTLE_MS);
+
+    handle = startFileWatcher(db.$client.filename, [dir], FAST_OPTIONS);
+    await Bun.sleep(500); // worker spin-up + chokidar warmup, on top of WARMUP_MS
+
+    const path = join(dir, 'new.txt');
+    await writeFile(path, 'content');
+    await waitFor(() => findFile(path) !== null, 3000);
+    expect(findFile(path)).not.toBeNull();
+  });
+
+  it('syncFolders adds a new folder that the worker then watches', async () => {
+    const dir = join(tmpDir, 'worker-sync');
+    await mkdir(dir);
+
+    handle = startFileWatcher(db.$client.filename, [], FAST_OPTIONS);
+    await Bun.sleep(500);
+    handle.syncFolders([dir]);
+    await Bun.sleep(300); // let the worker's chokidar.add() settle
+
+    const path = join(dir, 'synced.txt');
+    await writeFile(path, 'content');
+    await waitFor(() => findFile(path) !== null, 3000);
+    expect(findFile(path)).not.toBeNull();
+  });
+
+  it('stop() does not throw, and the worker no longer indexes afterward', async () => {
+    const dir = join(tmpDir, 'worker-stop');
+    await mkdir(dir);
+    await Bun.sleep(PRE_EXISTING_SETTLE_MS);
+
+    const localHandle = startFileWatcher(db.$client.filename, [dir], FAST_OPTIONS);
+    await Bun.sleep(500);
+    expect(() => localHandle.stop()).not.toThrow();
+
+    const path = join(dir, 'after-stop.txt');
+    await writeFile(path, 'content');
+    await Bun.sleep(300);
+    expect(findFile(path)).toBeNull();
   });
 });

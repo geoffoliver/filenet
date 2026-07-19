@@ -122,6 +122,13 @@ afterAll(async () => {
 });
 
 beforeEach(async () => {
+  // A prior test's PATCH /api/settings or /api/rescan may have kicked off
+  // a background scan (now a real worker thread — see server/scan-worker.ts
+  // — so this can outlive the test that started it, unlike the old
+  // same-thread fire-and-forget). Wait for it to finish before wiping
+  // sharedFiles below, or its writes can land after the wipe and bleed
+  // into the next test.
+  await waitFor(() => !isScanning());
   db.delete(sharedFiles).run();
   db.delete(friends).run();
   db.delete(settings).run();

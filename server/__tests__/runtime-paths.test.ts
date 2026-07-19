@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
-import { isCompiledBinary, resolveAssetPath } from '../runtime-paths';
+import { isCompiledBinary, resolveAssetPath, resolveWorkerPath } from '../runtime-paths';
 
 describe('resolveAssetPath', () => {
   const tmpDirs: string[] = [];
@@ -68,5 +68,48 @@ describe('isCompiledBinary', () => {
     // inside a `bun build --compile` binary.
 
     expect(isCompiledBinary(serverDir)).toBe(true);
+  });
+});
+
+describe('resolveWorkerPath', () => {
+  const tmpDirs: string[] = [];
+
+  afterEach(() => {
+    for (const dir of tmpDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('resolves to the sibling .ts source file when running from source', () => {
+    const serverDir = mkdtempSync(join(tmpdir(), 'filenet-worker-src-'));
+    tmpDirs.push(serverDir);
+    writeFileSync(join(serverDir, 'scan-worker.ts'), '');
+
+    const resolved = resolveWorkerPath('scan-worker', serverDir, '/unused/exec');
+
+    expect(resolved).toBe(join(serverDir, 'scan-worker.ts'));
+  });
+
+  it('falls back to the bundled .js file next to the executable when the .ts source does not exist', () => {
+    const serverDir = mkdtempSync(join(tmpdir(), 'filenet-worker-src-'));
+    tmpDirs.push(serverDir);
+    // No scan-worker.ts written — simulates the compiled-binary case where
+    // import.meta.dir is a synthetic path with nothing on disk.
+
+    const execDir = mkdtempSync(join(tmpdir(), 'filenet-worker-exec-'));
+    tmpDirs.push(execDir);
+    const execPath = join(execDir, 'filenet');
+
+    const resolved = resolveWorkerPath('scan-worker', serverDir, execPath);
+
+    expect(resolved).toBe(join(execDir, 'server', 'scan-worker.js'));
+  });
+
+  it('resolves a differently-named worker independently', () => {
+    const serverDir = mkdtempSync(join(tmpdir(), 'filenet-worker-src-'));
+    tmpDirs.push(serverDir);
+    writeFileSync(join(serverDir, 'watcher-worker.ts'), '');
+
+    const resolved = resolveWorkerPath('watcher-worker', serverDir, '/unused/exec');
+
+    expect(resolved).toBe(join(serverDir, 'watcher-worker.ts'));
   });
 });

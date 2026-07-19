@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **The whole app became unresponsive while scanning a large library** — moving the setup-wizard/rescan blocking off the HTTP request (0.2.1, below) wasn't enough on its own: `scanAndIndex`'s hash-every-file loop and the file watcher's initial walk of a newly-configured folder's pre-existing files both still ran synchronously on the same thread as the UI/API server. For a large library (verified against 15,000 files: as little as a single `GET /api/stats` could take 12+ seconds, and watching a folder with that many pre-existing files could starve the event loop so completely that not even a timer callback fired for a full minute+) this meant the entire app — not just the one request that started the scan — would hang for as long as the scan or the initial watch setup took. Both now run on their own background worker threads (`server/scan-worker.ts`, `server/watcher-worker.ts`) with their own database connections, verified against a real compiled binary scanning 15,000 files with the server staying at 12-16ms response times throughout. A single scan worker is now reused across scans rather than spawned fresh each time, after discovering that spawning one carries a real one-time cost (tens of seconds, from loading its ~2 MB bundle) that would otherwise repeat on every scan. New `SCAN_LOG=1` environment variable logs background scan progress (folders started, running file count, completion) to the console.
+
 ## [0.2.1] - 2026-07-18
 
 ### Fixed

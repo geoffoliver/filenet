@@ -9,11 +9,13 @@ import { type Db, applyMigrations, createDb } from '../db';
 import {
   hashFile,
   indexFile,
+  isScanning,
   removeIndexedFile,
   removeStaleEntries,
   scanAndIndex,
   scanDirectory,
   startPeriodicRescan,
+  stopScanWorker,
 } from '../indexer';
 import { sharedFiles } from '../schema';
 
@@ -526,6 +528,47 @@ describe('scanAndIndex', () => {
     expect(result.removed).toBe(1);
     expect(fileCount()).toBe(1);
     expect(findFile(badFile)).not.toBeNull();
+  });
+
+  // scanAndIndex now runs the actual walk/hash/index work in a worker
+  // thread (server/scan-worker.ts) rather than inline, so an unexpected
+  // error thrown deep in that work has to cross a postMessage boundary
+  // to reach the caller. A NUL byte in a path is a reliable way to
+  // trigger an error lstat doesn't treat as "just inaccessible"
+  // (ENOENT/EACCES/ENOTDIR) — Node/Bun reject it synchronously with
+  // ERR_INVALID_ARG_VALUE, which performScan's folder-stat handling
+  // re-throws rather than swallowing.
+  it('rejects when the scan hits an unexpected error, and releases the scanning mutex', async () => {
+    const badFolder = join(tmpDir, 'scan-bad\0folder');
+    await expect(scanAndIndex(db, [badFolder])).rejects.toThrow();
+    expect(isScanning()).toBe(false);
+    // The mutex release must be real, not just isScanning() reporting
+    // stale state — prove it by running a normal scan right after.
+    const dir = join(tmpDir, 'scan-after-worker-error');
+    await mkdir(dir);
+    await writeFile(join(dir, 'file.txt'), 'content');
+    const result = await scanAndIndex(db, [dir]);
+    expect(result.skipped).toBe(false);
+    expect(result.indexed).toBe(1);
+  });
+
+  // scanAndIndex reuses one worker across scans (spawning a fresh OS
+  // thread + reloading its ~2 MB bundle per scan turned out to carry a
+  // real one-time cost — see CHANGELOG) rather than spawning one per call.
+  // stopScanWorker() tears that cached worker down; this proves scanning
+  // still works afterward, i.e. a fresh worker gets spun back up rather
+  // than every subsequent scan silently failing.
+  it('still scans correctly after stopScanWorker() tears down the cached worker', async () => {
+    const dir = join(tmpDir, 'scan-after-worker-stop');
+    await mkdir(dir);
+    await writeFile(join(dir, 'file.txt'), 'content');
+
+    await scanAndIndex(db, [dir]); // warms the cached worker
+    stopScanWorker();
+
+    const result = await scanAndIndex(db, [dir]);
+    expect(result.skipped).toBe(false);
+    expect(fileCount()).toBe(1);
   });
 });
 

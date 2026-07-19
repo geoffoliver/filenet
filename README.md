@@ -61,7 +61,8 @@ dependency — no separate Node/Bun/npm install required.
    platform (`linux-x64`, `linux-arm64`, `darwin-x64`, `darwin-arm64`,
    `windows-x64`).
 2. Extract it — you'll get `filenet` (the executable), an `out/` folder
-   (the UI), and a `drizzle/migrations/` folder. Keep these three together.
+   (the UI), a `drizzle/migrations/` folder, and a `server/` folder (the
+   background scan and file-watcher workers). Keep these four together.
 3. Run the executable from that folder:
 
    ```bash
@@ -73,7 +74,16 @@ dependency — no separate Node/Bun/npm install required.
 Configuration is via environment variables: `PORT` (UI + management API,
 default `3000`), `P2P_PORT` (default: the listening port configured in
 Settings), `DATABASE_URL` (default: `./data/filenet.db`, relative to
-wherever you run the executable from).
+wherever you run the executable from), `SCAN_LOG` (default unset; set to
+`1` to log background scan progress — folder scans started, running file
+count, and completion — to the console).
+
+Scanning your shared folders (hashing every file, extracting metadata) and
+watching them for changes both run on separate background threads from the
+UI/API server, so a large library — whether being indexed for the first
+time or just configured as a new shared folder — won't make the rest of
+the app unresponsive. `SCAN_LOG=1` is useful for confirming a big initial
+scan is actually making progress.
 
 To build these yourself: `bun run build:binaries` (requires Bun, plus
 `bash`, `zip`, and a SHA-256 tool (`sha256sum` or `shasum`) on your PATH —
@@ -89,9 +99,11 @@ at their own releases by setting the "Update repository" field in Settings
 If the app doesn't come back up after clicking **Restart to update**, the
 swap is crash-safe: the previous version is left behind as `.old` siblings
 in the install directory rather than being deleted outright. Look for
-`filenet.old` (`filenet.exe.old` on Windows), `out.old`, and
-`drizzle/migrations.old` next to their non-`.old` counterparts, and rename
-each one back over the original to restore the last working version.
+`filenet.old` (`filenet.exe.old` on Windows), `out.old`,
+`drizzle/migrations.old`, `server/scan-worker.js.old`, and
+`server/watcher-worker.js.old` next to their non-`.old` counterparts, and
+rename each one back over the original to restore the last working
+version.
 
 ## Configuration
 

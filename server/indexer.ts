@@ -11,6 +11,7 @@ import { SQL, and, eq, lt, or, sql } from 'drizzle-orm';
 import type { Db } from './db';
 import type { SharedFile } from './schema';
 import { extractMetadata } from './metadata';
+import { resolveWorkerPath } from './runtime-paths';
 import { sharedFiles } from './schema';
 
 export async function hashFile(path: string): Promise<string> {
@@ -186,6 +187,146 @@ export function isScanning(): boolean {
   return scanning;
 }
 
+// The actual walk-hash-index-cleanup work, factored out of scanAndIndex so
+// it can run standalone inside the scan worker (server/scan-worker.ts) --
+// scanAndIndex itself just dispatches to that worker so this CPU/IO-heavy
+// loop never runs on the same thread as the HTTP server (see CHANGELOG: a
+// scan over a large library used to make the whole app unresponsive for
+// seconds at a time). Kept independently exported/tested from the worker
+// dispatch itself, so the directory-walk/error-handling edge cases have
+// fast, direct test coverage that doesn't pay real thread-spawn overhead.
+export async function performScan(
+  db: Db,
+  folders: string[],
+  scanStart: Date,
+  onProgress?: (indexed: number) => void,
+): Promise<{ indexed: number; removed: number }> {
+  const seen = new Set<string>();
+  let indexed = 0;
+  const inaccessibleRoots: string[] = [];
+
+  for (const folder of folders) {
+    try {
+      const folderStat = await lstat(folder);
+      if (!folderStat.isDirectory()) {
+        inaccessibleRoots.push(folder);
+        continue;
+      }
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code === 'ENOENT' || code === 'EACCES' || code === 'ENOTDIR') {
+        inaccessibleRoots.push(folder);
+        continue;
+      }
+      throw err;
+    }
+
+    const inaccessibleSubDirs = new Set<string>();
+
+    try {
+      for await (const path of scanDirectory(folder, true, inaccessibleSubDirs)) {
+        if (seen.has(path)) continue;
+        seen.add(path);
+        try {
+          await indexFile(db, path, scanStart);
+          indexed++;
+          onProgress?.(indexed);
+        } catch (err) {
+          const code = (err as NodeJS.ErrnoException).code;
+          if (code === 'ENOENT') {
+            // File vanished between discovery and indexing — treat as stale
+          } else if (code === 'EACCES' || code === 'ENOTDIR') {
+            inaccessibleRoots.push(path);
+          } else {
+            throw err;
+          }
+        }
+      }
+      for (const dir of inaccessibleSubDirs) {
+        inaccessibleRoots.push(dir);
+      }
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code === 'ENOENT' || code === 'EACCES' || code === 'ENOTDIR') {
+        inaccessibleRoots.push(folder);
+      } else {
+        throw err;
+      }
+    }
+  }
+
+  const removed = await removeStaleEntries(db, scanStart, inaccessibleRoots);
+  return { indexed, removed };
+}
+
+// Message protocol between scanAndIndex (below) and server/scan-worker.ts.
+export interface ScanWorkerRequest {
+  type: 'scan';
+  dbPath: string;
+  folders: string[];
+  scanStartMs: number;
+}
+
+export type ScanWorkerResponse =
+  | { type: 'done'; indexed: number; removed: number }
+  | { type: 'error'; message: string };
+
+// Reused across scans rather than spawned fresh each time: spinning up a
+// new OS thread and loading the worker's ~2 MB bundle turned out to carry a
+// real one-time cost (tens of seconds, observed against a compiled binary)
+// on whichever scan happens to be the first in the process. scanAndIndex's
+// own mutex means only one scan ever runs at a time, so reusing a single
+// worker across sequential scans is safe — there's no concurrent access to
+// race against.
+let cachedWorker: Worker | null = null;
+
+function getScanWorker(): Worker {
+  if (!cachedWorker) {
+    cachedWorker = new Worker(resolveWorkerPath('scan-worker', import.meta.dir));
+  }
+  return cachedWorker;
+}
+
+// Exposed for a clean process shutdown (see server/index.ts) — an
+// unterminated Worker can keep the event loop alive.
+export function stopScanWorker(): void {
+  cachedWorker?.terminate();
+  cachedWorker = null;
+}
+
+async function runScanInWorker(
+  db: Db,
+  folders: string[],
+  scanStart: Date,
+): Promise<{ indexed: number; removed: number }> {
+  const worker = getScanWorker();
+  return await new Promise<{ indexed: number; removed: number }>((resolve, reject) => {
+    worker.onmessage = (event: MessageEvent<ScanWorkerResponse>) => {
+      const msg = event.data;
+      if (msg.type === 'done') {
+        resolve({ indexed: msg.indexed, removed: msg.removed });
+      } else {
+        reject(new Error(msg.message));
+      }
+    };
+    worker.onerror = (event: ErrorEvent) => {
+      // The worker itself may now be dead (e.g. an uncaught exception
+      // outside performScan's own try/catch) — drop the cached reference
+      // so the next scan spawns a fresh one instead of reusing a broken
+      // thread.
+      cachedWorker = null;
+      reject(new Error(event.message || 'Scan worker crashed'));
+    };
+    const request: ScanWorkerRequest = {
+      type: 'scan',
+      dbPath: db.$client.filename,
+      folders,
+      scanStartMs: scanStart.getTime(),
+    };
+    worker.postMessage(request);
+  });
+}
+
 export async function scanAndIndex(
   db: Db,
   folders: string[],
@@ -194,60 +335,7 @@ export async function scanAndIndex(
   scanning = true;
   try {
     const scanStart = nextScanStart();
-    const seen = new Set<string>();
-    let indexed = 0;
-    const inaccessibleRoots: string[] = [];
-
-    for (const folder of folders) {
-      try {
-        const folderStat = await lstat(folder);
-        if (!folderStat.isDirectory()) {
-          inaccessibleRoots.push(folder);
-          continue;
-        }
-      } catch (err) {
-        const code = (err as NodeJS.ErrnoException).code;
-        if (code === 'ENOENT' || code === 'EACCES' || code === 'ENOTDIR') {
-          inaccessibleRoots.push(folder);
-          continue;
-        }
-        throw err;
-      }
-
-      const inaccessibleSubDirs = new Set<string>();
-
-      try {
-        for await (const path of scanDirectory(folder, true, inaccessibleSubDirs)) {
-          if (seen.has(path)) continue;
-          seen.add(path);
-          try {
-            await indexFile(db, path, scanStart);
-            indexed++;
-          } catch (err) {
-            const code = (err as NodeJS.ErrnoException).code;
-            if (code === 'ENOENT') {
-              // File vanished between discovery and indexing — treat as stale
-            } else if (code === 'EACCES' || code === 'ENOTDIR') {
-              inaccessibleRoots.push(path);
-            } else {
-              throw err;
-            }
-          }
-        }
-        for (const dir of inaccessibleSubDirs) {
-          inaccessibleRoots.push(dir);
-        }
-      } catch (err) {
-        const code = (err as NodeJS.ErrnoException).code;
-        if (code === 'ENOENT' || code === 'EACCES' || code === 'ENOTDIR') {
-          inaccessibleRoots.push(folder);
-        } else {
-          throw err;
-        }
-      }
-    }
-
-    const removed = await removeStaleEntries(db, scanStart, inaccessibleRoots);
+    const { indexed, removed } = await runScanInWorker(db, folders, scanStart);
     return { indexed, removed, skipped: false };
   } finally {
     scanning = false;
