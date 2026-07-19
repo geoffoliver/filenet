@@ -37,17 +37,26 @@ export class HashWorkerPool {
         }
       };
       worker.onerror = (event: ErrorEvent) => {
-        // This worker may be dead now — reject whatever it still owed us
-        // rather than leaving those callers hanging forever. A later
-        // hash() call will keep picking this (now-idle-looking) worker
-        // since nothing here removes it from the pool; that's an accepted
-        // tradeoff for staying simple, since a genuine crash here (as
-        // opposed to a single file's hashFile() rejection, which already
-        // resolves via the normal 'error' message path above and never
-        // reaches onerror) should be rare.
+        // This worker is dead now — reject whatever it still owed us
+        // rather than leaving those callers hanging forever, then remove
+        // it from the pool entirely. Leaving it in place would be worse
+        // than doing nothing: pending.clear() below makes it look like
+        // the *least busy* worker (0 pending, the minimum possible), so
+        // hash()'s selection loop would keep preferring this dead slot
+        // over every healthy-but-currently-busier worker, turning one
+        // crash into "every future hash() call has a chance to fail"
+        // instead of just shrinking the pool's capacity by one.
+        // Looked up by reference (not the loop-captured `i`) since an
+        // earlier crash may have already shifted indices via splice.
         const err = new Error(event.message || 'Hash worker crashed');
         for (const entry of pending.values()) entry.reject(err);
         pending.clear();
+
+        const idx = this.workers.indexOf(worker);
+        if (idx !== -1) {
+          this.workers.splice(idx, 1);
+          this.pendingByWorker.splice(idx, 1);
+        }
       };
 
       this.workers.push(worker);
@@ -76,12 +85,16 @@ export class HashWorkerPool {
         this.workers[idx].postMessage(request);
       } catch (err) {
         // postMessage throws synchronously for an already-terminated
-        // worker (verified against Bun) — e.g. one that crashed and hit
-        // onerror above without being removed from the pool. Without this,
-        // the entry set on the line above leaks forever: nothing else will
-        // ever remove it, since no response can arrive for a message that
-        // was never sent, and it keeps skewing this worker toward looking
-        // "least busy" for every future hash() call.
+        // worker (verified against Bun). A crashed worker can no longer
+        // cause this — onerror above now removes it from the pool
+        // entirely, so hash() can never select it — but this.workers[idx]
+        // could still individually end up terminated some other way (a
+        // future bug reaching into it directly, as this file's own tests
+        // do to simulate that case). Without this, the entry set on the
+        // line above leaks forever: nothing else will ever remove it,
+        // since no response can arrive for a message that was never sent,
+        // and it keeps skewing this worker toward looking "least busy"
+        // for every future hash() call.
         pending.delete(id);
         reject(err instanceof Error ? err : new Error(String(err)));
       }

@@ -222,12 +222,11 @@ export async function performScan(
   scanStart: Date,
   options: PerformScanOptions = {},
 ): Promise<{ indexed: number; removed: number }> {
-  const { onProgress, hashFn = hashFile } = options;
+  const { onProgress, hashFn = hashFile, concurrency: requestedConcurrency = 1 } = options;
   // Guard against 0/negative/NaN/Infinity: the loop below only throttles
   // dispatch when inFlight.size >= concurrency, so a non-finite or
   // non-positive value would never trigger that check and let inFlight
   // grow unbounded for the whole folder walk.
-  const requestedConcurrency = options.concurrency ?? 1;
   const concurrency = Number.isFinite(requestedConcurrency)
     ? Math.max(1, Math.floor(requestedConcurrency))
     : 1;

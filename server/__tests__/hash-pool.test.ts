@@ -91,17 +91,17 @@ describe('HashWorkerPool', () => {
     expect(() => new HashWorkerPool(1.5, SERVER_DIR)).toThrow(/positive integer/i);
   });
 
-  it('rejects cleanly (rather than leaking a pending entry) when postMessage throws on a dead worker', async () => {
+  it('rejects cleanly (rather than leaking a pending entry) when postMessage throws on a worker terminated out-of-band', async () => {
     tmpDir = await mkdtemp(join(tmpdir(), 'filenet-hash-pool-'));
     const path = join(tmpDir, 'a.txt');
     await writeFile(path, 'hello');
 
     pool = new HashWorkerPool(1, SERVER_DIR);
-    // Simulate a worker that crashed (hit onerror, which clears its
-    // pending map but deliberately doesn't remove it from the pool — see
-    // hash-pool.ts) without going through pool.terminate(), by terminating
-    // the individual underlying worker directly. postMessage to it then
-    // throws synchronously, same as a real crash would eventually cause.
+    // Terminating the individual underlying worker directly (not via
+    // pool.terminate(), and not a crash — verified this does NOT fire
+    // onerror) simulates a worker gone bad through some path other than
+    // the crash-detection below, e.g. a future bug. postMessage to it
+    // then throws synchronously, same as a real crash eventually causes.
     const internals = pool as unknown as { workers: Worker[] };
     internals.workers[0].terminate();
     await Bun.sleep(50);
@@ -116,5 +116,47 @@ describe('HashWorkerPool', () => {
     // eventually. Prove that isn't happening by confirming a second call
     // also fails the same clean way rather than hanging.
     await expect(pool.hash(path)).rejects.toThrow(/terminated/i);
+  });
+
+  it('removes a genuinely crashed worker from the pool so healthy workers keep serving requests', async () => {
+    tmpDir = await mkdtemp(join(tmpdir(), 'filenet-hash-pool-'));
+    const path = join(tmpDir, 'a.txt');
+    await writeFile(path, 'hello');
+
+    pool = new HashWorkerPool(3, SERVER_DIR);
+    expect(pool.size).toBe(3);
+
+    // Fire the pool's actual registered onerror callback directly rather
+    // than triggering a real worker crash to reach it. Verified separately
+    // that a genuine crash (e.g. postMessage(null), which throws inside
+    // hash-worker.ts's onmessage before its own try/catch even starts) is
+    // NOT safe to do here: it reproducibly aborts the whole `bun test`
+    // process (exit 133) even with a single bare worker and no pool
+    // involved at all, so it's a bun test environment hazard, not
+    // something to reproduce in a test. Reading back and calling the
+    // handler exercises the exact same removal logic without that risk.
+    const internals = pool as unknown as {
+      workers: Worker[];
+    };
+    const worker0 = internals.workers[0];
+    worker0.onerror!(new ErrorEvent('error', { message: 'simulated crash' }));
+
+    expect(pool.size).toBe(2);
+
+    // Without the fix, hash()'s "least busy" selection would keep
+    // preferring the crashed (now looking maximally idle) worker's old
+    // slot forever, failing some fraction of all future calls even
+    // though two other workers are perfectly healthy. Run enough calls
+    // that any lingering preference for a dead slot would show up as a
+    // failure.
+    const results = await Promise.all(
+      Array.from({ length: 10 }, () =>
+        pool!.hash(path).then(
+          () => 'ok',
+          () => 'fail',
+        ),
+      ),
+    );
+    expect(results).toEqual(Array(10).fill('ok'));
   });
 });
