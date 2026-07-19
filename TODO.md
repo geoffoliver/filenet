@@ -74,6 +74,7 @@
 - [x] Group chat: fan-out to all accepted connected peers on send
 - [x] `ChatMessageSchema` (Zod) validates inbound peer messages; deduplication + atomic transaction
 - [x] Online presence: track which friends are currently connected
+- [ ] Give users a way to initiate DM conversations
 
 ### API (management + P2P bridge)
 
