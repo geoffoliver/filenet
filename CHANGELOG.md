@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Search results are now a sortable table** — replaced the click-to-expand card list with a table (Name, Type, Size, Sources, and a type-aware Details column showing duration/dimensions/page-count). Column headers sort ascending/descending; checkboxes support multi-select with a "Download All" bulk action; full metadata moved to a slide-in info drawer (`ResultInfoDrawer`) opened via a per-row info icon.
+
 ### Fixed
 
 - **Settings tabs scrolled off-screen with no visible hint that they did** — the tab bar overflowed the page's `max-w-2xl` container, and macOS hides scrollbars by default, so the extra tabs (Maintenance, Updates, Notifications) were easy to miss entirely. Widened the Settings page to `max-w-4xl`, which fits all nine tabs on one line.
