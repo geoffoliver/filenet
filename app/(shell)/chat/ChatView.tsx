@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 
 import type { Conversation, Friend, Message } from '../../lib/api';
 import {
@@ -123,6 +124,10 @@ export default function ChatView() {
   const [showNewGroup, setShowNewGroup] = useState(false);
   const handleCloseNewGroup = useCallback(() => setShowNewGroup(false), []);
 
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const pendingConvId = searchParams.get('conv');
+
   useEffect(() => {
     getMyInfo()
       .then((info) => setLocalNodeId(info.nodeId))
@@ -209,14 +214,29 @@ export default function ChatView() {
     prevMsgCountRef.current = messages.length;
   }, [messages.length, scrollToBottom]);
 
-  function selectConv(convId: string) {
-    if (convId === activeConvId) return;
-    activeConvIdRef.current = convId; // sync update so loadMessages guard doesn't race
-    prevMsgCountRef.current = 0; // reset so first load always scrolls to bottom
-    setActiveConvId(convId);
-    setMessages([]);
-    loadMessages(convId);
-  }
+  const selectConv = useCallback(
+    (convId: string) => {
+      if (convId === activeConvId) return;
+      activeConvIdRef.current = convId; // sync update so loadMessages guard doesn't race
+      prevMsgCountRef.current = 0; // reset so first load always scrolls to bottom
+      setActiveConvId(convId);
+      setMessages([]);
+      loadMessages(convId);
+    },
+    [activeConvId, loadMessages],
+  );
+
+  // Deep-link support: /chat?conv=<id> (e.g. from the Friends page's "Message"
+  // button). Waits for the target conversation to show up in the polled list
+  // before selecting it, then strips the param so refresh/back doesn't replay it.
+  useEffect(() => {
+    if (!pendingConvId) return;
+    if (!conversations.some((c) => c.id === pendingConvId)) return;
+    queueMicrotask(() => {
+      selectConv(pendingConvId);
+      router.replace('/chat');
+    });
+  }, [pendingConvId, conversations, router, selectConv]);
 
   async function handleSend() {
     if (!draft.trim() || !activeConvId || sending) return;

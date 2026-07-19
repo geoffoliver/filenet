@@ -181,3 +181,14 @@ test('shows empty state when no conversation is selected', async ({ page }) => {
   // No conversation selected — right pane should show placeholder
   await expect(page.getByText(/select a conversation/i)).toBeVisible();
 });
+
+test('opens the conversation from a ?conv= query param and clears it from the URL', async ({
+  page,
+}) => {
+  await page.goto('/chat?conv=dm:node-alice:self');
+
+  const bubbles = page.locator('[class*="bubbleBody"]');
+  await expect(bubbles.filter({ hasText: 'Hey there!' })).toBeVisible();
+  await expect(bubbles.filter({ hasText: 'Hi Alice!' })).toBeVisible();
+  await expect(page).toHaveURL(/\/chat$/);
+});
