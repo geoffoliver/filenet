@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 
-import { apiUrl } from '../api';
+import { apiUrl, formatCount } from '../api';
 
 let originalDevApiPort: string | undefined;
 let originalWindow: unknown;
@@ -54,5 +54,18 @@ describe('apiUrl', () => {
     delete (globalThis as any).window;
 
     expect(apiUrl('/api/settings')).toBe('/api/settings');
+  });
+});
+
+describe('formatCount', () => {
+  test('adds no separator below 1000', () => {
+    expect(formatCount(0)).toBe('0');
+    expect(formatCount(999)).toBe('999');
+  });
+
+  test('adds thousands separators for large counts', () => {
+    expect(formatCount(1000)).toBe('1,000');
+    expect(formatCount(123456)).toBe('123,456');
+    expect(formatCount(1234567)).toBe('1,234,567');
   });
 });

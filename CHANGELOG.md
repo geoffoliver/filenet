@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Docs now cover removing the quarantine flag** — `site/docs.html` has a new section under Installation for macOS Gatekeeper (`xattr -d com.apple.quarantine`) and the Windows Mark-of-the-Web equivalent (`Unblock-File`), since the executable isn't signed on either platform.
+
+### Changed
+
+- **Settings page split into tabs** — nine sections were previously stacked on one long page; `SettingsView` now uses a WAI-ARIA tabbed layout (roving tabindex, arrow-key navigation) with one tab per section. Sections with an unsaved draft (Profile, Friends & Privacy, Files, Networking, Startup, Updates) track a dirty baseline against the last-saved value, show a dot on their tab while dirty, and a `beforeunload` prompt now warns before leaving the page with any unsaved section.
+- **Dashboard counts are now comma-formatted** — shared-files and downloads counts on Home used a bare `String(n)`; added `formatCount` (`app/lib/api.ts`, built on `Intl`/`.toLocaleString('en-US')`) rather than pulling in the `numeral` package, which turned out to be 33.6KB uncompressed and unmaintained since 2022 for what's just thousands-separator grouping.
+
 ## [0.2.5] - 2026-07-19
 
 ### Fixed

@@ -57,6 +57,33 @@
           button in Settings once one's ready.
         </p>
 
+        <h3 id="quarantine">Removing the quarantine flag</h3>
+        <p>
+          Since the executable isn't signed, both macOS and Windows tag it as downloaded from the
+          internet and block it from running until you clear that flag.
+        </p>
+        <p>
+          <strong>macOS</strong> — Gatekeeper refuses to run it with an "unidentified developer"
+          warning. Clear the quarantine attribute from the terminal:
+        </p>
+        <pre><code>xattr -d com.apple.quarantine ./filenet</code></pre>
+        <p>
+          If you extracted the zip with Finder rather than <code>unzip</code>, clear the whole
+          folder instead, since Finder applies the attribute to every extracted file:
+        </p>
+        <pre><code>xattr -dr com.apple.quarantine ./filenet-bun-darwin-arm64/</code></pre>
+        <p>
+          <strong>Windows</strong> — SMB/downloads mark the zip (and everything extracted from it)
+          with a "Mark of the Web", which triggers a SmartScreen prompt. Either click
+          <strong>More info → Run anyway</strong> on that prompt, or clear the flag first in
+          PowerShell:
+        </p>
+        <pre><code>Get-ChildItem -Path .\filenet-bun-windows-x64 -Recurse | Unblock-File</code></pre>
+        <p>
+          Linux has no equivalent quarantine mechanism — extracted binaries run as soon as they're
+          marked executable (<code>chmod +x filenet</code>).
+        </p>
+
         <h2 id="running">Running</h2>
         <p>
           Open <a href="http://localhost:3000">http://localhost:3000</a>. On first launch, the setup

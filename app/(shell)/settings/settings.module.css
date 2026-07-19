@@ -15,6 +15,73 @@
     mb-8;
 }
 
+/* ── Tabs ─────────────────────────────────────────────────────────────────── */
+
+.tabList {
+  @apply flex
+    items-center
+    gap-0.5
+    overflow-x-auto
+    mb-8
+    pb-2
+    border-b
+    border-[var(--border)];
+  /* Hide the scrollbar itself (still scrollable) — a visible one here reads
+     as a layout bug rather than the deliberate horizontal-scroll affordance
+     it is, especially since it'd only ever appear on narrow viewports. */
+  scrollbar-width: none;
+}
+
+.tabList::-webkit-scrollbar {
+  display: none;
+}
+
+.tab {
+  @apply flex
+    items-center
+    h-8
+    px-3
+    rounded-sm
+    text-sm
+    font-medium
+    text-[var(--text-secondary)]
+    whitespace-nowrap
+    transition
+    cursor-pointer
+    border-none
+    bg-transparent;
+}
+
+.tab:hover {
+  @apply bg-[var(--bg-elevated)]
+    text-[var(--text-primary)];
+}
+
+.tab:focus-visible {
+  @apply outline-2
+    outline-offset-2
+    outline-[var(--color-primary)];
+}
+
+.tabActive,
+.tabActive:hover {
+  @apply bg-[var(--color-primary)]
+    text-[var(--color-primary-fg)];
+}
+
+.dirtyDot {
+  @apply inline-block
+    w-1.5
+    h-1.5
+    rounded-full
+    bg-[var(--color-danger)]
+    ml-1.5;
+}
+
+.tabActive .dirtyDot {
+  @apply bg-[var(--color-primary-fg)];
+}
+
 /* ── Sections ─────────────────────────────────────────────────────────────── */
 
 .section {

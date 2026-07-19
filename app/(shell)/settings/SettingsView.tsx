@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import FolderPicker from '../../components/FolderPicker/FolderPicker';
 
@@ -44,21 +44,45 @@ function SaveButton({ saving, saved }: { saving: boolean; saved: boolean }) {
   );
 }
 
+// Tabs hide (not unmount) a section, so a draft in a section the user isn't
+// currently looking at is easy to forget about entirely — see the dot on
+// its tab (SettingsView's dirtyTabs) and the leave-page warning
+// (SettingsView's beforeunload effect), both driven by this. Every section
+// with its own Save button reports its dirty state here; sections whose
+// actions are all immediate (Scripts, Maintenance, Notifications — nothing
+// to lose by switching tabs) don't call this at all.
+function useReportDirty(isDirty: boolean, onDirtyChange: (dirty: boolean) => void) {
+  useEffect(() => {
+    onDirtyChange(isDirty);
+  }, [isDirty, onDirtyChange]);
+}
+
 // ── Profile section ───────────────────────────────────────────────────────────
 
-function ProfileSection({ initial }: { initial: Settings }) {
+function ProfileSection({
+  initial,
+  onDirtyChange,
+}: {
+  initial: Settings;
+  onDirtyChange: (dirty: boolean) => void;
+}) {
   const [name, setName] = useState(initial.name);
+  const [savedName, setSavedName] = useState(initial.name);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState('');
+
+  useReportDirty(name.trim() !== savedName, onDirtyChange);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setSaving(true);
     setError('');
     setSaved(false);
-    patchSettings({ name: name.trim() })
+    const trimmed = name.trim();
+    patchSettings({ name: trimmed })
       .then(() => {
+        setSavedName(trimmed);
         setSaved(true);
         setTimeout(() => setSaved(false), 2000);
       })
@@ -90,15 +114,31 @@ function ProfileSection({ initial }: { initial: Settings }) {
 
 // ── Privacy section ───────────────────────────────────────────────────────────
 
-function PrivacySection({ initial }: { initial: Settings }) {
+function PrivacySection({
+  initial,
+  onDirtyChange,
+}: {
+  initial: Settings;
+  onDirtyChange: (dirty: boolean) => void;
+}) {
   const [fromAnyone, setFromAnyone] = useState(initial.autoAcceptFromAnyone);
+  const [savedFromAnyone, setSavedFromAnyone] = useState(initial.autoAcceptFromAnyone);
   const [fromFriends, setFromFriends] = useState(initial.autoAcceptFromFriendsOfFriends);
+  const [savedFromFriends, setSavedFromFriends] = useState(initial.autoAcceptFromFriendsOfFriends);
   const [password, setPassword] = useState('');
   const [clearPassword, setClearPassword] = useState(false);
   const [hasPassword, setHasPassword] = useState(initial.hasInvitePassword);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState('');
+
+  useReportDirty(
+    fromAnyone !== savedFromAnyone ||
+      fromFriends !== savedFromFriends ||
+      password.trim() !== '' ||
+      clearPassword,
+    onDirtyChange,
+  );
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -115,6 +155,8 @@ function PrivacySection({ initial }: { initial: Settings }) {
     })
       .then((updated) => {
         setHasPassword(updated.hasInvitePassword);
+        setSavedFromAnyone(fromAnyone);
+        setSavedFromFriends(fromFriends);
         setPassword('');
         setClearPassword(false);
         setSaved(true);
@@ -190,15 +232,35 @@ function PrivacySection({ initial }: { initial: Settings }) {
 
 // ── Files section ─────────────────────────────────────────────────────────────
 
-function FilesSection({ initial }: { initial: Settings }) {
+function FilesSection({
+  initial,
+  onDirtyChange,
+}: {
+  initial: Settings;
+  onDirtyChange: (dirty: boolean) => void;
+}) {
   const [folders, setFolders] = useState<string[]>(initial.sharedFolders);
+  const [savedFolders, setSavedFolders] = useState<string[]>(initial.sharedFolders);
   const [newFolder, setNewFolder] = useState('');
   const [downloadFolder, setDownloadFolder] = useState(initial.downloadFolder ?? '');
+  const [savedDownloadFolder, setSavedDownloadFolder] = useState(initial.downloadFolder ?? '');
   const [rescanInterval, setRescanInterval] = useState(String(initial.rescanIntervalMinutes));
+  const [savedRescanInterval, setSavedRescanInterval] = useState(
+    String(initial.rescanIntervalMinutes),
+  );
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState('');
   const folderInputRef = useRef<HTMLInputElement>(null);
+
+  useReportDirty(
+    newFolder.trim() !== '' ||
+      downloadFolder !== savedDownloadFolder ||
+      rescanInterval !== savedRescanInterval ||
+      folders.length !== savedFolders.length ||
+      folders.some((f, i) => f !== savedFolders[i]),
+    onDirtyChange,
+  );
 
   function addFolder(pathOverride?: string) {
     const trimmed = (pathOverride ?? newFolder).trim();
@@ -229,6 +291,9 @@ function FilesSection({ initial }: { initial: Settings }) {
       rescanIntervalMinutes: interval,
     })
       .then(() => {
+        setSavedFolders(folders);
+        setSavedDownloadFolder(downloadFolder);
+        setSavedRescanInterval(rescanInterval);
         setSaved(true);
         setTimeout(() => setSaved(false), 2000);
       })
@@ -435,12 +500,20 @@ function ScriptsSection() {
 
 // ── Networking section ────────────────────────────────────────────────────────
 
-function NetworkingSection({ initial }: { initial: Settings }) {
+function NetworkingSection({
+  initial,
+  onDirtyChange,
+}: {
+  initial: Settings;
+  onDirtyChange: (dirty: boolean) => void;
+}) {
   const [port, setPort] = useState(String(initial.listenPort));
   const [savedPort, setSavedPort] = useState(initial.listenPort);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState('');
+
+  useReportDirty(port !== String(savedPort), onDirtyChange);
 
   const parsedPort = Number(port);
   const displayPort =
@@ -527,11 +600,20 @@ function NetworkingSection({ initial }: { initial: Settings }) {
 
 // ── Startup section ───────────────────────────────────────────────────────────
 
-function StartupSection({ initial }: { initial: Settings }) {
+function StartupSection({
+  initial,
+  onDirtyChange,
+}: {
+  initial: Settings;
+  onDirtyChange: (dirty: boolean) => void;
+}) {
   const [autoOpen, setAutoOpen] = useState(initial.autoOpenBrowser);
+  const [savedAutoOpen, setSavedAutoOpen] = useState(initial.autoOpenBrowser);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState('');
+
+  useReportDirty(autoOpen !== savedAutoOpen, onDirtyChange);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -540,6 +622,7 @@ function StartupSection({ initial }: { initial: Settings }) {
     setSaved(false);
     patchSettings({ autoOpenBrowser: autoOpen })
       .then(() => {
+        setSavedAutoOpen(autoOpen);
         setSaved(true);
         setTimeout(() => setSaved(false), 2000);
       })
@@ -622,15 +705,23 @@ const PHASE_LABEL: Record<UpdatePhase, (status: UpdateStatus) => string> = {
   error: (s) => `Error: ${s.error ?? 'unknown error'}`,
 };
 
-function UpdatesSection() {
+function UpdatesSection({ onDirtyChange }: { onDirtyChange: (dirty: boolean) => void }) {
   const [status, setStatus] = useState<UpdateStatus | null>(null);
   const [repo, setRepo] = useState('');
+  const [savedRepo, setSavedRepo] = useState('');
   const [interval, setIntervalMinutes] = useState('');
+  const [savedInterval, setSavedInterval] = useState('');
   const [checking, setChecking] = useState(false);
   const [restarting, setRestarting] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState('');
+
+  // Unlike the other sections, there's no `initial` prop to seed a baseline
+  // from — this section loads its own settings asynchronously below, so the
+  // baseline starts out just as empty as the live fields and both get set
+  // together once that load resolves.
+  useReportDirty(repo !== savedRepo || interval !== savedInterval, onDirtyChange);
 
   useEffect(() => {
     let active = true;
@@ -639,7 +730,9 @@ function UpdatesSection() {
         if (!active) return;
         setStatus(s);
         setRepo(settingsRow.updateRepo);
+        setSavedRepo(settingsRow.updateRepo);
         setIntervalMinutes(String(settingsRow.updateCheckIntervalMinutes));
+        setSavedInterval(String(settingsRow.updateCheckIntervalMinutes));
       })
       .catch(() => {
         if (active) setError('Could not load update status.');
@@ -693,6 +786,8 @@ function UpdatesSection() {
     setSaved(false);
     patchSettings({ updateRepo: repo.trim(), updateCheckIntervalMinutes: parsedInterval })
       .then(() => {
+        setSavedRepo(repo);
+        setSavedInterval(interval);
         setSaved(true);
         setTimeout(() => setSaved(false), 2000);
       })
@@ -836,11 +931,119 @@ function NotificationsSection() {
   );
 }
 
+// ── Tabs ──────────────────────────────────────────────────────────────────────
+// The settings page grew to nine sections, each a full form in its own
+// right — showing them all stacked on one long page made the ones near the
+// bottom easy to miss. Tabs give each section its own moment without
+// touching any section's own internals.
+//
+// Every section stays mounted the whole time (hidden via the native
+// `hidden` attribute, not conditionally rendered) specifically so switching
+// tabs can never discard an in-progress edit in a section the user hasn't
+// saved yet — each section already manages its own draft state
+// independently and only submits on its own Save click.
+
+const TABS = [
+  { id: 'profile', label: 'Profile' },
+  { id: 'privacy', label: 'Friends & Privacy' },
+  { id: 'files', label: 'Files' },
+  { id: 'networking', label: 'Networking' },
+  { id: 'startup', label: 'Startup' },
+  { id: 'scripts', label: 'Scripts' },
+  { id: 'maintenance', label: 'Maintenance' },
+  { id: 'updates', label: 'Updates' },
+  { id: 'notifications', label: 'Notifications' },
+] as const;
+
+type TabId = (typeof TABS)[number]['id'];
+
+function TabList({
+  activeTab,
+  onSelect,
+  dirtyTabs,
+}: {
+  activeTab: TabId;
+  onSelect: (id: TabId) => void;
+  dirtyTabs: ReadonlySet<TabId>;
+}) {
+  // Roving tabindex + arrow-key navigation with automatic activation, per
+  // the WAI-ARIA APG tabs pattern: only the active tab is in the regular
+  // tab order, and Left/Right/Home/End move focus *and* select in one step.
+  function handleKeyDown(e: React.KeyboardEvent) {
+    const currentIndex = TABS.findIndex((t) => t.id === activeTab);
+    let nextIndex: number | null = null;
+    if (e.key === 'ArrowRight') nextIndex = (currentIndex + 1) % TABS.length;
+    else if (e.key === 'ArrowLeft') nextIndex = (currentIndex - 1 + TABS.length) % TABS.length;
+    else if (e.key === 'Home') nextIndex = 0;
+    else if (e.key === 'End') nextIndex = TABS.length - 1;
+    if (nextIndex === null) return;
+    e.preventDefault();
+    const next = TABS[nextIndex];
+    onSelect(next.id);
+    document.getElementById(`settings-tab-${next.id}`)?.focus();
+  }
+
+  return (
+    <div className={styles.tabList} role="tablist" aria-label="Settings sections">
+      {TABS.map((tab) => {
+        const selected = tab.id === activeTab;
+        const dirty = dirtyTabs.has(tab.id);
+        return (
+          <button
+            key={tab.id}
+            id={`settings-tab-${tab.id}`}
+            type="button"
+            role="tab"
+            aria-selected={selected}
+            aria-controls={`settings-panel-${tab.id}`}
+            tabIndex={selected ? 0 : -1}
+            className={`${styles.tab} ${selected ? styles.tabActive : ''}`}
+            onClick={() => onSelect(tab.id)}
+            onKeyDown={handleKeyDown}
+          >
+            {tab.label}
+            {dirty && (
+              <span
+                className={styles.dirtyDot}
+                aria-label="Unsaved changes"
+                title="Unsaved changes"
+              />
+            )}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function TabPanel({
+  id,
+  activeTab,
+  children,
+}: {
+  id: TabId;
+  activeTab: TabId;
+  children: React.ReactNode;
+}) {
+  return (
+    <div
+      id={`settings-panel-${id}`}
+      role="tabpanel"
+      aria-labelledby={`settings-tab-${id}`}
+      hidden={activeTab !== id}
+    >
+      {children}
+    </div>
+  );
+}
+
 // ── Root component ────────────────────────────────────────────────────────────
 
 export default function SettingsView() {
   const [settings, setSettings] = useState<Settings | null>(null);
   const [loadError, setLoadError] = useState('');
+  const [activeTab, setActiveTab] = useState<TabId>('profile');
+  const [dirtyTabs, setDirtyTabs] = useState<Set<TabId>>(new Set());
 
   useEffect(() => {
     let active = true;
@@ -856,21 +1059,82 @@ export default function SettingsView() {
     };
   }, []);
 
+  const handleDirtyChange = useCallback((tabId: TabId, dirty: boolean) => {
+    setDirtyTabs((prev) => {
+      if (prev.has(tabId) === dirty) return prev;
+      const next = new Set(prev);
+      if (dirty) next.add(tabId);
+      else next.delete(tabId);
+      return next;
+    });
+  }, []);
+
+  // Tabs only hide a dirty section, they never discard it — but leaving the
+  // page entirely (closing the tab, reloading, navigating elsewhere) would.
+  // The dot on each tab is the primary signal; this is the backstop for
+  // when the browser itself is about to throw the draft away.
+  useEffect(() => {
+    if (dirtyTabs.size === 0) return;
+    function handleBeforeUnload(e: BeforeUnloadEvent) {
+      // Both are needed: Chrome (and older browsers generally) only
+      // prompts if returnValue is set, while preventDefault() is the
+      // current spec's documented way of triggering it.
+      e.preventDefault();
+      e.returnValue = '';
+    }
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [dirtyTabs]);
+
   if (loadError) return <p className={styles.loadError}>{loadError}</p>;
   if (!settings) return <p className={styles.loading}>Loading…</p>;
 
   return (
     <div className={styles.page}>
       <h1 className={styles.pageTitle}>Settings</h1>
-      <ProfileSection initial={settings} />
-      <PrivacySection initial={settings} />
-      <FilesSection initial={settings} />
-      <NetworkingSection initial={settings} />
-      <StartupSection initial={settings} />
-      <ScriptsSection />
-      <MaintenanceSection />
-      <UpdatesSection />
-      <NotificationsSection />
+      <TabList activeTab={activeTab} onSelect={setActiveTab} dirtyTabs={dirtyTabs} />
+      <TabPanel id="profile" activeTab={activeTab}>
+        <ProfileSection
+          initial={settings}
+          onDirtyChange={(dirty) => handleDirtyChange('profile', dirty)}
+        />
+      </TabPanel>
+      <TabPanel id="privacy" activeTab={activeTab}>
+        <PrivacySection
+          initial={settings}
+          onDirtyChange={(dirty) => handleDirtyChange('privacy', dirty)}
+        />
+      </TabPanel>
+      <TabPanel id="files" activeTab={activeTab}>
+        <FilesSection
+          initial={settings}
+          onDirtyChange={(dirty) => handleDirtyChange('files', dirty)}
+        />
+      </TabPanel>
+      <TabPanel id="networking" activeTab={activeTab}>
+        <NetworkingSection
+          initial={settings}
+          onDirtyChange={(dirty) => handleDirtyChange('networking', dirty)}
+        />
+      </TabPanel>
+      <TabPanel id="startup" activeTab={activeTab}>
+        <StartupSection
+          initial={settings}
+          onDirtyChange={(dirty) => handleDirtyChange('startup', dirty)}
+        />
+      </TabPanel>
+      <TabPanel id="scripts" activeTab={activeTab}>
+        <ScriptsSection />
+      </TabPanel>
+      <TabPanel id="maintenance" activeTab={activeTab}>
+        <MaintenanceSection />
+      </TabPanel>
+      <TabPanel id="updates" activeTab={activeTab}>
+        <UpdatesSection onDirtyChange={(dirty) => handleDirtyChange('updates', dirty)} />
+      </TabPanel>
+      <TabPanel id="notifications" activeTab={activeTab}>
+        <NotificationsSection />
+      </TabPanel>
     </div>
   );
 }

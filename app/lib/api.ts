@@ -33,6 +33,13 @@ export function formatEta(seconds: number | null): string {
   return `${h}h ${m % 60}m`;
 }
 
+// Fixed locale rather than the visitor's own: predictable output (matters
+// for tests) and this app has no other i18n infrastructure to plug into —
+// this is just thousands-separator grouping, not full localization.
+export function formatCount(n: number): string {
+  return n.toLocaleString('en-US');
+}
+
 export function formatBytes(s: string | number): string {
   let n: bigint;
   try {

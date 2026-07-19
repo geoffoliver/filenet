@@ -8,6 +8,7 @@ import {
   type Stats,
   type Transfer,
   formatBytes,
+  formatCount,
   formatEta,
   formatSpeed,
   getStats,
@@ -140,7 +141,7 @@ export default function HomeView() {
       <div className={styles.grid}>
         <StatCard
           label="Shared files"
-          value={stats ? String(stats.sharedFiles.count) : '–'}
+          value={stats ? formatCount(stats.sharedFiles.count) : '–'}
           sub={stats ? formatBytes(stats.sharedFiles.totalSize) : undefined}
         />
         <StatCard
@@ -150,7 +151,7 @@ export default function HomeView() {
         />
         <StatCard
           label="Files downloaded"
-          value={stats ? String(stats.downloads.count) : '–'}
+          value={stats ? formatCount(stats.downloads.count) : '–'}
           sub={stats ? formatBytes(stats.downloads.totalSize) : undefined}
         />
         <StatCard
