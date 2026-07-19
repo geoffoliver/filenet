@@ -50,19 +50,22 @@ test('navigates to search page with query when form is submitted', async ({ page
   await page.waitForURL(/\/search\?.*q=my/);
 });
 
-test('expands result detail on click', async ({ page }) => {
+test('renders results as a table with core columns', async ({ page }) => {
   await mockSearch(page, { files: [], total: 0, network: [NETWORK_FILE] });
   await page.goto('/search?q=song&type=all');
-  await page.getByText('awesome-song.mp3').click();
-  await expect(page.getByText('Test Artist')).toBeVisible();
-  await expect(page.getByText('Test Album')).toBeVisible();
-  await expect(page.getByText('3:30')).toBeVisible(); // 210s duration
+  await expect(page.getByRole('columnheader', { name: 'Name' })).toBeVisible();
+  await expect(page.getByRole('columnheader', { name: 'Type' })).toBeVisible();
+  await expect(page.getByRole('columnheader', { name: 'Size' })).toBeVisible();
+  await expect(page.getByRole('columnheader', { name: 'Sources' })).toBeVisible();
+  await expect(page.getByRole('columnheader', { name: 'Details' })).toBeVisible();
 });
 
-test('shows source count in result row', async ({ page }) => {
+test('shows source count and details column in the row', async ({ page }) => {
   await mockSearch(page, { files: [], total: 0, network: [NETWORK_FILE] });
   await page.goto('/search?q=song&type=all');
-  await expect(page.getByText(/1 source/i)).toBeVisible();
+  const row = page.getByRole('row', { name: /awesome-song.mp3/ });
+  await expect(row.getByRole('cell').nth(4)).toHaveText('1'); // Sources column
+  await expect(row.getByRole('cell').nth(5)).toHaveText('3:30'); // Details: 210s duration
 });
 
 test('search via navbar navigates to search page', async ({ page }) => {
@@ -101,7 +104,6 @@ test('download button shows progress while downloading', async ({ page }) => {
   });
 
   await page.goto('/search?q=song&type=all');
-  await page.getByText('awesome-song.mp3').click();
   await page.getByRole('button', { name: 'Download' }).click();
   await expect(page.getByRole('button', { name: /\d+%/ })).toBeVisible({ timeout: 8000 });
 });
@@ -118,7 +120,6 @@ test('download button shows Done after completion', async ({ page }) => {
   });
 
   await page.goto('/search?q=song&type=all');
-  await page.getByText('awesome-song.mp3').click();
   await page.getByRole('button', { name: 'Download' }).click();
   await expect(page.getByRole('button', { name: 'Done ✓' })).toBeVisible({ timeout: 8000 });
 });
