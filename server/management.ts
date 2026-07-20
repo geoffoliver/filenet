@@ -22,6 +22,7 @@ import {
   PatchSettingsBodySchema,
   ReorderScriptBodySchema,
   SearchQuerySchema,
+  SearchStreamQuerySchema,
 } from './schemas';
 import { ConflictError, NotFoundError } from './errors';
 import {
@@ -33,6 +34,7 @@ import {
   notifyFriendRejected,
   sendToPeer,
 } from './connections';
+import { SEARCH_TIMEOUT_MS, SETTLE_TIMEOUT_MS, initiateNetworkSearch } from './search-protocol';
 import { acceptFriendRequest, addOutgoingFriend, getFriends, rejectFriendRequest } from './friends';
 import {
   cancelDownload,
@@ -63,7 +65,6 @@ import type { Identity } from './identity';
 import type { SharedFile } from './schema';
 import type { UpdateManager } from './updater';
 import { dmConversationId } from './chat';
-import { initiateNetworkSearch } from './search-protocol';
 import { searchFiles } from './search';
 
 type SharedFileDto = {
@@ -352,6 +353,61 @@ export function createManagementFetch(deps: ManagementDeps): (req: Request) => P
           files: localResult.files.map(toSharedFileDto),
           total: localResult.total,
           ...(network ? { network: networkResults } : {}),
+        });
+      }
+
+      if (url.pathname === '/api/search/stream' && req.method === 'GET') {
+        const result = SearchStreamQuerySchema.safeParse(Object.fromEntries(url.searchParams));
+        if (!result.success) {
+          return new Response(result.error.issues[0].message, { status: 400 });
+        }
+        const { q, type } = result.data;
+        const encoder = new TextEncoder();
+        const sseEvent = (event: string, data: unknown) =>
+          encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+
+        const stream = new ReadableStream({
+          async start(controller) {
+            try {
+              const localResult = await searchFiles(db, { query: q, type, limit: 50, offset: 0 });
+              controller.enqueue(
+                sseEvent('local', {
+                  files: localResult.files.map(toSharedFileDto),
+                  total: localResult.total,
+                }),
+              );
+
+              const peers = await getAcceptedConnectedPeers(db);
+              if (peers.length === 0) {
+                controller.enqueue(sseEvent('done', {}));
+                controller.close();
+                return;
+              }
+
+              await networkSearch(
+                identity,
+                peers,
+                { query: q, fileType: type },
+                SEARCH_TIMEOUT_MS,
+                sendToPeer,
+                SETTLE_TIMEOUT_MS,
+                (batch) => controller.enqueue(sseEvent('network', batch)),
+              );
+              controller.enqueue(sseEvent('done', {}));
+              controller.close();
+            } catch (err) {
+              console.error('Search stream error:', err);
+              controller.error(err);
+            }
+          },
+        });
+
+        return new Response(stream, {
+          headers: {
+            'Content-Type': 'text/event-stream',
+            'Cache-Control': 'no-cache',
+            Connection: 'keep-alive',
+          },
         });
       }
 
