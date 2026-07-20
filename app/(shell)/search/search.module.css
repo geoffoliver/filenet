@@ -49,6 +49,26 @@
     mb-4;
 }
 
+.searching {
+  @apply flex
+    items-center
+    gap-2
+    text-sm
+    text-[var(--text-muted)]
+    mb-4;
+}
+
+.searchingSpinner {
+  @apply w-3
+    h-3
+    rounded-full
+    border-2
+    border-[var(--border)]
+    border-t-[var(--color-primary)]
+    animate-spin
+    flex-shrink-0;
+}
+
 /* ── Results table ────────────────────────────────────────────────────────── */
 
 .tableWrap {
