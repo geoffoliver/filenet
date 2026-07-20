@@ -405,9 +405,9 @@ export function createManagementFetch(deps: ManagementDeps): (req: Request) => P
               safeEnqueue(sseEvent('done', {}));
               safeClose();
             } catch (err) {
+              console.error('Search stream error:', err);
               if (!closed) {
                 closed = true;
-                console.error('Search stream error:', err);
                 try {
                   controller.error(err);
                 } catch {
