@@ -64,6 +64,8 @@ export const SearchQuerySchema = z.object({
   network: z.preprocess((v) => v === 'true' || v === true, z.boolean().optional().default(false)),
 });
 
+export const SearchStreamQuerySchema = SearchQuerySchema.pick({ q: true, type: true });
+
 // Protocol message schemas (untrusted peer input)
 
 export const SearchResultItemSchema = z.object({
