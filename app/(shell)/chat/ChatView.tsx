@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 
 import type { Conversation, Friend, Message } from '../../lib/api';
 import {
@@ -123,6 +124,10 @@ export default function ChatView() {
   const [showNewGroup, setShowNewGroup] = useState(false);
   const handleCloseNewGroup = useCallback(() => setShowNewGroup(false), []);
 
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const pendingConvId = searchParams.get('conv');
+
   useEffect(() => {
     getMyInfo()
       .then((info) => setLocalNodeId(info.nodeId))
@@ -209,14 +214,36 @@ export default function ChatView() {
     prevMsgCountRef.current = messages.length;
   }, [messages.length, scrollToBottom]);
 
-  function selectConv(convId: string) {
-    if (convId === activeConvId) return;
-    activeConvIdRef.current = convId; // sync update so loadMessages guard doesn't race
-    prevMsgCountRef.current = 0; // reset so first load always scrolls to bottom
-    setActiveConvId(convId);
-    setMessages([]);
-    loadMessages(convId);
-  }
+  const selectConv = useCallback(
+    (convId: string) => {
+      // Guard on the ref (not the activeConvId state) so this callback stays
+      // referentially stable across conversation switches — otherwise the
+      // deep-link effect below (which depends on selectConv) would re-run and
+      // schedule redundant work every time the active conversation changes.
+      if (convId === activeConvIdRef.current) return;
+      activeConvIdRef.current = convId; // sync update so loadMessages guard doesn't race
+      prevMsgCountRef.current = 0; // reset so first load always scrolls to bottom
+      setActiveConvId(convId);
+      setMessages([]);
+      loadMessages(convId);
+    },
+    [loadMessages],
+  );
+
+  // Deep-link support: /chat?conv=<id> (e.g. from the Friends page's "Message"
+  // button). Waits for the target conversation to show up in the polled list
+  // before selecting it, then strips the param so refresh/back doesn't replay it.
+  // The state updates are deferred via queueMicrotask because selectConv calls
+  // setState synchronously, which react-hooks/set-state-in-effect (error-level
+  // in this repo) flags when called directly from an effect body.
+  useEffect(() => {
+    if (!pendingConvId) return;
+    if (!conversations.some((c) => c.id === pendingConvId)) return;
+    queueMicrotask(() => {
+      selectConv(pendingConvId);
+      router.replace('/chat');
+    });
+  }, [pendingConvId, conversations, router, selectConv]);
 
   async function handleSend() {
     if (!draft.trim() || !activeConvId || sending) return;

@@ -161,6 +161,19 @@
     text-[var(--text-secondary)];
 }
 
+.actionGroup {
+  @apply flex
+    flex-col
+    items-end
+    gap-1;
+}
+
+.actionError {
+  @apply text-xs
+    text-[var(--color-danger)]
+    text-right;
+}
+
 /* ── Empty state ──────────────────────────────────────────────────────────── */
 
 .empty {

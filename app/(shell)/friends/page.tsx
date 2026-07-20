@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useRouter } from 'next/navigation';
 
 import type { AddFriendParams, Friend } from '../../lib/api';
 import {
@@ -8,6 +9,7 @@ import {
   addFriend,
   formatBytes,
   getFriends,
+  openDmConversation,
   rejectFriend,
   removeFriend,
 } from '../../lib/api';
@@ -51,6 +53,7 @@ function timeAgo(iso: string): string {
 }
 
 export default function FriendsPage() {
+  const router = useRouter();
   const [friends, setFriends] = useState<Friend[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
@@ -60,6 +63,7 @@ export default function FriendsPage() {
   const [formError, setFormError] = useState('');
   const [actionId, setActionId] = useState<string | null>(null);
   const [confirmRemoveId, setConfirmRemoveId] = useState<string | null>(null);
+  const [messageError, setMessageError] = useState<Record<string, string>>({});
   const mountedRef = useRef(true);
   const pollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hasLoadedRef = useRef(false);
@@ -137,6 +141,29 @@ export default function FriendsPage() {
       // leave unchanged
     } finally {
       setActionId(null);
+    }
+  }
+
+  async function handleMessage(friend: Friend) {
+    setActionId(friend.id);
+    setMessageError((prev) => ({ ...prev, [friend.id]: '' }));
+    try {
+      // nodeId is guaranteed set for ACCEPTED friends: handleIncomingFriendRequest
+      // (server/friends.ts) always sets it when a friend row is created/updated to
+      // INCOMING_PENDING, acceptFriendRequest never touches it and only accepts from
+      // INCOMING_PENDING, and the outbound handshake (server/connections.ts) persists
+      // it before any accept flow can run.
+      const conv = await openDmConversation(friend.nodeId as string);
+      router.push(`/chat?conv=${encodeURIComponent(conv.id)}`);
+    } catch (err) {
+      setMessageError((prev) => ({
+        ...prev,
+        [friend.id]: err instanceof Error ? err.message : 'Failed to start conversation.',
+      }));
+    } finally {
+      // Guard against clobbering a different friend's in-flight busy state if the
+      // user triggered another row's action while this request was pending.
+      setActionId((current) => (current === friend.id ? null : current));
     }
   }
 
@@ -347,6 +374,19 @@ export default function FriendsPage() {
                   </div>
                 </div>
                 <div className={styles.actions}>
+                  <div className={styles.actionGroup}>
+                    <button
+                      type="button"
+                      className="btn btn-ghost"
+                      onClick={() => handleMessage(f)}
+                      disabled={actionId === f.id}
+                    >
+                      {actionId === f.id ? '…' : 'Message'}
+                    </button>
+                    {messageError[f.id] && (
+                      <span className={styles.actionError}>{messageError[f.id]}</span>
+                    )}
+                  </div>
                   {confirmRemoveId === f.id ? (
                     <>
                       <span className={styles.confirmLabel}>Remove?</span>
