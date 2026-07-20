@@ -148,6 +148,11 @@ export default function FriendsPage() {
     setActionId(friend.id);
     setMessageError((prev) => ({ ...prev, [friend.id]: '' }));
     try {
+      // nodeId is guaranteed set for ACCEPTED friends: handleIncomingFriendRequest
+      // (server/friends.ts) always sets it when a friend row is created/updated to
+      // INCOMING_PENDING, acceptFriendRequest never touches it and only accepts from
+      // INCOMING_PENDING, and the outbound handshake (server/connections.ts) persists
+      // it before any accept flow can run.
       const conv = await openDmConversation(friend.nodeId as string);
       router.push(`/chat?conv=${encodeURIComponent(conv.id)}`);
     } catch (err) {

@@ -1,6 +1,12 @@
 import { expect, test } from '@playwright/test';
 
-import { FRIENDS, FRIENDS_WITH_INCOMING_REQUEST, mockBaseApp, mockFriends } from './helpers';
+import {
+  CONVERSATIONS,
+  FRIENDS,
+  FRIENDS_WITH_INCOMING_REQUEST,
+  mockBaseApp,
+  mockFriends,
+} from './helpers';
 
 test.beforeEach(async ({ page }) => {
   await mockBaseApp(page);
@@ -141,7 +147,7 @@ test('starting a DM posts peerNodeId and navigates to Chat with it in the URL', 
         },
       });
     }
-    return route.fulfill({ json: FRIENDS });
+    return route.fulfill({ json: CONVERSATIONS });
   });
 
   await page.goto('/friends');
@@ -161,7 +167,7 @@ test('shows an inline error and re-enables the button when starting a DM fails',
     if (route.request().method() === 'POST') {
       return route.fulfill({ status: 403, body: 'peerNodeId must be an accepted friend' });
     }
-    return route.fulfill({ json: FRIENDS });
+    return route.fulfill({ json: CONVERSATIONS });
   });
 
   await page.goto('/friends');
