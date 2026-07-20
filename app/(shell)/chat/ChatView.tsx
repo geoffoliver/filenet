@@ -216,14 +216,18 @@ export default function ChatView() {
 
   const selectConv = useCallback(
     (convId: string) => {
-      if (convId === activeConvId) return;
+      // Guard on the ref (not the activeConvId state) so this callback stays
+      // referentially stable across conversation switches — otherwise the
+      // deep-link effect below (which depends on selectConv) would re-run and
+      // schedule redundant work every time the active conversation changes.
+      if (convId === activeConvIdRef.current) return;
       activeConvIdRef.current = convId; // sync update so loadMessages guard doesn't race
       prevMsgCountRef.current = 0; // reset so first load always scrolls to bottom
       setActiveConvId(convId);
       setMessages([]);
       loadMessages(convId);
     },
-    [activeConvId, loadMessages],
+    [loadMessages],
   );
 
   // Deep-link support: /chat?conv=<id> (e.g. from the Friends page's "Message"
