@@ -161,7 +161,9 @@ export default function FriendsPage() {
         [friend.id]: err instanceof Error ? err.message : 'Failed to start conversation.',
       }));
     } finally {
-      setActionId(null);
+      // Guard against clobbering a different friend's in-flight busy state if the
+      // user triggered another row's action while this request was pending.
+      setActionId((current) => (current === friend.id ? null : current));
     }
   }
 
