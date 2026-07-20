@@ -338,21 +338,11 @@ export function createManagementFetch(deps: ManagementDeps): (req: Request) => P
         if (!result.success) {
           return new Response(result.error.issues[0].message, { status: 400 });
         }
-        const { q, type, limit, offset, network } = result.data;
-        const localSearchPromise = searchFiles(db, { query: q, type, limit, offset });
-        const networkResultsPromise = network
-          ? getAcceptedConnectedPeers(db).then((peers) =>
-              networkSearch(identity, peers, { query: q, fileType: type }),
-            )
-          : Promise.resolve([]);
-        const [localResult, networkResults] = await Promise.all([
-          localSearchPromise,
-          networkResultsPromise,
-        ]);
+        const { q, type, limit, offset } = result.data;
+        const localResult = await searchFiles(db, { query: q, type, limit, offset });
         return Response.json({
           files: localResult.files.map(toSharedFileDto),
           total: localResult.total,
-          ...(network ? { network: networkResults } : {}),
         });
       }
 
