@@ -31,6 +31,28 @@ test('shows results from the network', async ({ page }) => {
   await expect(page.getByText('5.0 MB')).toBeVisible();
 });
 
+test('shows a searching indicator while the stream is in flight, hidden once done', async ({
+  page,
+}) => {
+  let resolveFulfill: () => void;
+  const gate = new Promise<void>((r) => (resolveFulfill = r));
+  await page.route('/api/search**', async (route) => {
+    await gate;
+    await route.fulfill({
+      contentType: 'text/event-stream',
+      body: `event: local\ndata: ${JSON.stringify({ files: [], total: 0 })}\n\nevent: done\ndata: {}\n\n`,
+    });
+  });
+  await page.goto('/search?q=song&type=all');
+  // The status div carries no aria-label, so its accessible name is empty;
+  // match on role + visible text instead of getByRole's `name` filter.
+  const indicator = page.getByRole('status');
+  await expect(indicator).toBeVisible();
+  await expect(indicator).toHaveText(/searching network/i);
+  resolveFulfill!();
+  await expect(indicator).not.toBeVisible();
+});
+
 test('shows "No results found" when search returns nothing', async ({ page }) => {
   await mockSearch(page, { files: [], total: 0, network: [] });
   await page.goto('/search?q=nothing&type=all');
