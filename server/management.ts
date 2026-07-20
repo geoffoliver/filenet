@@ -427,6 +427,7 @@ export function createManagementFetch(deps: ManagementDeps): (req: Request) => P
           headers: {
             'Content-Type': 'text/event-stream',
             'Cache-Control': 'no-cache',
+            Connection: 'keep-alive',
           },
         });
       }

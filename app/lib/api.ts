@@ -545,6 +545,7 @@ export function streamSearch(
   });
   es.onerror = () => {
     if (finished) return;
+    finished = true;
     handlers.onError();
     es.close();
   };
