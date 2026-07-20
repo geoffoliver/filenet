@@ -838,6 +838,42 @@ describe('initiateNetworkSearch', () => {
     expect(batches).toHaveLength(1); // only the first call added anything
   });
 
+  it('does not let a throwing onBatch prevent the search from resolving', async () => {
+    const peer = makePeer('throwing-onbatch-peer');
+    const sent: { peer: ConnectedPeer; msg: InnerMessage }[] = [];
+    const errorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+    const networkResultsPromise = initiateNetworkSearch(
+      identity,
+      [peer],
+      { query: 'throw-test', fileType: 'all' },
+      5_000,
+      captureAll(sent),
+      50,
+      () => {
+        throw new Error('onBatch boom');
+      },
+    );
+    await Bun.sleep(10);
+    const reqMsg = sent[0].msg as SearchRequestMessage;
+    handleSearchResult({
+      type: 'search-result',
+      searchId: reqMsg.searchId,
+      fromNodeId: 'throwing-onbatch-peer',
+      results: [
+        {
+          filename: 'a.mp3',
+          size: '100',
+          sha256: 'a'.repeat(64),
+          mimeType: 'audio/mpeg',
+          metadata: null,
+        },
+      ],
+    });
+    const results = await networkResultsPromise;
+    expect(results).toHaveLength(1);
+    errorSpy.mockRestore();
+  });
+
   it('caps collected results at MAX_NETWORK_RESULTS', async () => {
     const peer = makePeer('cap-peer');
     const sent: { peer: ConnectedPeer; msg: InnerMessage }[] = [];

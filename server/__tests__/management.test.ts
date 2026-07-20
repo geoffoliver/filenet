@@ -1342,6 +1342,61 @@ describe('GET /api/search/stream', () => {
     const res = await makeHandler()(req('/api/search/stream?type=unknown'));
     expect(res.status).toBe(400);
   });
+
+  it('does not throw when a network batch arrives after the client has disconnected', async () => {
+    const nodeId = 'cancel-node';
+    db.insert(friends)
+      .values({
+        id: randomUUID(),
+        addedAt: new Date(),
+        updatedAt: new Date(),
+        name: 'CancelPeer',
+        address: '10.0.0.50',
+        port: 7734,
+        nodeId,
+        status: 'ACCEPTED',
+      })
+      .run();
+    registerPeer(
+      { send: () => {}, close: () => {} },
+      Buffer.alloc(32),
+      nodeId,
+      Buffer.alloc(32),
+      '10.0.0.50',
+      7734,
+    );
+    try {
+      let capturedOnBatch: ((batch: unknown[]) => void) | undefined;
+      const handler = createManagementFetch({
+        identity,
+        db,
+        connectPeer: neverConnect,
+        updater: makeFakeUpdater(),
+        networkSearch: async (_id, _peers, _params, _t, _s, _st, onBatch) => {
+          capturedOnBatch = onBatch;
+          return [];
+        },
+      });
+
+      const res = await handler(req('/api/search/stream?q=song'));
+      await res.body!.cancel();
+
+      expect(() => {
+        capturedOnBatch?.([
+          {
+            filename: 'late.mp3',
+            size: '1',
+            sha256: 'c'.repeat(64),
+            mimeType: null,
+            metadata: null,
+            nodeId,
+          },
+        ]);
+      }).not.toThrow();
+    } finally {
+      unregisterPeer(nodeId);
+    }
+  });
 });
 
 // ---------------------------------------------------------------------------

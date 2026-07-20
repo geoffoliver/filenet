@@ -179,7 +179,11 @@ export function handleSearchResult(
     }
     if (added > 0) {
       pending.resultsPerSender.set(sender, senderCount + added);
-      pending.onBatch?.(newItems);
+      try {
+        pending.onBatch?.(newItems);
+      } catch (err) {
+        console.error('onBatch callback threw:', err);
+      }
       // Reset the settle timer — resolve early if no new results arrive within the window.
       if (pending.settleTimer) clearTimeout(pending.settleTimer);
       pending.settleTimer = setTimeout(() => {

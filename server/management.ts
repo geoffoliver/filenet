@@ -356,11 +356,30 @@ export function createManagementFetch(deps: ManagementDeps): (req: Request) => P
         const sseEvent = (event: string, data: unknown) =>
           encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
 
+        let closed = false;
+
         const stream = new ReadableStream({
           async start(controller) {
+            const safeEnqueue = (chunk: Uint8Array) => {
+              if (closed) return;
+              try {
+                controller.enqueue(chunk);
+              } catch {
+                closed = true;
+              }
+            };
+            const safeClose = () => {
+              if (closed) return;
+              closed = true;
+              try {
+                controller.close();
+              } catch {
+                // already closed by the consumer — nothing to do
+              }
+            };
             try {
               const localResult = await searchFiles(db, { query: q, type, limit: 50, offset: 0 });
-              controller.enqueue(
+              safeEnqueue(
                 sseEvent('local', {
                   files: localResult.files.map(toSharedFileDto),
                   total: localResult.total,
@@ -369,8 +388,8 @@ export function createManagementFetch(deps: ManagementDeps): (req: Request) => P
 
               const peers = await getAcceptedConnectedPeers(db);
               if (peers.length === 0) {
-                controller.enqueue(sseEvent('done', {}));
-                controller.close();
+                safeEnqueue(sseEvent('done', {}));
+                safeClose();
                 return;
               }
 
@@ -381,14 +400,26 @@ export function createManagementFetch(deps: ManagementDeps): (req: Request) => P
                 SEARCH_TIMEOUT_MS,
                 sendToPeer,
                 SETTLE_TIMEOUT_MS,
-                (batch) => controller.enqueue(sseEvent('network', batch)),
+                (batch) => safeEnqueue(sseEvent('network', batch)),
               );
-              controller.enqueue(sseEvent('done', {}));
-              controller.close();
+              safeEnqueue(sseEvent('done', {}));
+              safeClose();
             } catch (err) {
-              console.error('Search stream error:', err);
-              controller.error(err);
+              if (!closed) {
+                closed = true;
+                console.error('Search stream error:', err);
+                try {
+                  controller.error(err);
+                } catch {
+                  // already closed/errored — nothing to do
+                }
+              }
             }
+          },
+          cancel() {
+            // Client disconnected (e.g. EventSource.close() on the browser side) —
+            // stop attempting to enqueue into a controller that's now closed.
+            closed = true;
           },
         });
 
@@ -396,7 +427,6 @@ export function createManagementFetch(deps: ManagementDeps): (req: Request) => P
           headers: {
             'Content-Type': 'text/event-stream',
             'Cache-Control': 'no-cache',
-            Connection: 'keep-alive',
           },
         });
       }
