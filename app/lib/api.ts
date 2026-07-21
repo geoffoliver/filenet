@@ -423,18 +423,16 @@ export type NetworkFile = {
   viaNodeId?: string;
 };
 
-export type SearchResponse = {
-  files: LocalFile[];
-  total: number;
-  network?: NetworkFile[];
-};
-
-export type SearchParams = {
+export type SearchStreamParams = {
   q: string;
   type?: FileType;
-  limit?: number;
-  offset?: number;
-  network?: boolean;
+};
+
+export type SearchStreamHandlers = {
+  onLocal: (data: { files: LocalFile[]; total: number }) => void;
+  onNetworkBatch: (batch: NetworkFile[]) => void;
+  onDone: () => void;
+  onError: () => void;
 };
 
 // ── Chat ──────────────────────────────────────────────────────────────────────
@@ -525,17 +523,41 @@ export async function deleteConversation(convId: string): Promise<void> {
   }
 }
 
-export async function searchFiles(
-  params: SearchParams,
-  signal?: AbortSignal,
-): Promise<SearchResponse> {
+export function streamSearch(
+  params: SearchStreamParams,
+  handlers: SearchStreamHandlers,
+): EventSource {
   const qs = new URLSearchParams();
   if (params.q) qs.set('q', params.q);
   if (params.type && params.type !== 'all') qs.set('type', params.type);
-  if (params.limit != null) qs.set('limit', String(params.limit));
-  if (params.offset != null) qs.set('offset', String(params.offset));
-  if (params.network) qs.set('network', 'true');
-  const res = await fetch(apiUrl(`/api/search?${qs}`), { signal });
-  if (!res.ok) throw new Error('Search failed');
-  return res.json();
+  const es = new EventSource(apiUrl(`/api/search/stream?${qs}`));
+  let finished = false;
+  const fail = () => {
+    if (finished) return;
+    finished = true;
+    handlers.onError();
+    es.close();
+  };
+  es.addEventListener('local', (e) => {
+    try {
+      handlers.onLocal(JSON.parse((e as MessageEvent).data));
+    } catch {
+      fail();
+    }
+  });
+  es.addEventListener('network', (e) => {
+    try {
+      handlers.onNetworkBatch(JSON.parse((e as MessageEvent).data));
+    } catch {
+      fail();
+    }
+  });
+  es.addEventListener('done', () => {
+    if (finished) return;
+    finished = true;
+    handlers.onDone();
+    es.close();
+  });
+  es.onerror = fail;
+  return es;
 }

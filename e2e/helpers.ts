@@ -242,7 +242,16 @@ export async function mockSearch(
     network: [],
   },
 ) {
-  await page.route('/api/search**', (route) => route.fulfill({ json: results }));
+  const frames = [
+    `event: local\ndata: ${JSON.stringify({ files: results.files, total: results.total })}\n\n`,
+  ];
+  if (results.network && results.network.length > 0) {
+    frames.push(`event: network\ndata: ${JSON.stringify(results.network)}\n\n`);
+  }
+  frames.push(`event: done\ndata: {}\n\n`);
+  await page.route('/api/search**', (route) =>
+    route.fulfill({ contentType: 'text/event-stream', body: frames.join('') }),
+  );
 }
 
 export async function mockConversations(page: Page, convs = CONVERSATIONS) {

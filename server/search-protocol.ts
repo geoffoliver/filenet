@@ -34,6 +34,7 @@ type PendingSearch = {
   settleTimer: ReturnType<typeof setTimeout> | null;
   settleTimeoutMs: number;
   resolve: (results: NetworkResult[]) => void;
+  onBatch?: (batch: NetworkResult[]) => void;
 };
 
 // Seen search IDs — prevents processing the same search twice (cycle prevention)
@@ -161,6 +162,7 @@ export function handleSearchResult(
     // result list by spoofing many fromNodeId values.
     const sender = msg.viaNodeId ?? msg.fromNodeId;
     const senderCount = pending.resultsPerSender.get(sender) ?? 0;
+    const newItems: NetworkResult[] = [];
     let added = 0;
     for (const item of msg.results) {
       if (pending.results.length >= MAX_NETWORK_RESULTS) break;
@@ -169,12 +171,19 @@ export function handleSearchResult(
       const key = JSON.stringify([msg.fromNodeId, item.sha256]);
       if (!pending.seenKeys.has(key)) {
         pending.seenKeys.add(key);
-        pending.results.push({ ...item, nodeId: msg.fromNodeId, viaNodeId: msg.viaNodeId });
+        const result: NetworkResult = { ...item, nodeId: msg.fromNodeId, viaNodeId: msg.viaNodeId };
+        pending.results.push(result);
+        newItems.push(result);
         added++;
       }
     }
     if (added > 0) {
       pending.resultsPerSender.set(sender, senderCount + added);
+      try {
+        pending.onBatch?.(newItems);
+      } catch (err) {
+        console.error('onBatch callback threw:', err);
+      }
       // Reset the settle timer — resolve early if no new results arrive within the window.
       if (pending.settleTimer) clearTimeout(pending.settleTimer);
       pending.settleTimer = setTimeout(() => {
@@ -291,6 +300,7 @@ export async function initiateNetworkSearch(
   timeoutMs = SEARCH_TIMEOUT_MS,
   sendFn: (peer: ConnectedPeer, msg: InnerMessage) => void = sendToPeer,
   settleTimeoutMs = SETTLE_TIMEOUT_MS,
+  onBatch?: (batch: NetworkResult[]) => void,
 ): Promise<NetworkResult[]> {
   if (peers.length === 0) return [];
 
@@ -322,6 +332,7 @@ export async function initiateNetworkSearch(
       settleTimer: null,
       settleTimeoutMs,
       resolve,
+      onBatch,
     };
     pendingSearches.set(searchId, pending);
 

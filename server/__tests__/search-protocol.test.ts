@@ -765,6 +765,115 @@ describe('initiateNetworkSearch', () => {
     expect(results.filter((r) => r.sha256 === 'c'.repeat(64))).toHaveLength(1);
   });
 
+  it('invokes onBatch with newly added results as they arrive', async () => {
+    const peer = makePeer('batch-peer');
+    const sent: { peer: ConnectedPeer; msg: InnerMessage }[] = [];
+    const batches: NetworkResult[][] = [];
+    const networkResultsPromise = initiateNetworkSearch(
+      identity,
+      [peer],
+      { query: 'batch-test', fileType: 'all' },
+      5_000,
+      captureAll(sent),
+      50,
+      (batch) => batches.push(batch),
+    );
+    await Bun.sleep(10);
+    const reqMsg = sent[0].msg as SearchRequestMessage;
+    handleSearchResult({
+      type: 'search-result',
+      searchId: reqMsg.searchId,
+      fromNodeId: 'batch-peer',
+      results: [
+        {
+          filename: 'a.mp3',
+          size: '100',
+          sha256: 'a'.repeat(64),
+          mimeType: 'audio/mpeg',
+          metadata: null,
+        },
+      ],
+    });
+    const results = await networkResultsPromise;
+    expect(results).toHaveLength(1);
+    expect(batches).toHaveLength(1);
+    expect(batches[0]).toHaveLength(1);
+    expect(batches[0][0].sha256).toBe('a'.repeat(64));
+    expect(batches[0][0].nodeId).toBe('batch-peer');
+  });
+
+  it('does not invoke onBatch when a result batch adds no new results', async () => {
+    const peer = makePeer('dup-batch-peer');
+    const sent: { peer: ConnectedPeer; msg: InnerMessage }[] = [];
+    const batches: NetworkResult[][] = [];
+    const networkResultsPromise = initiateNetworkSearch(
+      identity,
+      [peer],
+      { query: 'dup-batch-test', fileType: 'all' },
+      5_000,
+      captureAll(sent),
+      50,
+      (batch) => batches.push(batch),
+    );
+    await Bun.sleep(10);
+    const reqMsg = sent[0].msg as SearchRequestMessage;
+    const resultMsg: SearchResultMessage = {
+      type: 'search-result',
+      searchId: reqMsg.searchId,
+      fromNodeId: 'dup-batch-peer',
+      results: [
+        {
+          filename: 'a.mp3',
+          size: '100',
+          sha256: 'a'.repeat(64),
+          mimeType: 'audio/mpeg',
+          metadata: null,
+        },
+      ],
+    };
+    handleSearchResult(resultMsg);
+    handleSearchResult(resultMsg); // duplicate — adds nothing
+    const results = await networkResultsPromise;
+    expect(results).toHaveLength(1);
+    expect(batches).toHaveLength(1); // only the first call added anything
+  });
+
+  it('does not let a throwing onBatch prevent the search from resolving', async () => {
+    const peer = makePeer('throwing-onbatch-peer');
+    const sent: { peer: ConnectedPeer; msg: InnerMessage }[] = [];
+    const errorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+    const networkResultsPromise = initiateNetworkSearch(
+      identity,
+      [peer],
+      { query: 'throw-test', fileType: 'all' },
+      5_000,
+      captureAll(sent),
+      50,
+      () => {
+        throw new Error('onBatch boom');
+      },
+    );
+    await Bun.sleep(10);
+    const reqMsg = sent[0].msg as SearchRequestMessage;
+    handleSearchResult({
+      type: 'search-result',
+      searchId: reqMsg.searchId,
+      fromNodeId: 'throwing-onbatch-peer',
+      results: [
+        {
+          filename: 'a.mp3',
+          size: '100',
+          sha256: 'a'.repeat(64),
+          mimeType: 'audio/mpeg',
+          metadata: null,
+        },
+      ],
+    });
+    const results = await networkResultsPromise;
+    expect(results).toHaveLength(1);
+    errorSpy.mockRestore();
+  });
+
   it('caps collected results at MAX_NETWORK_RESULTS', async () => {
     const peer = makePeer('cap-peer');
     const sent: { peer: ConnectedPeer; msg: InnerMessage }[] = [];

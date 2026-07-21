@@ -22,6 +22,7 @@ import {
   PatchSettingsBodySchema,
   ReorderScriptBodySchema,
   SearchQuerySchema,
+  SearchStreamQuerySchema,
 } from './schemas';
 import { ConflictError, NotFoundError } from './errors';
 import {
@@ -33,6 +34,7 @@ import {
   notifyFriendRejected,
   sendToPeer,
 } from './connections';
+import { SEARCH_TIMEOUT_MS, SETTLE_TIMEOUT_MS, initiateNetworkSearch } from './search-protocol';
 import { acceptFriendRequest, addOutgoingFriend, getFriends, rejectFriendRequest } from './friends';
 import {
   cancelDownload,
@@ -63,7 +65,6 @@ import type { Identity } from './identity';
 import type { SharedFile } from './schema';
 import type { UpdateManager } from './updater';
 import { dmConversationId } from './chat';
-import { initiateNetworkSearch } from './search-protocol';
 import { searchFiles } from './search';
 
 type SharedFileDto = {
@@ -337,21 +338,102 @@ export function createManagementFetch(deps: ManagementDeps): (req: Request) => P
         if (!result.success) {
           return new Response(result.error.issues[0].message, { status: 400 });
         }
-        const { q, type, limit, offset, network } = result.data;
-        const localSearchPromise = searchFiles(db, { query: q, type, limit, offset });
-        const networkResultsPromise = network
-          ? getAcceptedConnectedPeers(db).then((peers) =>
-              networkSearch(identity, peers, { query: q, fileType: type }),
-            )
-          : Promise.resolve([]);
-        const [localResult, networkResults] = await Promise.all([
-          localSearchPromise,
-          networkResultsPromise,
-        ]);
+        const { q, type, limit, offset } = result.data;
+        const localResult = await searchFiles(db, { query: q, type, limit, offset });
         return Response.json({
           files: localResult.files.map(toSharedFileDto),
           total: localResult.total,
-          ...(network ? { network: networkResults } : {}),
+        });
+      }
+
+      if (url.pathname === '/api/search/stream' && req.method === 'GET') {
+        const result = SearchStreamQuerySchema.safeParse(Object.fromEntries(url.searchParams));
+        if (!result.success) {
+          return new Response(result.error.issues[0].message, { status: 400 });
+        }
+        const { q, type } = result.data;
+        const encoder = new TextEncoder();
+        const sseEvent = (event: string, data: unknown) =>
+          encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+
+        let closed = false;
+
+        const stream = new ReadableStream({
+          async start(controller) {
+            const safeEnqueue = (chunk: Uint8Array) => {
+              if (closed) return;
+              try {
+                controller.enqueue(chunk);
+              } catch {
+                closed = true;
+              }
+            };
+            const safeClose = () => {
+              if (closed) return;
+              closed = true;
+              try {
+                controller.close();
+              } catch {
+                // already closed by the consumer — nothing to do
+              }
+            };
+            try {
+              const localResult = await searchFiles(db, { query: q, type, limit: 50, offset: 0 });
+              if (closed) return; // client disconnected while local search was running
+              safeEnqueue(
+                sseEvent('local', {
+                  files: localResult.files.map(toSharedFileDto),
+                  total: localResult.total,
+                }),
+              );
+
+              const peers = await getAcceptedConnectedPeers(db);
+              if (closed) return; // client disconnected — skip fanning the search out to peers
+              if (peers.length === 0) {
+                safeEnqueue(sseEvent('done', {}));
+                safeClose();
+                return;
+              }
+
+              await networkSearch(
+                identity,
+                peers,
+                { query: q, fileType: type },
+                SEARCH_TIMEOUT_MS,
+                sendToPeer,
+                SETTLE_TIMEOUT_MS,
+                (batch) => {
+                  if (closed) return; // don't bother building an SSE chunk nobody will see
+                  safeEnqueue(sseEvent('network', batch));
+                },
+              );
+              safeEnqueue(sseEvent('done', {}));
+              safeClose();
+            } catch (err) {
+              console.error('Search stream error:', err);
+              if (!closed) {
+                closed = true;
+                try {
+                  controller.error(err);
+                } catch {
+                  // already closed/errored — nothing to do
+                }
+              }
+            }
+          },
+          cancel() {
+            // Client disconnected (e.g. EventSource.close() on the browser side) —
+            // stop attempting to enqueue into a controller that's now closed.
+            closed = true;
+          },
+        });
+
+        return new Response(stream, {
+          headers: {
+            'Content-Type': 'text/event-stream',
+            'Cache-Control': 'no-cache',
+            Connection: 'keep-alive',
+          },
         });
       }
 

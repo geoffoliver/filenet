@@ -94,6 +94,21 @@ function jsonReq(path: string, method: string, body: unknown) {
   });
 }
 
+function parseSseEvents(text: string): { event: string; data: unknown }[] {
+  return text
+    .trim()
+    .split('\n\n')
+    .filter(Boolean)
+    .map((frame) => {
+      const eventLine = frame.split('\n').find((l) => l.startsWith('event: '))!;
+      const dataLine = frame.split('\n').find((l) => l.startsWith('data: '))!;
+      return {
+        event: eventLine.slice('event: '.length),
+        data: JSON.parse(dataLine.slice('data: '.length)),
+      };
+    });
+}
+
 async function waitFor(check: () => boolean, timeoutMs = 2000): Promise<void> {
   const start = Date.now();
   while (!check()) {
@@ -1188,12 +1203,6 @@ describe('GET /api/search', () => {
     expect(body.files).toHaveLength(2);
   });
 
-  it('omits network field when network param is not set', async () => {
-    const res = await makeHandler()(req('/api/search'));
-    const body = await res.json();
-    expect('network' in body).toBe(false);
-  });
-
   it('serializes size as a string', async () => {
     const res = await makeHandler()(req('/api/search'));
     const body = await res.json();
@@ -1241,53 +1250,46 @@ describe('GET /api/search', () => {
     const res = await makeHandler()(req('/api/search?offset=-1'));
     expect(res.status).toBe(400);
   });
+});
 
-  it('network=true returns empty network array when accepted friends are not connected', async () => {
-    db
-      .insert(friends)
-      .values({
-        id: randomUUID(),
-        addedAt: new Date(),
-        updatedAt: new Date(),
-        name: 'Bob',
-        address: '127.0.0.1',
-        port: 7734,
-        nodeId: 'bob-node',
-        status: 'ACCEPTED',
-      })
-      .returning()
-      .get()!;
-    const res = await makeHandler()(req('/api/search?network=true'));
-    expect(res.status).toBe(200);
-    const body = await res.json();
-    expect(Array.isArray(body.network)).toBe(true);
-    expect(body.network).toHaveLength(0);
+describe('GET /api/search/stream', () => {
+  beforeEach(async () => {
+    db.insert(sharedFiles)
+      .values(
+        [
+          {
+            path: '/music/song.mp3',
+            filename: 'song.mp3',
+            size: 1000n,
+            sha256: 'a'.repeat(64),
+            mimeType: 'audio/mpeg',
+            metadata: null,
+          },
+        ].map((d) => ({
+          id: randomUUID(),
+          lastSeenAt: new Date(),
+          indexedAt: new Date(),
+          updatedAt: new Date(),
+          ...d,
+        })),
+      )
+      .run();
   });
 
-  it('network=true does not fan out to pending friends', async () => {
-    db
-      .insert(friends)
-      .values({
-        id: randomUUID(),
-        addedAt: new Date(),
-        updatedAt: new Date(),
-        name: 'Pending',
-        address: '127.0.0.1',
-        port: 7734,
-        nodeId: 'pending-node',
-        status: 'INCOMING_PENDING',
-      })
-      .returning()
-      .get()!;
-    const res = await makeHandler()(req('/api/search?network=true'));
+  it('sends local results immediately, then done, when there are no connected peers', async () => {
+    const res = await makeHandler()(req('/api/search/stream?q=song'));
     expect(res.status).toBe(200);
-    const body = await res.json();
-    expect(body.network).toHaveLength(0);
+    expect(res.headers.get('Content-Type')).toBe('text/event-stream');
+    const events = parseSseEvents(await res.text());
+    expect(events.map((e) => e.event)).toEqual(['local', 'done']);
+    const localData = events[0].data as { files: { filename: string }[]; total: number };
+    expect(localData.files).toHaveLength(1);
+    expect(localData.files[0].filename).toBe('song.mp3');
   });
 
-  it('network=true includes results from connected peers alongside local results', async () => {
-    db
-      .insert(friends)
+  it('streams a network batch between local and done when a peer is connected', async () => {
+    const nodeId = 'alice-node';
+    db.insert(friends)
       .values({
         id: randomUUID(),
         addedAt: new Date(),
@@ -1295,37 +1297,105 @@ describe('GET /api/search', () => {
         name: 'Alice',
         address: '10.0.0.99',
         port: 7734,
-        nodeId: 'alice-node',
+        nodeId,
         status: 'ACCEPTED',
       })
-      .returning()
-      .get()!;
-    const fakeNetworkResult = {
-      filename: 'remote.mp3',
-      size: '9999',
-      sha256: 'a'.repeat(64),
-      mimeType: 'audio/mpeg',
-      metadata: null,
-      nodeId: 'alice-node',
-    };
-    const handler = createManagementFetch({
-      identity,
-      db,
-      connectPeer: neverConnect,
-      updater: makeFakeUpdater(),
-      networkSearch: async () => [fakeNetworkResult],
-    });
+      .run();
+    registerPeer(
+      { send: () => {}, close: () => {} },
+      Buffer.alloc(32),
+      nodeId,
+      Buffer.alloc(32),
+      '10.0.0.99',
+      7734,
+    );
+    try {
+      const fakeNetworkResult = {
+        filename: 'remote.mp3',
+        size: '9999',
+        sha256: 'b'.repeat(64),
+        mimeType: 'audio/mpeg',
+        metadata: null,
+        nodeId,
+      };
+      const handler = createManagementFetch({
+        identity,
+        db,
+        connectPeer: neverConnect,
+        updater: makeFakeUpdater(),
+        networkSearch: async (_id, _peers, _params, _t, _s, _st, onBatch) => {
+          onBatch?.([fakeNetworkResult]);
+          return [fakeNetworkResult];
+        },
+      });
 
-    const res = await handler(req('/api/search?network=true'));
-    expect(res.status).toBe(200);
-    const body = await res.json();
-    expect(Array.isArray(body.network)).toBe(true);
-    expect(body.network).toHaveLength(1);
-    expect(body.network[0].filename).toBe('remote.mp3');
-    expect(body.network[0].nodeId).toBe('alice-node');
-    // Local results still present
-    expect(Array.isArray(body.files)).toBe(true);
-    expect(typeof body.total).toBe('number');
+      const res = await handler(req('/api/search/stream?q=song'));
+      const events = parseSseEvents(await res.text());
+      expect(events.map((e) => e.event)).toEqual(['local', 'network', 'done']);
+      expect((events[1].data as unknown[])[0]).toMatchObject({ filename: 'remote.mp3' });
+    } finally {
+      unregisterPeer(nodeId);
+    }
+  });
+
+  it('returns 400 for invalid type', async () => {
+    const res = await makeHandler()(req('/api/search/stream?type=unknown'));
+    expect(res.status).toBe(400);
+  });
+
+  it('does not throw when a network batch arrives after the client has disconnected', async () => {
+    const nodeId = 'cancel-node';
+    db.insert(friends)
+      .values({
+        id: randomUUID(),
+        addedAt: new Date(),
+        updatedAt: new Date(),
+        name: 'CancelPeer',
+        address: '10.0.0.50',
+        port: 7734,
+        nodeId,
+        status: 'ACCEPTED',
+      })
+      .run();
+    registerPeer(
+      { send: () => {}, close: () => {} },
+      Buffer.alloc(32),
+      nodeId,
+      Buffer.alloc(32),
+      '10.0.0.50',
+      7734,
+    );
+    try {
+      let capturedOnBatch: ((batch: unknown[]) => void) | undefined;
+      const handler = createManagementFetch({
+        identity,
+        db,
+        connectPeer: neverConnect,
+        updater: makeFakeUpdater(),
+        networkSearch: async (_id, _peers, _params, _t, _s, _st, onBatch) => {
+          capturedOnBatch = onBatch;
+          return [];
+        },
+      });
+
+      const res = await handler(req('/api/search/stream?q=song'));
+      await res.body!.cancel();
+
+      expect(() => {
+        capturedOnBatch?.([
+          {
+            filename: 'late.mp3',
+            size: '1',
+            sha256: 'c'.repeat(64),
+            mimeType: null,
+            metadata: null,
+            nodeId,
+          },
+        ]);
+      }).not.toThrow();
+    } finally {
+      unregisterPeer(nodeId);
+    }
   });
 });
 

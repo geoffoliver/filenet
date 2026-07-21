@@ -13,8 +13,8 @@ import {
   mergeResults,
   sortHits,
 } from '../../lib/searchResults';
-import type { FileType } from '../../lib/api';
-import { searchFiles } from '../../lib/api';
+import type { FileType, LocalFile, NetworkFile } from '../../lib/api';
+import { streamSearch } from '../../lib/api';
 
 import ResultInfoDrawer from './ResultInfoDrawer';
 import ResultRow from './ResultRow';
@@ -32,7 +32,7 @@ const FILE_TYPES: { value: FileType; label: string }[] = [
 const VALID_FILE_TYPES = new Set<string>(FILE_TYPES.map((t) => t.value));
 
 // Guards against a stale bookmark/shared link carrying an unrecognized
-// ?type= value (e.g. from a since-removed file type) reaching searchFiles().
+// ?type= value (e.g. from a since-removed file type) reaching streamSearch().
 function parseFileType(raw: string | null): FileType {
   return raw && VALID_FILE_TYPES.has(raw) ? (raw as FileType) : 'all';
 }
@@ -87,21 +87,32 @@ export default function SearchView() {
   // This effect has empty deps because the component remounts on param changes.
   useEffect(() => {
     if (!initialQ.trim()) return;
-    const controller = new AbortController();
-    searchFiles({ q: initialQ, type: initialType, network: true }, controller.signal)
-      .then((res) => {
-        setHits(mergeResults(res.files, res.network ?? []));
-        setSelected(new Set());
-        setHasSearched(true);
-        setLoading(false);
-      })
-      .catch((err: unknown) => {
-        if (err instanceof Error && err.name === 'AbortError') return;
-        setError('Search failed. Is the server running?');
-        setHasSearched(true);
-        setLoading(false);
-      });
-    return () => controller.abort();
+    let localFiles: LocalFile[] = [];
+    let networkResults: NetworkFile[] = [];
+    const es = streamSearch(
+      { q: initialQ, type: initialType },
+      {
+        onLocal: (data) => {
+          localFiles = data.files;
+          setHits(mergeResults(localFiles, networkResults));
+          setSelected(new Set());
+        },
+        onNetworkBatch: (batch) => {
+          networkResults = [...networkResults, ...batch];
+          setHits(mergeResults(localFiles, networkResults));
+        },
+        onDone: () => {
+          setHasSearched(true);
+          setLoading(false);
+        },
+        onError: () => {
+          setError('Search failed. Is the server running?');
+          setHasSearched(true);
+          setLoading(false);
+        },
+      },
+    );
+    return () => es.close();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); // intentionally empty — component remounts when params change
 
@@ -191,6 +202,13 @@ export default function SearchView() {
       </form>
 
       {error && <p className={styles.error}>{error}</p>}
+
+      {loading && !error && (
+        <div className={styles.searching} role="status">
+          <span className={styles.searchingSpinner} aria-hidden="true" />
+          Searching network…
+        </div>
+      )}
 
       {hasSearched && !loading && !error && (
         <div className={styles.resultsHeader}>
