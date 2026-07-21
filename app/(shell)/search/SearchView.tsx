@@ -63,7 +63,7 @@ function SortableHeader({
   );
 }
 
-function isRowActive(d: RowDownload | undefined): boolean {
+function isRowActive(d: RowDownload | undefined): d is RowDownload & { id: string } {
   return !!d?.id && d.state !== null && !TRANSFER_TERMINAL_STATES.has(d.state);
 }
 
@@ -227,7 +227,7 @@ export default function SearchView() {
           let changed = false;
           const next = new Map(prev);
           for (const [sha, d] of prev) {
-            if (!isRowActive(d) || !d.id) continue;
+            if (!isRowActive(d)) continue;
             const t = byId.get(d.id);
             if (t && (t.state !== d.state || t.progress !== d.progress)) {
               next.set(sha, { ...d, state: t.state, progress: t.progress });
