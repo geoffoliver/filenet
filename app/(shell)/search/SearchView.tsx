@@ -1,10 +1,11 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 
 import {
   DEFAULT_SORT,
+  type RowDownload,
   type SearchHit,
   type SortColumn,
   type SortDirection,
@@ -13,8 +14,8 @@ import {
   mergeResults,
   sortHits,
 } from '../../lib/searchResults';
-import type { FileType, LocalFile, NetworkFile } from '../../lib/api';
-import { streamSearch } from '../../lib/api';
+import type { FileType, LocalFile, NetworkFile, TransferState } from '../../lib/api';
+import { TRANSFER_TERMINAL_STATES, getTransfers, startDownload, streamSearch } from '../../lib/api';
 
 import ResultInfoDrawer from './ResultInfoDrawer';
 import ResultRow from './ResultRow';
@@ -62,6 +63,10 @@ function SortableHeader({
   );
 }
 
+function isRowActive(d: RowDownload | undefined): boolean {
+  return !!d?.id && !TRANSFER_TERMINAL_STATES.has(d.state as TransferState);
+}
+
 // SearchView is remounted by its parent whenever search params change,
 // so we only need a mount effect — no URL-watching effect required.
 export default function SearchView() {
@@ -81,7 +86,7 @@ export default function SearchView() {
   const [sort, setSort] = useState<{ column: SortColumn; direction: SortDirection }>(DEFAULT_SORT);
   const [infoHit, setInfoHit] = useState<SearchHit | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const downloadTriggers = useRef(new Map<string, () => void>());
+  const [downloads, setDownloads] = useState<Map<string, RowDownload>>(new Map());
 
   // Auto-run search on mount when there's an initial query (e.g. from navbar).
   // This effect has empty deps because the component remounts on param changes.
@@ -132,13 +137,55 @@ export default function SearchView() {
     );
   }
 
-  const registerDownloadTrigger = useCallback(
-    (sha256: string, trigger: (() => void) | undefined) => {
-      if (trigger) downloadTriggers.current.set(sha256, trigger);
-      else downloadTriggers.current.delete(sha256);
-    },
-    [],
-  );
+  function startRowDownload(hit: SearchHit) {
+    const current = downloads.get(hit.sha256);
+    const busy =
+      current?.starting ||
+      (!!current?.id && current.state !== 'FAILED' && current.state !== 'CANCELLED');
+    const sources = directSources(hit);
+    if (busy || sources.length === 0) return;
+
+    setDownloads((prev) => {
+      const next = new Map(prev);
+      next.set(hit.sha256, { starting: true, id: null, state: null, progress: 0, error: '' });
+      return next;
+    });
+
+    startDownload({
+      sha256: hit.sha256,
+      filename: hit.filename,
+      size: hit.size,
+      mimeType: hit.mimeType ?? undefined,
+      sources: sources.map((n) => n.nodeId),
+    })
+      .then(({ id }) => {
+        setDownloads((prev) => {
+          const cur = prev.get(hit.sha256);
+          if (!cur) return prev;
+          const next = new Map(prev);
+          next.set(hit.sha256, { ...cur, id, state: 'PENDING' });
+          return next;
+        });
+      })
+      .catch((err: Error) => {
+        setDownloads((prev) => {
+          const cur = prev.get(hit.sha256);
+          if (!cur) return prev;
+          const next = new Map(prev);
+          next.set(hit.sha256, { ...cur, error: err.message });
+          return next;
+        });
+      })
+      .finally(() => {
+        setDownloads((prev) => {
+          const cur = prev.get(hit.sha256);
+          if (!cur) return prev;
+          const next = new Map(prev);
+          next.set(hit.sha256, { ...cur, starting: false });
+          return next;
+        });
+      });
+  }
 
   const sortedHits = sortHits(hits, sort.column, sort.direction);
   const selectableShas = new Set(
@@ -147,11 +194,53 @@ export default function SearchView() {
   const allSelected =
     selectableShas.size > 0 && [...selectableShas].every((sha) => selected.has(sha));
   const someSelected = selected.size > 0 && !allSelected;
+  const anyDownloadActive = [...downloads.values()].some(isRowActive);
 
   const headerCheckboxRef = useRef<HTMLInputElement>(null);
   useEffect(() => {
     if (headerCheckboxRef.current) headerCheckboxRef.current.indeterminate = someSelected;
   }, [someSelected]);
+
+  // Single shared poll for all active downloads in the table. Gated on
+  // anyDownloadActive (not on `downloads` itself) so it doesn't tear down
+  // and restart on every progress tick — only when polling needs to start
+  // or can stop entirely.
+  useEffect(() => {
+    if (!anyDownloadActive) return;
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout>;
+
+    async function tick() {
+      try {
+        const transfers = await getTransfers();
+        if (cancelled) return;
+        const byId = new Map(transfers.map((t) => [t.id, t]));
+        setDownloads((prev) => {
+          let changed = false;
+          const next = new Map(prev);
+          for (const [sha, d] of prev) {
+            if (!isRowActive(d) || !d.id) continue;
+            const t = byId.get(d.id);
+            if (t && (t.state !== d.state || t.progress !== d.progress)) {
+              next.set(sha, { ...d, state: t.state, progress: t.progress });
+              changed = true;
+            }
+          }
+          return changed ? next : prev;
+        });
+      } catch {
+        // ignore, retry next tick
+      } finally {
+        if (!cancelled) timer = setTimeout(tick, 2000);
+      }
+    }
+
+    timer = setTimeout(tick, 2000);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [anyDownloadActive]);
 
   function toggleSelectOne(sha256: string) {
     setSelected((prev) => {
@@ -168,7 +257,8 @@ export default function SearchView() {
 
   function handleDownloadAll() {
     for (const sha256 of selected) {
-      downloadTriggers.current.get(sha256)?.();
+      const hit = hits.find((h) => h.sha256 === sha256);
+      if (hit) startRowDownload(hit);
     }
     setSelected(new Set());
   }
@@ -272,7 +362,8 @@ export default function SearchView() {
                   selected={selected.has(hit.sha256)}
                   onToggleSelect={toggleSelectOne}
                   onOpenInfo={setInfoHit}
-                  onRegisterDownload={registerDownloadTrigger}
+                  download={downloads.get(hit.sha256)}
+                  onStartDownload={startRowDownload}
                 />
               ))}
             </tbody>
