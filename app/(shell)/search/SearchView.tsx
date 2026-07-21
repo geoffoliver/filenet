@@ -264,8 +264,9 @@ export default function SearchView() {
   }
 
   function handleDownloadAll() {
+    const hitsBySha = new Map(hits.map((h) => [h.sha256, h]));
     for (const sha256 of selected) {
-      const hit = hits.find((h) => h.sha256 === sha256);
+      const hit = hitsBySha.get(sha256);
       if (hit) startRowDownload(hit);
     }
     setSelected(new Set());
