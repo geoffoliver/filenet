@@ -379,6 +379,7 @@ export function createManagementFetch(deps: ManagementDeps): (req: Request) => P
             };
             try {
               const localResult = await searchFiles(db, { query: q, type, limit: 50, offset: 0 });
+              if (closed) return; // client disconnected while local search was running
               safeEnqueue(
                 sseEvent('local', {
                   files: localResult.files.map(toSharedFileDto),
@@ -387,6 +388,7 @@ export function createManagementFetch(deps: ManagementDeps): (req: Request) => P
               );
 
               const peers = await getAcceptedConnectedPeers(db);
+              if (closed) return; // client disconnected — skip fanning the search out to peers
               if (peers.length === 0) {
                 safeEnqueue(sseEvent('done', {}));
                 safeClose();
@@ -400,7 +402,10 @@ export function createManagementFetch(deps: ManagementDeps): (req: Request) => P
                 SEARCH_TIMEOUT_MS,
                 sendToPeer,
                 SETTLE_TIMEOUT_MS,
-                (batch) => safeEnqueue(sseEvent('network', batch)),
+                (batch) => {
+                  if (closed) return; // don't bother building an SSE chunk nobody will see
+                  safeEnqueue(sseEvent('network', batch));
+                },
               );
               safeEnqueue(sseEvent('done', {}));
               safeClose();
