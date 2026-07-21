@@ -14,7 +14,7 @@ import {
   mergeResults,
   sortHits,
 } from '../../lib/searchResults';
-import type { FileType, LocalFile, NetworkFile, TransferState } from '../../lib/api';
+import type { FileType, LocalFile, NetworkFile } from '../../lib/api';
 import { TRANSFER_TERMINAL_STATES, getTransfers, startDownload, streamSearch } from '../../lib/api';
 
 import ResultInfoDrawer from './ResultInfoDrawer';
@@ -64,7 +64,7 @@ function SortableHeader({
 }
 
 function isRowActive(d: RowDownload | undefined): boolean {
-  return !!d?.id && !TRANSFER_TERMINAL_STATES.has(d.state as TransferState);
+  return !!d?.id && d.state !== null && !TRANSFER_TERMINAL_STATES.has(d.state);
 }
 
 // Patches an existing downloads-map entry for `sha256` with `patch` (or the
