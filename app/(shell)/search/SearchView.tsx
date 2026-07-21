@@ -67,6 +67,24 @@ function isRowActive(d: RowDownload | undefined): boolean {
   return !!d?.id && !TRANSFER_TERMINAL_STATES.has(d.state as TransferState);
 }
 
+// Patches an existing downloads-map entry for `sha256` with `patch` (or the
+// result of calling it with the current entry). No-op if the row has since
+// been removed from the map. Centralizes the clone-and-patch pattern used by
+// startRowDownload's async callbacks below.
+function patchDownload(
+  setDownloads: React.Dispatch<React.SetStateAction<Map<string, RowDownload>>>,
+  sha256: string,
+  patch: Partial<RowDownload> | ((cur: RowDownload) => Partial<RowDownload>),
+) {
+  setDownloads((prev) => {
+    const cur = prev.get(sha256);
+    if (!cur) return prev;
+    const next = new Map(prev);
+    next.set(sha256, { ...cur, ...(typeof patch === 'function' ? patch(cur) : patch) });
+    return next;
+  });
+}
+
 // SearchView is remounted by its parent whenever search params change,
 // so we only need a mount effect — no URL-watching effect required.
 export default function SearchView() {
@@ -159,31 +177,13 @@ export default function SearchView() {
       sources: sources.map((n) => n.nodeId),
     })
       .then(({ id }) => {
-        setDownloads((prev) => {
-          const cur = prev.get(hit.sha256);
-          if (!cur) return prev;
-          const next = new Map(prev);
-          next.set(hit.sha256, { ...cur, id, state: 'PENDING' });
-          return next;
-        });
+        patchDownload(setDownloads, hit.sha256, { id, state: 'PENDING' });
       })
       .catch((err: Error) => {
-        setDownloads((prev) => {
-          const cur = prev.get(hit.sha256);
-          if (!cur) return prev;
-          const next = new Map(prev);
-          next.set(hit.sha256, { ...cur, error: err.message });
-          return next;
-        });
+        patchDownload(setDownloads, hit.sha256, { error: err.message });
       })
       .finally(() => {
-        setDownloads((prev) => {
-          const cur = prev.get(hit.sha256);
-          if (!cur) return prev;
-          const next = new Map(prev);
-          next.set(hit.sha256, { ...cur, starting: false });
-          return next;
-        });
+        patchDownload(setDownloads, hit.sha256, { starting: false });
       });
   }
 

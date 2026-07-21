@@ -214,6 +214,33 @@ test('download button shows Done after completion', async ({ page }) => {
   await expect(page.getByRole('button', { name: 'Done ✓' })).toBeVisible({ timeout: 8000 });
 });
 
+test('a stale transfer sharing a sha256 with a fresh download does not corrupt the row', async ({
+  page,
+}) => {
+  await mockSearch(page, { files: [], total: 0, network: [NETWORK_FILE] });
+  await page.route('/api/transfers', (route) => {
+    if (route.request().method() === 'POST') return route.fulfill({ json: { id: 'dl-fresh' } });
+    if (route.request().method() === 'GET')
+      return route.fulfill({
+        json: [
+          // A stale, terminal transfer of a prior download of the same file —
+          // same sha256, different id, already CANCELLED.
+          TRANSFER_ROW('CANCELLED', 0),
+          // The fresh download this test just started, same sha256 but a
+          // distinct id and still in progress.
+          { ...TRANSFER_ROW('DOWNLOADING', 0.5), id: 'dl-fresh' },
+        ],
+      });
+    return route.continue();
+  });
+
+  await page.goto('/search?q=song&type=all');
+  await page.getByRole('button', { name: 'Download' }).click();
+  // Must track the fresh transfer (by id) and show its progress, not get
+  // confused by the stale CANCELLED entry sharing the same sha256.
+  await expect(page.getByRole('button', { name: '50%' })).toBeVisible({ timeout: 8000 });
+});
+
 test('info icon opens a drawer with full metadata', async ({ page }) => {
   await mockSearch(page, { files: [], total: 0, network: [NETWORK_FILE] });
   await page.goto('/search?q=song&type=all');
