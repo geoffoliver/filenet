@@ -1,4 +1,4 @@
-import type { LocalFile, NetworkFile } from './api';
+import type { LocalFile, NetworkFile, TransferState } from './api';
 
 export type SearchHit = {
   sha256: string;
@@ -8,6 +8,14 @@ export type SearchHit = {
   metadata: string | null;
   local: boolean;
   networkSources: NetworkFile[];
+};
+
+export type RowDownload = {
+  starting: boolean;
+  id: string | null;
+  state: TransferState | null;
+  progress: number;
+  error: string;
 };
 
 export type ParsedMeta = {
