@@ -553,6 +553,7 @@ export function streamSearch(
     }
   });
   es.addEventListener('done', () => {
+    if (finished) return;
     finished = true;
     handlers.onDone();
     es.close();
