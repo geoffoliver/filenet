@@ -105,6 +105,7 @@ export default function SearchView() {
   const [infoHit, setInfoHit] = useState<SearchHit | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [downloads, setDownloads] = useState<Map<string, RowDownload>>(new Map());
+  const claimingRef = useRef<Set<string>>(new Set());
 
   // Auto-run search on mount when there's an initial query (e.g. from navbar).
   // This effect has empty deps because the component remounts on param changes.
@@ -161,7 +162,13 @@ export default function SearchView() {
       current?.starting ||
       (!!current?.id && current.state !== 'FAILED' && current.state !== 'CANCELLED');
     const sources = directSources(hit);
-    if (busy || sources.length === 0) return;
+    // The `downloads` read above reflects the last committed render, so two
+    // rapid invocations before React re-renders (e.g. a fast double-click)
+    // would both see the same stale value and both pass. `claimingRef` is a
+    // synchronous mutex outside React's state timing that closes that
+    // window: it's added here and only cleared once this attempt settles.
+    if (busy || sources.length === 0 || claimingRef.current.has(hit.sha256)) return;
+    claimingRef.current.add(hit.sha256);
 
     setDownloads((prev) => {
       const next = new Map(prev);
@@ -183,6 +190,7 @@ export default function SearchView() {
         patchDownload(setDownloads, hit.sha256, { error: err.message });
       })
       .finally(() => {
+        claimingRef.current.delete(hit.sha256);
         patchDownload(setDownloads, hit.sha256, { starting: false });
       });
   }
