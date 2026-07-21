@@ -53,6 +53,24 @@ test('shows a searching indicator while the stream is in flight, hidden once don
   await expect(indicator).not.toBeVisible();
 });
 
+test('shows a search-failed error when a frame has a malformed payload, even if the stream otherwise closes cleanly', async ({
+  page,
+}) => {
+  // A malformed `local` frame followed by a well-formed `done` and a clean
+  // stream close — isolates the JSON.parse failure from the (separately
+  // handled) network-level connection-drop path, which would otherwise mask
+  // this bug by triggering the same error message for an unrelated reason.
+  await page.route('/api/search**', (route) =>
+    route.fulfill({
+      contentType: 'text/event-stream',
+      body: 'event: local\ndata: {not valid json\n\nevent: done\ndata: {}\n\n',
+    }),
+  );
+  await page.goto('/search?q=song&type=all');
+  await expect(page.getByText('Search failed. Is the server running?')).toBeVisible();
+  await expect(page.getByText(/no results found/i)).not.toBeVisible();
+});
+
 test('shows "No results found" when search returns nothing', async ({ page }) => {
   await mockSearch(page, { files: [], total: 0, network: [] });
   await page.goto('/search?q=nothing&type=all');

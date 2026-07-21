@@ -532,22 +532,31 @@ export function streamSearch(
   if (params.type && params.type !== 'all') qs.set('type', params.type);
   const es = new EventSource(apiUrl(`/api/search/stream?${qs}`));
   let finished = false;
+  const fail = () => {
+    if (finished) return;
+    finished = true;
+    handlers.onError();
+    es.close();
+  };
   es.addEventListener('local', (e) => {
-    handlers.onLocal(JSON.parse((e as MessageEvent).data));
+    try {
+      handlers.onLocal(JSON.parse((e as MessageEvent).data));
+    } catch {
+      fail();
+    }
   });
   es.addEventListener('network', (e) => {
-    handlers.onNetworkBatch(JSON.parse((e as MessageEvent).data));
+    try {
+      handlers.onNetworkBatch(JSON.parse((e as MessageEvent).data));
+    } catch {
+      fail();
+    }
   });
   es.addEventListener('done', () => {
     finished = true;
     handlers.onDone();
     es.close();
   });
-  es.onerror = () => {
-    if (finished) return;
-    finished = true;
-    handlers.onError();
-    es.close();
-  };
+  es.onerror = fail;
   return es;
 }
