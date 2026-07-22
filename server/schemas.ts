@@ -44,6 +44,7 @@ export const PatchSettingsBodySchema = z
       .optional(),
     updateCheckIntervalMinutes: z.int().min(0).max(35791).optional(),
     autoOpenBrowser: z.boolean().optional(),
+    enableFileWatcher: z.boolean().optional(),
   })
   .strict();
 

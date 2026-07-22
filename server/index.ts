@@ -110,10 +110,13 @@ const stopRescan = startPeriodicRescan(
   },
 );
 
-const fileWatcher = startFileWatcher(
-  db.$client.filename,
-  parseSharedFolders(startupSettings.sharedFolders),
-);
+// Restart-required, not live-toggled: this is an escape hatch for platforms
+// where the native file-watching backend itself misbehaves (e.g. spinning
+// CPU from a stuck FSEvents retry loop on some Intel Macs), so re-reading it
+// from a running process would just re-trigger whatever's already broken.
+const fileWatcher = startupSettings.enableFileWatcher
+  ? startFileWatcher(db.$client.filename, parseSharedFolders(startupSettings.sharedFolders))
+  : undefined;
 
 const connectPeerFn = (
   address: string,
@@ -134,7 +137,7 @@ const shutdown = () => {
   stopRescan();
   stopReconnect();
   stopUpdateChecks();
-  fileWatcher.stop();
+  fileWatcher?.stop();
   stopScanWorker();
   pauseAllActiveDownloads(db)
     .catch(() => {})

@@ -91,6 +91,7 @@ export const settings = sqliteTable('Settings', {
   updateRepo: text('updateRepo').notNull().default('geoffoliver/filenet'),
   updateCheckIntervalMinutes: integer('updateCheckIntervalMinutes').notNull().default(1440),
   autoOpenBrowser: integer('autoOpenBrowser', { mode: 'boolean' }).notNull().default(true),
+  enableFileWatcher: integer('enableFileWatcher', { mode: 'boolean' }).notNull().default(true),
 });
 
 export type Settings = typeof settings.$inferSelect;

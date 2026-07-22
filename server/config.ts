@@ -17,6 +17,7 @@ export type SettingsPatch = {
   updateRepo?: string;
   updateCheckIntervalMinutes?: number;
   autoOpenBrowser?: boolean;
+  enableFileWatcher?: boolean;
 };
 
 export type SafeSettings = Omit<Settings, 'invitePassword' | 'sharedFolders'> & {

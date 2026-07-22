@@ -74,6 +74,7 @@ export type Settings = {
   updateRepo: string;
   updateCheckIntervalMinutes: number;
   autoOpenBrowser: boolean;
+  enableFileWatcher: boolean;
 };
 
 export type SettingsPatch = {
@@ -88,6 +89,7 @@ export type SettingsPatch = {
   updateRepo?: string;
   updateCheckIntervalMinutes?: number;
   autoOpenBrowser?: boolean;
+  enableFileWatcher?: boolean;
 };
 
 export async function getMyInfo(): Promise<{ nodeId: string }> {

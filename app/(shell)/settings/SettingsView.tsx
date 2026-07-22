@@ -248,6 +248,8 @@ function FilesSection({
   const [savedRescanInterval, setSavedRescanInterval] = useState(
     String(initial.rescanIntervalMinutes),
   );
+  const [fileWatcherEnabled, setFileWatcherEnabled] = useState(initial.enableFileWatcher);
+  const [savedFileWatcherEnabled, setSavedFileWatcherEnabled] = useState(initial.enableFileWatcher);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState('');
@@ -257,6 +259,7 @@ function FilesSection({
     newFolder.trim() !== '' ||
       downloadFolder !== savedDownloadFolder ||
       rescanInterval !== savedRescanInterval ||
+      fileWatcherEnabled !== savedFileWatcherEnabled ||
       folders.length !== savedFolders.length ||
       folders.some((f, i) => f !== savedFolders[i]),
     onDirtyChange,
@@ -289,11 +292,13 @@ function FilesSection({
       sharedFolders: folders,
       downloadFolder: downloadFolder.trim() || null,
       rescanIntervalMinutes: interval,
+      enableFileWatcher: fileWatcherEnabled,
     })
       .then(() => {
         setSavedFolders(folders);
         setSavedDownloadFolder(downloadFolder);
         setSavedRescanInterval(rescanInterval);
+        setSavedFileWatcherEnabled(fileWatcherEnabled);
         setSaved(true);
         setTimeout(() => setSaved(false), 2000);
       })
@@ -367,6 +372,21 @@ function FilesSection({
             <span className={styles.intervalUnit}>minutes (0 = disabled)</span>
           </div>
         </label>
+
+        <label className={styles.toggle}>
+          <input
+            type="checkbox"
+            checked={fileWatcherEnabled}
+            onChange={(e) => setFileWatcherEnabled(e.target.checked)}
+          />
+          <span>React to file changes as they happen (file watcher)</span>
+        </label>
+        <p className={styles.hint}>
+          <strong>Restart required</strong> — on some systems the native file watcher can misbehave
+          (e.g. spinning CPU on Intel Macs). Turning this off falls back to periodic scans on the
+          interval above (or the manual &ldquo;Rescan now&rdquo; button in Maintenance) and takes
+          effect the next time the server starts.
+        </p>
 
         {error && <p className={styles.error}>{error}</p>}
         <div className={styles.formFooter}>

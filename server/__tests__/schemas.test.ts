@@ -175,6 +175,17 @@ describe('PatchSettingsBodySchema', () => {
     expect(PatchSettingsBodySchema.safeParse({ autoOpenBrowser: 'yes' }).success).toBe(false);
   });
 
+  it('accepts enableFileWatcher', () => {
+    const r = PatchSettingsBodySchema.safeParse({ enableFileWatcher: false });
+    expect(r.success).toBe(true);
+    if (!r.success) return;
+    expect(r.data.enableFileWatcher).toBe(false);
+  });
+
+  it('rejects wrong type for enableFileWatcher', () => {
+    expect(PatchSettingsBodySchema.safeParse({ enableFileWatcher: 'yes' }).success).toBe(false);
+  });
+
   it('rejects wrong type for invitePassword', () => {
     expect(PatchSettingsBodySchema.safeParse({ invitePassword: 123 }).success).toBe(false);
   });

@@ -75,6 +75,11 @@ describe('getOrCreateSettings', () => {
     const s = await getOrCreateSettings(db);
     expect(s.autoOpenBrowser).toBe(true);
   });
+
+  it('defaults enableFileWatcher to true', async () => {
+    const s = await getOrCreateSettings(db);
+    expect(s.enableFileWatcher).toBe(true);
+  });
 });
 
 describe('updateSettings', () => {
@@ -103,6 +108,12 @@ describe('updateSettings', () => {
     await getOrCreateSettings(db);
     const updated = await updateSettings(db, { autoOpenBrowser: false });
     expect(updated.autoOpenBrowser).toBe(false);
+  });
+
+  it('updates enableFileWatcher', async () => {
+    await getOrCreateSettings(db);
+    const updated = await updateSettings(db, { enableFileWatcher: false });
+    expect(updated.enableFileWatcher).toBe(false);
   });
 });
 

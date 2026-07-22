@@ -19,6 +19,7 @@ export const SETTINGS = {
   updateRepo: 'geoffoliver/filenet',
   updateCheckIntervalMinutes: 1440,
   autoOpenBrowser: true,
+  enableFileWatcher: true,
 };
 
 export const UPDATE_STATUS_IDLE = {

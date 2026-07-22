@@ -93,6 +93,14 @@ test('rescan interval field is rendered', async ({ page }) => {
   ).toHaveValue('60');
 });
 
+test('file watcher toggle is rendered with the correct default', async ({ page }) => {
+  await page.goto('/settings');
+  await page.getByRole('tab', { name: 'Files' }).click();
+  const toggle = page.getByRole('checkbox', { name: /file watcher/i });
+  await expect(toggle).toBeVisible();
+  await expect(toggle).toBeChecked();
+});
+
 test('startup toggle is rendered with the correct default', async ({ page }) => {
   await page.goto('/settings');
   await page.getByRole('tab', { name: 'Startup' }).click();

@@ -1,0 +1,1 @@
+ALTER TABLE `Settings` ADD `enableFileWatcher` integer DEFAULT true NOT NULL;
