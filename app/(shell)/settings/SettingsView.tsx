@@ -968,12 +968,14 @@ function TabList({
 }) {
   // Roving tabindex + arrow-key navigation with automatic activation, per
   // the WAI-ARIA APG tabs pattern: only the active tab is in the regular
-  // tab order, and Left/Right/Home/End move focus *and* select in one step.
+  // tab order, and Up/Down/Home/End move focus *and* select in one step.
+  // (Up/Down, not Left/Right, since this is a vertical tab list —
+  // aria-orientation="vertical" below sets the same expectation for AT.)
   function handleKeyDown(e: React.KeyboardEvent) {
     const currentIndex = TABS.findIndex((t) => t.id === activeTab);
     let nextIndex: number | null = null;
-    if (e.key === 'ArrowRight') nextIndex = (currentIndex + 1) % TABS.length;
-    else if (e.key === 'ArrowLeft') nextIndex = (currentIndex - 1 + TABS.length) % TABS.length;
+    if (e.key === 'ArrowDown') nextIndex = (currentIndex + 1) % TABS.length;
+    else if (e.key === 'ArrowUp') nextIndex = (currentIndex - 1 + TABS.length) % TABS.length;
     else if (e.key === 'Home') nextIndex = 0;
     else if (e.key === 'End') nextIndex = TABS.length - 1;
     if (nextIndex === null) return;
@@ -984,7 +986,12 @@ function TabList({
   }
 
   return (
-    <div className={styles.tabList} role="tablist" aria-label="Settings sections">
+    <div
+      className={styles.tabList}
+      role="tablist"
+      aria-label="Settings sections"
+      aria-orientation="vertical"
+    >
       {TABS.map((tab) => {
         const selected = tab.id === activeTab;
         const dirty = dirtyTabs.has(tab.id);

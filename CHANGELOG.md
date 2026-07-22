@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Settings navigation is now a left nav instead of tabs** — `SettingsView` previously laid its nine sections out as a horizontal tab row (widened in 0.2.7 after it started scrolling off-screen); it's now a vertical nav down the left side with the section content alongside it, which sidesteps the horizontal-scroll problem entirely instead of just giving it more room.
+
+### Fixed
+
+- **Settings nav keyboard navigation didn't match its new vertical layout** — after the tab row became a left nav, `TabList` still only handled `ArrowLeft`/`ArrowRight` and had no `aria-orientation` set, so keyboard and screen-reader users got horizontal-tablist behavior on a vertical one. Switched to `ArrowUp`/`ArrowDown` (Home/End unchanged) and added `aria-orientation="vertical"`, per the WAI-ARIA APG tabs pattern.
+
 ## [0.2.8] - 2026-07-22
 
 ### Added
