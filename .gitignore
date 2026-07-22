@@ -50,3 +50,4 @@ test-results/
 
 # subagent-driven-development scratch state
 .superpowers/
+.claude/

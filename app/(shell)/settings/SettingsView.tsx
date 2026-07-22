@@ -1031,6 +1031,7 @@ function TabPanel({
       role="tabpanel"
       aria-labelledby={`settings-tab-${id}`}
       hidden={activeTab !== id}
+      className={styles.tabPanel}
     >
       {children}
     </div>
@@ -1092,49 +1093,51 @@ export default function SettingsView() {
   return (
     <div className={styles.page}>
       <h1 className={styles.pageTitle}>Settings</h1>
-      <TabList activeTab={activeTab} onSelect={setActiveTab} dirtyTabs={dirtyTabs} />
-      <TabPanel id="profile" activeTab={activeTab}>
-        <ProfileSection
-          initial={settings}
-          onDirtyChange={(dirty) => handleDirtyChange('profile', dirty)}
-        />
-      </TabPanel>
-      <TabPanel id="privacy" activeTab={activeTab}>
-        <PrivacySection
-          initial={settings}
-          onDirtyChange={(dirty) => handleDirtyChange('privacy', dirty)}
-        />
-      </TabPanel>
-      <TabPanel id="files" activeTab={activeTab}>
-        <FilesSection
-          initial={settings}
-          onDirtyChange={(dirty) => handleDirtyChange('files', dirty)}
-        />
-      </TabPanel>
-      <TabPanel id="networking" activeTab={activeTab}>
-        <NetworkingSection
-          initial={settings}
-          onDirtyChange={(dirty) => handleDirtyChange('networking', dirty)}
-        />
-      </TabPanel>
-      <TabPanel id="startup" activeTab={activeTab}>
-        <StartupSection
-          initial={settings}
-          onDirtyChange={(dirty) => handleDirtyChange('startup', dirty)}
-        />
-      </TabPanel>
-      <TabPanel id="scripts" activeTab={activeTab}>
-        <ScriptsSection />
-      </TabPanel>
-      <TabPanel id="maintenance" activeTab={activeTab}>
-        <MaintenanceSection />
-      </TabPanel>
-      <TabPanel id="updates" activeTab={activeTab}>
-        <UpdatesSection onDirtyChange={(dirty) => handleDirtyChange('updates', dirty)} />
-      </TabPanel>
-      <TabPanel id="notifications" activeTab={activeTab}>
-        <NotificationsSection />
-      </TabPanel>
+      <div className={styles.settings}>
+        <TabList activeTab={activeTab} onSelect={setActiveTab} dirtyTabs={dirtyTabs} />
+        <TabPanel id="profile" activeTab={activeTab}>
+          <ProfileSection
+            initial={settings}
+            onDirtyChange={(dirty) => handleDirtyChange('profile', dirty)}
+          />
+        </TabPanel>
+        <TabPanel id="privacy" activeTab={activeTab}>
+          <PrivacySection
+            initial={settings}
+            onDirtyChange={(dirty) => handleDirtyChange('privacy', dirty)}
+          />
+        </TabPanel>
+        <TabPanel id="files" activeTab={activeTab}>
+          <FilesSection
+            initial={settings}
+            onDirtyChange={(dirty) => handleDirtyChange('files', dirty)}
+          />
+        </TabPanel>
+        <TabPanel id="networking" activeTab={activeTab}>
+          <NetworkingSection
+            initial={settings}
+            onDirtyChange={(dirty) => handleDirtyChange('networking', dirty)}
+          />
+        </TabPanel>
+        <TabPanel id="startup" activeTab={activeTab}>
+          <StartupSection
+            initial={settings}
+            onDirtyChange={(dirty) => handleDirtyChange('startup', dirty)}
+          />
+        </TabPanel>
+        <TabPanel id="scripts" activeTab={activeTab}>
+          <ScriptsSection />
+        </TabPanel>
+        <TabPanel id="maintenance" activeTab={activeTab}>
+          <MaintenanceSection />
+        </TabPanel>
+        <TabPanel id="updates" activeTab={activeTab}>
+          <UpdatesSection onDirtyChange={(dirty) => handleDirtyChange('updates', dirty)} />
+        </TabPanel>
+        <TabPanel id="notifications" activeTab={activeTab}>
+          <NotificationsSection />
+        </TabPanel>
+      </div>
     </div>
   );
 }
