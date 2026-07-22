@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.8] - 2026-07-22
+
 ### Added
 
 - **Start a DM from the Friends page** — each accepted friend now has a "Message" button that opens (or reuses) the DM conversation and jumps to Chat with it selected, via the existing `POST /api/conversations` `peerNodeId` endpoint that was previously unused from the UI.
