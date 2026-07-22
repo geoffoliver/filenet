@@ -260,7 +260,7 @@ export type Transfer = {
   completedAt: string | null;
 };
 
-export const TRANSFER_TERMINAL_STATES = new Set<TransferState>([
+export const TRANSFER_TERMINAL_STATES: ReadonlySet<TransferState> = new Set<TransferState>([
   'COMPLETED',
   'FAILED',
   'CANCELLED',
