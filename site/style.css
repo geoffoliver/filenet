@@ -1,25 +1,44 @@
-/* ── Tokens ─────────────────────────────────────────────────────────────── */
+/* ── Tokens — mirrors app/globals.css ──────────────────────────────────── */
 :root {
-  --bg: #f2ede4;
-  --fg: #14181f;
-  --signal: #d9591c;
-  --wire: #1f7a72;
-  --surface: #e8e2d5;
+  --bg-base: #f4f4f5;
+  --bg-surface: #ffffff;
+  --bg-elevated: #e4e4e7;
 
-  --font-display: 'IBM Plex Mono', ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace;
-  --font-body: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  --text-primary: #18181b;
+  --text-secondary: #52525b;
+  --text-muted: #a1a1aa;
 
-  --nav-height: 64px;
-  --radius: 8px;
+  --border: rgba(0, 0, 0, 0.08);
+  --border-strong: rgba(0, 0, 0, 0.16);
+
+  --color-primary: #3b82f6;
+  --color-primary-hover: #2563eb;
+  --color-primary-fg: #ffffff;
+
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.08);
+
+  --font-sans: 'Geist', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  --font-mono: 'Geist Mono', ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace;
+
+  --nav-height: 56px;
+  --radius-sm: 6px;
+  --radius-md: 10px;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #10141c;
-    --fg: #eef0e9;
-    --signal: #ff8a4d;
-    --wire: #4fc4bb;
-    --surface: #1a1f2a;
+    --bg-base: #0f0f10;
+    --bg-surface: #1a1a1b;
+    --bg-elevated: #252527;
+
+    --text-primary: #f4f4f5;
+    --text-secondary: #a1a1aa;
+    --text-muted: #71717a;
+
+    --border: rgba(255, 255, 255, 0.08);
+    --border-strong: rgba(255, 255, 255, 0.16);
+
+    --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.4);
   }
 }
 
@@ -34,9 +53,9 @@ html {
 
 body {
   margin: 0;
-  background: var(--bg);
-  color: var(--fg);
-  font-family: var(--font-body);
+  background: var(--bg-base);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
   font-size: 16px;
   line-height: 1.55;
 }
@@ -47,7 +66,7 @@ img {
 }
 
 a {
-  color: var(--signal);
+  color: var(--color-primary);
 }
 
 .wrap {
@@ -57,7 +76,7 @@ a {
 }
 
 :focus-visible {
-  outline: 2px solid var(--signal);
+  outline: 2px solid var(--color-primary);
   outline-offset: 3px;
 }
 
@@ -67,7 +86,8 @@ a {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  border-bottom: 1px solid var(--surface);
+  background: var(--bg-surface);
+  border-bottom: 1px solid var(--border);
 }
 
 .site-nav .wrap {
@@ -78,12 +98,16 @@ a {
 }
 
 .wordmark {
-  font-family: var(--font-display);
-  font-weight: 600;
+  font-family: var(--font-sans);
+  font-weight: 700;
   font-size: 1.1rem;
-  color: var(--fg);
+  color: var(--text-primary);
   text-decoration: none;
   letter-spacing: -0.02em;
+}
+
+.wordmark span {
+  color: var(--color-primary);
 }
 
 .nav-links {
@@ -92,18 +116,19 @@ a {
   list-style: none;
   margin: 0;
   padding: 0;
-  font-family: var(--font-display);
+  font-family: var(--font-sans);
   font-size: 0.9rem;
+  font-weight: 500;
 }
 
 .nav-links a {
-  color: var(--fg);
+  color: var(--text-secondary);
   text-decoration: none;
 }
 
 .nav-links a:hover,
 .nav-links a[aria-current='page'] {
-  color: var(--signal);
+  color: var(--text-primary);
 }
 
 /* ── Buttons ────────────────────────────────────────────────────────────── */
@@ -112,32 +137,42 @@ a {
   align-items: center;
   gap: 8px;
   padding: 12px 20px;
-  border-radius: var(--radius);
-  font-family: var(--font-display);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-sans);
+  font-weight: 500;
   font-size: 0.95rem;
   text-decoration: none;
   border: 1px solid transparent;
+  transition: background-color 150ms;
 }
 
 .btn-signal {
-  background: var(--signal);
-  color: var(--bg);
+  background: var(--color-primary);
+  color: var(--color-primary-fg);
+}
+
+.btn-signal:hover {
+  background: var(--color-primary-hover);
 }
 
 .btn-outline {
-  border-color: var(--wire);
-  color: var(--fg);
+  border-color: var(--border-strong);
+  color: var(--text-secondary);
+}
+
+.btn-outline:hover {
+  background: var(--bg-elevated);
+  color: var(--text-primary);
 }
 
 /* ── Footer ─────────────────────────────────────────────────────────────── */
 .site-footer {
-  border-top: 1px solid var(--surface);
+  border-top: 1px solid var(--border);
   margin-top: 96px;
   padding: 32px 0;
-  font-family: var(--font-display);
+  font-family: var(--font-sans);
   font-size: 0.85rem;
-  color: var(--fg);
-  opacity: 0.75;
+  color: var(--text-secondary);
 }
 
 .site-footer .wrap {
@@ -171,16 +206,18 @@ a {
 }
 
 .eyebrow {
-  font-family: var(--font-display);
+  font-family: var(--font-sans);
   font-size: 0.85rem;
-  color: var(--wire);
+  font-weight: 500;
+  color: var(--text-secondary);
   text-transform: lowercase;
   letter-spacing: 0.04em;
   margin: 0 0 12px;
 }
 
 .hero h1 {
-  font-family: var(--font-display);
+  font-family: var(--font-sans);
+  font-weight: 700;
   font-size: clamp(1.8rem, 3.4vw, 2.6rem);
   line-height: 1.2;
   letter-spacing: -0.01em;
@@ -190,7 +227,7 @@ a {
 .hero-sub {
   font-size: 1.05rem;
   max-width: 46ch;
-  opacity: 0.9;
+  color: var(--text-secondary);
   margin: 0 0 28px;
 }
 
@@ -207,7 +244,7 @@ a {
 }
 
 .ng-edge {
-  stroke: var(--wire);
+  stroke: var(--border-strong);
   stroke-width: 2;
   fill: none;
   stroke-dasharray: 6 10;
@@ -215,19 +252,20 @@ a {
 }
 
 .ng-node {
-  fill: var(--surface);
-  stroke: var(--signal);
+  fill: var(--bg-surface);
+  stroke: var(--border-strong);
   stroke-width: 2;
 }
 
 .ng-node-you {
-  fill: var(--signal);
+  fill: var(--color-primary);
+  stroke: var(--color-primary);
 }
 
 .ng-label {
-  font-family: var(--font-display);
+  font-family: var(--font-sans);
   font-size: 13px;
-  fill: var(--fg);
+  fill: var(--text-secondary);
   text-anchor: middle;
 }
 
@@ -255,11 +293,12 @@ a {
 }
 
 .section-title {
-  font-family: var(--font-display);
+  font-family: var(--font-sans);
   font-size: 0.95rem;
+  font-weight: 500;
   text-transform: lowercase;
   letter-spacing: 0.04em;
-  color: var(--wire);
+  color: var(--text-secondary);
   margin: 0 0 24px;
 }
 
@@ -267,7 +306,7 @@ a {
   list-style: none;
   margin: 0;
   padding: 0;
-  border-top: 1px solid var(--surface);
+  border-top: 1px solid var(--border);
 }
 
 .wiring-item {
@@ -276,13 +315,13 @@ a {
   gap: 20px;
   align-items: start;
   padding: 20px 0;
-  border-bottom: 1px solid var(--surface);
+  border-bottom: 1px solid var(--border);
 }
 
 .wiring-tag {
-  font-family: var(--font-display);
+  font-family: var(--font-mono);
   font-size: 0.8rem;
-  color: var(--signal);
+  color: var(--color-primary);
 }
 
 .wiring-item h3 {
@@ -292,13 +331,13 @@ a {
 
 .wiring-item p {
   margin: 0;
-  opacity: 0.9;
+  color: var(--text-secondary);
 }
 
 .wiring-note {
-  font-family: var(--font-display);
+  font-family: var(--font-mono);
   font-size: 0.78rem;
-  opacity: 0.65;
+  color: var(--text-muted);
   text-align: right;
 }
 
@@ -325,22 +364,23 @@ a {
 
 .inspection-window {
   margin: 0;
-  border: 1px solid var(--wire);
-  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
   overflow: hidden;
-  background: var(--surface);
+  background: var(--bg-surface);
+  box-shadow: var(--shadow-sm);
 }
 
 .inspection-window img {
   width: 100%;
-  border-bottom: 1px solid var(--wire);
+  border-bottom: 1px solid var(--border);
 }
 
 .inspection-window figcaption {
   padding: 10px 14px;
-  font-family: var(--font-display);
+  font-family: var(--font-mono);
   font-size: 0.78rem;
-  color: var(--wire);
+  color: var(--text-secondary);
 }
 
 /* ── Docs page ──────────────────────────────────────────────────────────── */
@@ -351,41 +391,45 @@ a {
 }
 
 .docs h1 {
-  font-family: var(--font-display);
+  font-family: var(--font-sans);
+  font-weight: 700;
   font-size: 2rem;
   margin: 0 0 32px;
 }
 
 .docs h2 {
-  font-family: var(--font-display);
+  font-family: var(--font-sans);
+  font-weight: 600;
   font-size: 1.3rem;
   margin: 48px 0 16px;
   padding-top: 24px;
-  border-top: 1px solid var(--surface);
+  border-top: 1px solid var(--border);
 }
 
 .docs h3 {
+  font-weight: 600;
   font-size: 1.05rem;
   margin: 24px 0 12px;
 }
 
 .docs p,
 .docs li {
-  opacity: 0.92;
+  color: var(--text-secondary);
 }
 
 .docs code {
-  font-family: var(--font-display);
+  font-family: var(--font-mono);
   font-size: 0.85em;
-  background: var(--surface);
+  color: var(--text-primary);
+  background: var(--bg-elevated);
   padding: 2px 6px;
   border-radius: 4px;
 }
 
 .docs pre {
-  background: var(--surface);
-  border: 1px solid var(--wire);
-  border-radius: var(--radius);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
   padding: 16px;
   overflow-x: auto;
 }
@@ -407,11 +451,12 @@ a {
 .docs td {
   text-align: left;
   padding: 8px 12px;
-  border: 1px solid var(--surface);
+  border: 1px solid var(--border);
   font-size: 0.9rem;
 }
 
 .docs th {
-  font-family: var(--font-display);
-  color: var(--wire);
+  font-family: var(--font-sans);
+  font-weight: 600;
+  color: var(--text-secondary);
 }

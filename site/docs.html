@@ -12,7 +12,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
-      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&display=swap"
+      href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500;600&display=swap"
       rel="stylesheet"
     />
     <link rel="stylesheet" href="style.css" />
@@ -20,7 +20,7 @@
   <body>
     <nav class="site-nav">
       <div class="wrap">
-        <a class="wordmark" href="index.html">filenet</a>
+        <a class="wordmark" href="index.html">File<span>net</span></a>
         <ul class="nav-links">
           <li><a href="docs.html" aria-current="page">docs</a></li>
           <li><a href="https://github.com/geoffoliver/filenet">github</a></li>
@@ -46,15 +46,36 @@
           </li>
           <li>
             Extract it — you'll get <code>filenet</code> (the executable), an
-            <code>out/</code> folder (the UI), and a <code>drizzle/migrations/</code> folder. Keep
-            these three together.
+            <code>out/</code> folder (the UI), a <code>drizzle/migrations/</code> folder, and a
+            <code>server/</code> folder (the background scan, file-watcher, and hashing workers).
+            Keep these four together.
           </li>
           <li>Run the executable from that folder: <code>./filenet</code></li>
         </ol>
         <p>
-          Filenet checks for new releases automatically and shows a
-          <strong>Restart to update</strong>
-          button in Settings once one's ready.
+          Configuration is via environment variables: <code>PORT</code> (UI + management API,
+          default <code>3000</code>), <code>P2P_PORT</code> (default: the listening port configured
+          in Settings), <code>DATABASE_URL</code> (default: <code>./data/filenet.db</code>, relative
+          to wherever you run the executable from), <code>SCAN_LOG</code> (default unset; set to
+          <code>1</code> to log background scan progress to the console).
+        </p>
+        <p>
+          Filenet checks for new releases automatically (interval configurable in Settings, default
+          once every 24 hours — set to <code>0</code> to disable), downloads and SHA-256-verifies
+          them in the background, and shows a <strong>Restart to update</strong> button in Settings
+          once one's ready. Forks can point their users at their own releases by setting the
+          "Update repository" field in Settings (<code>owner/repo</code>, default
+          <code>geoffoliver/filenet</code>).
+        </p>
+        <p>
+          If the app doesn't come back up after clicking <strong>Restart to update</strong>, the
+          swap is crash-safe: the previous version is left behind as <code>.old</code> siblings in
+          the install directory rather than being deleted outright. Look for
+          <code>filenet.old</code> (<code>filenet.exe.old</code> on Windows), <code>out.old</code>,
+          <code>drizzle/migrations.old</code>, <code>server/scan-worker.js.old</code>,
+          <code>server/watcher-worker.js.old</code>, and <code>server/hash-worker.js.old</code>
+          next to their non-<code>.old</code> counterparts, and rename each one back over the
+          original to restore the last working version.
         </p>
 
         <h3 id="quarantine">Removing the quarantine flag</h3>
@@ -142,7 +163,39 @@ bun run server</code></pre>
             forward this on your router
           </li>
           <li><strong>Auto-open browser</strong> — opens the app on server start (default: on)</li>
+          <li>
+            <strong>Notifications</strong> — desktop notifications (with an in-app toast fallback)
+            for incoming friend requests and ready-to-install updates; opt in from the
+            Notifications tab
+          </li>
         </ul>
+
+        <h2 id="security">Security</h2>
+        <p>All peer-to-peer communication is encrypted at the application layer:</p>
+        <ul>
+          <li>
+            <strong>Key exchange</strong> — X25519 ECDH, with both sides signing via their Ed25519
+            identity key, so neither side can be impersonated
+          </li>
+          <li>
+            <strong>Session encryption</strong> — AES-256-GCM with a unique key and random IV per
+            message, covering chat, search, friend requests, and file chunks
+          </li>
+          <li>
+            <strong>Identity</strong> — your node ID is the SHA-256 of your public key, so it's
+            cryptographically bound to your keypair
+          </li>
+        </ul>
+        <p>
+          The transport is plain <code>ws://</code>, not <code>wss://</code> (TLS). A network
+          observer can see which IPs are talking to each other, but cannot read the content of any
+          messages. If you need to hide the fact of communication (not just its content), run
+          Filenet behind a VPN or <a href="https://tailscale.com">Tailscale</a>.
+        </p>
+        <p>
+          The local database (SQLite) is <strong>not</strong> encrypted at rest. Anyone with
+          filesystem access to the machine can read chat history, the file index, and friend lists.
+        </p>
 
         <h2 id="networking">Networking / port forwarding</h2>
         <p>There's no automatic NAT traversal — you forward one port yourself:</p>
@@ -160,8 +213,9 @@ bun run server</code></pre>
         </ol>
         <p>
           <strong>Forward only the P2P port.</strong> Never expose the web UI (port 3000) to the
-          internet — it has no authentication and grants full control of the application to anyone
-          who can reach it. It's meant for your home network only.
+          internet — it has no authentication and grants full control of the application, including
+          browsing the host filesystem, to anyone who can reach it. It's meant for your home network
+          only.
         </p>
 
         <h2 id="scripting">Post-download scripts</h2>
