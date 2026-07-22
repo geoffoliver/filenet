@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.9] - 2026-07-22
+
 ### Changed
 
 - **Settings navigation is now a left nav instead of tabs** — `SettingsView` previously laid its nine sections out as a horizontal tab row (widened in 0.2.7 after it started scrolling off-screen); it's now a vertical nav down the left side with the section content alongside it, which sidesteps the horizontal-scroll problem entirely instead of just giving it more room.
