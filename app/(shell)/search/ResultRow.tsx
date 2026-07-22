@@ -1,101 +1,43 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
-
 import {
+  type RowDownload,
   type SearchHit,
   detailColumnValue,
   directSources,
   mimeIcon,
   sourceCount,
 } from '../../lib/searchResults';
-import { formatBytes, getTransfers, startDownload } from '../../lib/api';
-import type { TransferState } from '../../lib/api';
+import { formatBytes } from '../../lib/api';
 
 import styles from './search.module.css';
-
-const TERMINAL_STATES = new Set<TransferState>(['COMPLETED', 'FAILED', 'CANCELLED']);
 
 export default function ResultRow({
   hit,
   selected,
   onToggleSelect,
   onOpenInfo,
-  onRegisterDownload,
+  download,
+  onStartDownload,
 }: {
   hit: SearchHit;
   selected: boolean;
   onToggleSelect: (sha256: string) => void;
   onOpenInfo: (hit: SearchHit) => void;
-  onRegisterDownload: (sha256: string, trigger: (() => void) | undefined) => void;
+  download: RowDownload | undefined;
+  onStartDownload: (hit: SearchHit) => void;
 }) {
-  const [starting, setStarting] = useState(false);
-  const [downloadId, setDownloadId] = useState<string | null>(null);
-  const [downloadState, setDownloadState] = useState<TransferState | null>(null);
-  const [downloadProgress, setDownloadProgress] = useState(0);
-  const [downloadError, setDownloadError] = useState('');
-
   const sources = directSources(hit);
+  const starting = download?.starting ?? false;
+  const downloadId = download?.id ?? null;
+  const downloadState = download?.state ?? null;
+  const downloadProgress = download?.progress ?? 0;
+  const downloadError = download?.error ?? '';
+
   const disabled =
     starting ||
     (!!downloadId && downloadState !== 'FAILED' && downloadState !== 'CANCELLED') ||
     sources.length === 0;
-
-  const beginDownload = useCallback(() => {
-    if (disabled) return;
-    setDownloadId(null);
-    setDownloadState(null);
-    setDownloadProgress(0);
-    setStarting(true);
-    setDownloadError('');
-    startDownload({
-      sha256: hit.sha256,
-      filename: hit.filename,
-      size: hit.size,
-      mimeType: hit.mimeType ?? undefined,
-      sources: directSources(hit).map((n) => n.nodeId),
-    })
-      .then(({ id }) => {
-        setDownloadId(id);
-        setDownloadState('PENDING');
-      })
-      .catch((err: Error) => setDownloadError(err.message))
-      .finally(() => setStarting(false));
-  }, [disabled, hit]);
-
-  useEffect(() => {
-    onRegisterDownload(hit.sha256, beginDownload);
-    return () => onRegisterDownload(hit.sha256, undefined);
-  }, [hit.sha256, beginDownload, onRegisterDownload]);
-
-  useEffect(() => {
-    if (!downloadId || (downloadState && TERMINAL_STATES.has(downloadState))) return;
-    let cancelled = false;
-    let timer: ReturnType<typeof setTimeout>;
-
-    async function tick() {
-      try {
-        const transfers = await getTransfers();
-        if (cancelled) return;
-        const t = transfers.find((x) => x.id === downloadId);
-        if (t) {
-          setDownloadState(t.state);
-          setDownloadProgress(t.progress);
-          if (!TERMINAL_STATES.has(t.state)) timer = setTimeout(tick, 2000);
-        } else {
-          timer = setTimeout(tick, 2000);
-        }
-      } catch {
-        if (!cancelled) timer = setTimeout(tick, 2000);
-      }
-    }
-
-    timer = setTimeout(tick, 2000);
-    return () => {
-      cancelled = true;
-      clearTimeout(timer);
-    };
-  }, [downloadId, downloadState]);
 
   const label = starting
     ? 'Starting…'
@@ -138,7 +80,7 @@ export default function ResultRow({
           type="button"
           className="btn btn-primary"
           disabled={disabled}
-          onClick={beginDownload}
+          onClick={() => onStartDownload(hit)}
         >
           {label}
         </button>

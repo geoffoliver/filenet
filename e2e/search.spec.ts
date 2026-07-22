@@ -214,6 +214,33 @@ test('download button shows Done after completion', async ({ page }) => {
   await expect(page.getByRole('button', { name: 'Done ✓' })).toBeVisible({ timeout: 8000 });
 });
 
+test('a stale transfer sharing a sha256 with a fresh download does not corrupt the row', async ({
+  page,
+}) => {
+  await mockSearch(page, { files: [], total: 0, network: [NETWORK_FILE] });
+  await page.route('/api/transfers', (route) => {
+    if (route.request().method() === 'POST') return route.fulfill({ json: { id: 'dl-fresh' } });
+    if (route.request().method() === 'GET')
+      return route.fulfill({
+        json: [
+          // A stale, terminal transfer of a prior download of the same file —
+          // same sha256, different id, already CANCELLED.
+          TRANSFER_ROW('CANCELLED', 0),
+          // The fresh download this test just started, same sha256 but a
+          // distinct id and still in progress.
+          { ...TRANSFER_ROW('DOWNLOADING', 0.5), id: 'dl-fresh' },
+        ],
+      });
+    return route.continue();
+  });
+
+  await page.goto('/search?q=song&type=all');
+  await page.getByRole('button', { name: 'Download' }).click();
+  // Must track the fresh transfer (by id) and show its progress, not get
+  // confused by the stale CANCELLED entry sharing the same sha256.
+  await expect(page.getByRole('button', { name: '50%' })).toBeVisible({ timeout: 8000 });
+});
+
 test('info icon opens a drawer with full metadata', async ({ page }) => {
   await mockSearch(page, { files: [], total: 0, network: [NETWORK_FILE] });
   await page.goto('/search?q=song&type=all');
@@ -319,6 +346,39 @@ test('Download All fires a download for every selected row', async ({ page }) =>
 
   await expect(page.getByText(/selected/)).not.toBeVisible(); // selection clears
   await expect.poll(() => startedIds.length).toBe(2);
+});
+
+test('starting multiple downloads shares a single transfers poll instead of one per row', async ({
+  page,
+}) => {
+  await mockSearch(page, { files: [], total: 0, network: [NETWORK_FILE, NETWORK_FILE_2] });
+  let getCount = 0;
+  let postCount = 0;
+  await page.route('/api/transfers', (route) => {
+    if (route.request().method() === 'POST') {
+      postCount += 1;
+      return route.fulfill({ json: { id: `dl-${postCount}` } });
+    }
+    if (route.request().method() === 'GET') {
+      getCount += 1;
+      // Empty list: neither row's transfer id ever matches, so both stay
+      // PENDING (non-terminal) and polling keeps running for the whole
+      // wait below regardless of which implementation is under test.
+      return route.fulfill({ json: [] });
+    }
+    return route.continue();
+  });
+
+  await page.goto('/search?q=song&type=all');
+  await page.getByRole('checkbox', { name: 'Select awesome-song.mp3' }).check();
+  await page.getByRole('checkbox', { name: 'Select another-song.mp3' }).check();
+  await page.getByRole('button', { name: 'Download All' }).click();
+
+  // ~2 poll cycles at the 2s cadence. A single shared poll produces ~2
+  // GET requests in this window; one poll per active row produces ~4
+  // (2 rows x 2 ticks). The threshold of 3 sits strictly between them.
+  await page.waitForTimeout(4500);
+  expect(getCount).toBeLessThanOrEqual(3);
 });
 
 test('the select-all header checkbox selects every selectable row', async ({ page }) => {

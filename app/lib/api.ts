@@ -260,6 +260,12 @@ export type Transfer = {
   completedAt: string | null;
 };
 
+export const TRANSFER_TERMINAL_STATES: ReadonlySet<TransferState> = new Set<TransferState>([
+  'COMPLETED',
+  'FAILED',
+  'CANCELLED',
+]);
+
 export async function getTransfers(): Promise<Transfer[]> {
   const res = await fetch(apiUrl('/api/transfers'));
   if (!res.ok) throw new Error('Failed to load transfers');
