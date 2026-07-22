@@ -1,6 +1,6 @@
 {
   "name": "filenet",
-  "version": "0.2.9",
+  "version": "0.2.10",
   "private": true,
   "scripts": {
     "dev": "PORT=3001 bun --bun next dev",

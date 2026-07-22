@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.10] - 2026-07-22
+
 ### Added
 
 - **Setting to disable the reactive file watcher** — a new "React to file changes as they happen (file watcher)" toggle in Settings → Files (default: on). Added as an escape hatch for a native `fs.watch`/FSEvents bug some Intel Macs hit — sustained high idle CPU alongside a repeating `FSEventStreamStart: register_with_server` error in Console.app. Filenet's own watcher orchestration was ruled out (it's started once at boot and kept in sync via `syncFolders`, never re-created), pointing at Bun's underlying native file-watching implementation instead. Restart-required, not live-toggled, since a running process re-reading the setting would just re-trigger whatever's already stuck; turning it off falls back to the existing periodic/manual rescan.
