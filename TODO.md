@@ -52,6 +52,7 @@
 - [x] Inbound search: execute locally, forward to own friends (minus already-seen search IDs), return results directly to originating node
 - [x] Search deduplication (track seen search IDs to prevent cycles)
 - [x] Direct result delivery back to the requesting node over an encrypted connection
+- [ ] Browse a friend's full shared file index, not just query-matched results — needs a paginated "list files" request/response over the same encrypted connection search already uses
 
 ### File Transfers
 
@@ -144,6 +145,7 @@
 - [x] Add Friend form: name, address, port, optional password
 - [x] Remove friend action (with inline confirmation)
 - [x] Friend list: download count and total size from each friend (uploads not tracked)
+- [ ] "Browse files" action per friend — view their full shared file list without a search query, reusing the Search results table/detail drawer
 
 ### Transfers
 
