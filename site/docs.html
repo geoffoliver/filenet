@@ -34,24 +34,159 @@
     <main>
       <div class="wrap docs">
         <h1>docs</h1>
+        <p class="docs-sub">
+          Everything you need to get Filenet running. If you want to know how it actually works
+          under the hood, that's further down the page.
+        </p>
 
-        <h2 id="installation">Installation</h2>
-        <p>Filenet ships as a standalone executable — no separate Node/Bun install required.</p>
+        <h2 id="installation">Get Filenet</h2>
+        <p>Filenet is a single app — no separate installs, no dependencies. Pick your computer:</p>
+
+        <div class="platform-cards">
+          <div class="platform-card" data-os="mac">
+            <span class="platform-icon platform-icon-mac" aria-hidden="true"></span>
+            <h3>macOS</h3>
+            <span class="platform-badge" hidden>That's you!</span>
+            <div class="platform-variant" data-file="darwin-arm64">
+              <a
+                class="btn btn-signal"
+                href="https://github.com/geoffoliver/filenet/releases/latest/download/filenet-bun-darwin-arm64.zip"
+                >Download for Mac</a
+              >
+              <button type="button" class="platform-swap" data-swap="darwin-x64">
+                Older Intel Mac?
+              </button>
+            </div>
+            <div class="platform-variant" data-file="darwin-x64" hidden>
+              <a
+                class="btn btn-signal"
+                href="https://github.com/geoffoliver/filenet/releases/latest/download/filenet-bun-darwin-x64.zip"
+                >Download for Mac (Intel)</a
+              >
+              <button type="button" class="platform-swap" data-swap="darwin-arm64">
+                Newer Apple Silicon Mac?
+              </button>
+            </div>
+          </div>
+
+          <div class="platform-card" data-os="windows">
+            <span class="platform-icon platform-icon-windows" aria-hidden="true"></span>
+            <h3>Windows</h3>
+            <span class="platform-badge" hidden>That's you!</span>
+            <div class="platform-variant" data-file="windows-x64">
+              <a
+                class="btn btn-signal"
+                href="https://github.com/geoffoliver/filenet/releases/latest/download/filenet-bun-windows-x64.zip"
+                >Download for Windows</a
+              >
+            </div>
+          </div>
+
+          <div class="platform-card" data-os="linux">
+            <span class="platform-icon platform-icon-linux" aria-hidden="true"></span>
+            <h3>Linux</h3>
+            <span class="platform-badge" hidden>That's you!</span>
+            <div class="platform-variant" data-file="linux-x64">
+              <a
+                class="btn btn-signal"
+                href="https://github.com/geoffoliver/filenet/releases/latest/download/filenet-bun-linux-x64.zip"
+                >Download for Linux</a
+              >
+              <button type="button" class="platform-swap" data-swap="linux-arm64">
+                ARM machine (Raspberry Pi, etc.)?
+              </button>
+            </div>
+            <div class="platform-variant" data-file="linux-arm64" hidden>
+              <a
+                class="btn btn-signal"
+                href="https://github.com/geoffoliver/filenet/releases/latest/download/filenet-bun-linux-arm64.zip"
+                >Download for Linux (ARM)</a
+              >
+              <button type="button" class="platform-swap" data-swap="linux-x64">
+                Regular (x64) machine?
+              </button>
+            </div>
+          </div>
+        </div>
+        <p class="platform-note">
+          Prefer to build it yourself, or want the exact file names? See
+          <a href="#technical-details">the technical section</a> below.
+        </p>
+
+        <div class="callout" id="quarantine">
+          <p class="callout-title">⚠️ Before you can open it</p>
+          <p>
+            Filenet isn't a signed, notarized app from an app store, so macOS and Windows will both
+            block it the first time you try to run it. That's expected — it only takes a second to
+            fix.
+          </p>
+          <div class="callout-os">
+            <strong>macOS</strong>
+            <p>
+              You'll see an "unidentified developer" warning. Open Terminal (press
+              <code>⌘ Space</code>, type "Terminal", hit enter), then in the folder where you
+              extracted Filenet, copy and paste this and hit enter:
+            </p>
+            <pre><code>xattr -d com.apple.quarantine ./filenet</code></pre>
+            <p>
+              If you extracted the zip by double-clicking it in Finder (instead of a zip tool), use
+              this instead — Finder tags every file individually:
+            </p>
+            <pre><code>xattr -dr com.apple.quarantine ./filenet-bun-darwin-arm64/</code></pre>
+          </div>
+          <div class="callout-os">
+            <strong>Windows</strong>
+            <p>
+              You'll see a blue "Windows protected your PC" screen. Click
+              <strong>More info</strong>, then <strong>Run anyway</strong> — or clear the flag ahead
+              of time by opening PowerShell in that folder and pasting this in:
+            </p>
+            <pre><code>Get-ChildItem -Path .\filenet-bun-windows-x64 -Recurse | Unblock-File</code></pre>
+          </div>
+          <div class="callout-os">
+            <strong>Linux</strong>
+            <p>Nothing to do here — just make sure the file is marked executable:</p>
+            <pre><code>chmod +x filenet</code></pre>
+          </div>
+        </div>
+
+        <h2 id="running">Running it</h2>
+        <p>
+          Open the folder you extracted — everything inside it needs to stay together in one place.
+        </p>
         <ol>
           <li>
-            Download <code>filenet-bun-&lt;platform&gt;.zip</code> from the
-            <a href="https://github.com/geoffoliver/filenet/releases">Releases</a> page for your
-            platform (<code>linux-x64</code>, <code>linux-arm64</code>, <code>darwin-x64</code>,
-            <code>darwin-arm64</code>, <code>windows-x64</code>).
+            Double-click <code>filenet.exe</code> (Windows) — or open Terminal in that folder and
+            run <code>./filenet</code> (Mac/Linux)
           </li>
+          <li>Open <a href="http://localhost:3000">http://localhost:3000</a> in your browser</li>
           <li>
-            Extract it — you'll get <code>filenet</code> (the executable), an
-            <code>out/</code> folder (the UI), a <code>drizzle/migrations/</code> folder, and a
-            <code>server/</code> folder (the background scan, file-watcher, and hashing workers).
-            Keep these four together.
+            The first time, a setup wizard walks you through picking a name, which folders to share,
+            and where downloads should go
           </li>
-          <li>Run the executable from that folder: <code>./filenet</code></li>
         </ol>
+        <p>
+          Want friends outside your home network to connect to you? See
+          <a href="#networking">Networking / port forwarding</a> below.
+        </p>
+
+        <div class="tech-divider" id="technical-details">
+          <h2>For the technically curious</h2>
+          <p>
+            Everything above is all you need. Here's how it actually works, if you want to know.
+          </p>
+        </div>
+
+        <h3 id="installation-details">What's in the download</h3>
+        <p>
+          Each release zip is named <code>filenet-bun-&lt;platform&gt;.zip</code> on the
+          <a href="https://github.com/geoffoliver/filenet/releases">Releases</a> page
+          (<code>linux-x64</code>, <code>linux-arm64</code>, <code>darwin-x64</code>,
+          <code>darwin-arm64</code>, <code>windows-x64</code>) — that's what the buttons above link
+          to. Inside, you'll find <code>filenet</code> (the executable), an <code>out/</code> folder
+          (the UI), a <code>drizzle/migrations/</code> folder, and a <code>server/</code> folder
+          (the background scan, file-watcher, and hashing workers). Keep these four together.
+        </p>
         <p>
           Configuration is via environment variables: <code>PORT</code> (UI + management API,
           default <code>3000</code>), <code>P2P_PORT</code> (default: the listening port configured
@@ -78,38 +213,7 @@
           restore the last working version.
         </p>
 
-        <h3 id="quarantine">Removing the quarantine flag</h3>
-        <p>
-          Since the executable isn't signed, both macOS and Windows tag it as downloaded from the
-          internet and block it from running until you clear that flag.
-        </p>
-        <p>
-          <strong>macOS</strong> — Gatekeeper refuses to run it with an "unidentified developer"
-          warning. Clear the quarantine attribute from the terminal:
-        </p>
-        <pre><code>xattr -d com.apple.quarantine ./filenet</code></pre>
-        <p>
-          If you extracted the zip with Finder rather than <code>unzip</code>, clear the whole
-          folder instead, since Finder applies the attribute to every extracted file:
-        </p>
-        <pre><code>xattr -dr com.apple.quarantine ./filenet-bun-darwin-arm64/</code></pre>
-        <p>
-          <strong>Windows</strong> — SMB/downloads mark the zip (and everything extracted from it)
-          with a "Mark of the Web", which triggers a SmartScreen prompt. Either click
-          <strong>More info → Run anyway</strong> on that prompt, or clear the flag first in
-          PowerShell:
-        </p>
-        <pre><code>Get-ChildItem -Path .\filenet-bun-windows-x64 -Recurse | Unblock-File</code></pre>
-        <p>
-          Linux has no equivalent quarantine mechanism — extracted binaries run as soon as they're
-          marked executable (<code>chmod +x filenet</code>).
-        </p>
-
-        <h2 id="running">Running</h2>
-        <p>
-          Open <a href="http://localhost:3000">http://localhost:3000</a>. On first launch, the setup
-          wizard walks you through configuration.
-        </p>
+        <h3 id="listeners">Ports &amp; listeners</h3>
         <p>The app runs two listeners in a single process:</p>
         <table>
           <thead>
@@ -133,7 +237,7 @@
           </tbody>
         </table>
 
-        <h3>Building from source</h3>
+        <h3 id="building-from-source">Building from source</h3>
         <p>
           If you'd rather build it yourself, Filenet requires <a href="https://bun.sh">Bun</a> ≥
           1.0:
@@ -249,5 +353,41 @@ export default async function ({ file, stats }: { file: BunFile; stats: Transfer
         >
       </div>
     </footer>
+
+    <script>
+      (function () {
+        var ua = navigator.userAgent || '';
+        var platform = navigator.platform || navigator.userAgentData?.platform || '';
+        var os = null;
+        if (/Mac|Macintosh/i.test(platform) || /Macintosh/i.test(ua)) {
+          os = 'mac';
+        } else if (/Win/i.test(platform) || /Windows/i.test(ua)) {
+          os = 'windows';
+        } else if (/Linux/i.test(platform) || /Linux/i.test(ua)) {
+          os = 'linux';
+        }
+
+        if (os) {
+          var card = document.querySelector('.platform-card[data-os="' + os + '"]');
+          if (card) {
+            card.classList.add('platform-card-detected');
+            var badge = card.querySelector('.platform-badge');
+            if (badge) badge.hidden = false;
+          }
+        }
+
+        document.querySelectorAll('.platform-swap').forEach(function (button) {
+          button.addEventListener('click', function () {
+            var currentVariant = button.closest('.platform-variant');
+            var card = button.closest('.platform-card');
+            var targetVariant = card.querySelector('[data-file="' + button.dataset.swap + '"]');
+            if (targetVariant) {
+              currentVariant.hidden = true;
+              targetVariant.hidden = false;
+            }
+          });
+        });
+      })();
+    </script>
   </body>
 </html>
